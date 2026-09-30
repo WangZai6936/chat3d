@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ModelConfig, generateBatch } from '../ai/provider';
+import { ModelConfig, testConnection } from '../ai/provider';
 import { useEditorStore } from '../store';
 
 // 模型配置对话框：OpenAI 兼容协议
@@ -28,9 +28,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
     setTestMsg(null);
     try {
       const cfg: ModelConfig = { baseURL: baseURL.trim(), apiKey: apiKey.trim(), model: model.trim(), useMock: false };
-      // 最小请求：能拿到合法 JSON 就算通
-      await generateBatch('回复：ok', cfg, { nodes: [], selection: [] });
-      setTestMsg({ ok: true, text: '连接成功' });
+      // 只验证网络连通与 key/模型名有效；不要求模型按 DSL 格式作答
+      const r = await testConnection(cfg);
+      setTestMsg({ ok: r.ok, text: r.text });
     } catch (e) {
       setTestMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {

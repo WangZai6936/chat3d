@@ -361,6 +361,64 @@ async function fetchChat(
   return content;
 }
 
+// 测试连接：只验证「能联通 + key 有效 + 模型名被服务方接受」
+// 不要求模型按 DSL 格式回答（生成链路的 JSON 校验放在 chat 侧）
+export async function testConnection(cfg: ModelConfig): Promise<{ ok: boolean; text: string }> {
+  const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
+  if (!base) return { ok: false, text: '未配置 API 地址（baseURL）' };
+  if (!cfg.apiKey.trim()) return { ok: false, text: '未配置 API Key' };
+  if (!cfg.model.trim()) return { ok: false, text: '未配置模型名' };
+  const url = `${base}/chat/completions`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cfg.apiKey.trim()}`,
+      },
+      body: JSON.stringify({
+        model: cfg.model.trim(),
+        messages: [{ role: 'user', content: 'ok' }],
+        temperature: 0,
+        stream: false,
+      }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      return { ok: false, text: `HTTP ${res.status}：${httpHint(res.status)}${detail ? `（服务方返回：${detail.slice(0, 150)}）` : ''}` };
+    }
+    const data = (await res.json()) as {
+      choices?: { message?: { content?: string; reasoning_content?: string } }[];
+    };
+    const msg = data?.choices?.[0]?.message;
+    let content = msg?.content;
+    // 思考型模型可能把答案放在 reasoning_content
+    if (!content && typeof msg?.reasoning_content === 'string' && msg.reasoning_content.trim()) {
+      content = msg.reasoning_content;
+    }
+    if (!content || !content.trim()) return { ok: false, text: '接口返回 200，但没有消息内容' };
+    return { ok: true, text: `连接成功（模型回复：${content.trim().slice(0, 60)}）` };
+  } catch (e) {
+    return { ok: false, text: `请求没发出去：${e instanceof Error ? e.message : String(e)}。可能是地址拼写错误、网络不通，或服务方不支持跨域调用` };
+  }
+}
+
+// 常见 HTTP 状态码的排查提示（面向非技术用户）
+function httpHint(status: number): string {
+  switch (status) {
+    case 401:
+      return 'API Key 无效或已过期，检查是否复制完整、带没带多余空格';
+    case 403:
+      return '服务方拒绝访问。常见原因：key 没有该模型权限、地域/来源被拦截（如直连境外服务无代理时会被云防护拦 403）、或账号额度不足';
+    case 404:
+      return '地址或模型不存在。确认 baseURL 填到 /v1 这一级，且模型名在该服务上确实存在';
+    case 429:
+      return '请求太频繁或额度已用完，稍后再试或更换 key';
+    default:
+      return '';
+  }
+}
+
 // 构造场景上下文（ChatPanel 调用）
 export function buildSceneContext(doc: { nodes: { id: string; name: string; geometry?: Geometry; transform: { position: [number, number, number] } }[] }, selection: string[]): SceneContext {
   return {
