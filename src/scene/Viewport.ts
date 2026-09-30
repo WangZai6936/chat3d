@@ -2,9 +2,10 @@
 // - Scene DSL 文档是唯一可信来源；Three.js 对象是其渲染结果，不作为数据源
 // - 按需渲染：相机/选择/几何变化时才刷新
 // - 严格资源生命周期：geometry/material/texture 引用计数，dispose 不自动释放共享纹理
-// - 渲染质感：PMREM 室内环境贴图（反射+补光）+ ACES 色调映射 + 阴影地面 + 雾 + 渐变背景
+// - 渲染质感：PMREM 环境贴图 + ACES 色调映射 + 阴影地面 + 雾 + 渐变背景 + 盒子倒角 + 自动取景
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { Geometry, Material, SceneDocument, SceneNode } from '../domain/types';
 
 interface NodeResources {
@@ -36,6 +37,7 @@ export class Viewport {
   private backgroundTexture: THREE.CanvasTexture | null = null;
   private floorGeometry: THREE.PlaneGeometry | null = null;
   private floorMaterial: THREE.MeshStandardMaterial | null = null;
+  private keyLight: THREE.DirectionalLight | null = null;
 
   // 世界单位：米。相机近远裁剪面按工业设备场景尺度设定。
   constructor(host: HTMLElement, onPick: (nodeId: string | null) => void) {
@@ -117,6 +119,7 @@ export class Viewport {
 
     // 暖白主光：模拟厂房高侧窗，投影方向稳定、边缘柔和
     const dir = new THREE.DirectionalLight('#fff4e6', 1.4);
+    this.keyLight = dir;
     dir.position.set(10, 14, 8);
     dir.castShadow = true;
     dir.shadow.mapSize.width = 2048;
@@ -245,6 +248,52 @@ export class Viewport {
     this.dirty = true;
   }
 
+  // 自动取景：场景变化后计算包围盒，把整个模型框进视野中心
+  // - 相机目标点 = 包围盒中心；半径按最长边与视野张角反推
+  // - 阴影相机范围随场景缩放，大模型不会丢阴影
+  private frameScene(): void {
+    if (this.nodeMap.size === 0) {
+      // 空场景：相机回到默认观察机位（撤销到空场景时画面与初始空场景一致）
+      this.orbitTarget.set(0, 0.5, 0);
+      this.orbitRadius = 6.87;
+      this.orbitTheta = 0.675;
+      this.orbitPhi = 1.2;
+      this.updateOrbitCamera();
+      return;
+    }
+    const box = new THREE.Box3();
+    for (const [, res] of this.nodeMap) {
+      res.mesh.updateWorldMatrix(true, false);
+      box.expandByObject(res.mesh);
+    }
+    if (box.isEmpty()) return;
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z, 0.4);
+    this.orbitTarget.copy(center);
+
+    const fov = (this.camera.fov * Math.PI) / 180;
+    // 让最长边约占视野 55%，留出周边呼吸空间
+    const radius = maxDim / 2 / Math.tan(fov / 2) / 0.55;
+    this.orbitRadius = Math.min(Math.max(radius, 0.8), 300);
+
+    // 仰角太低（贴地看）时抬到默认观察角
+    if (this.orbitPhi < 0.5) this.orbitPhi = 1.1;
+    this.updateOrbitCamera();
+
+    // 阴影相机随包络缩放
+    if (this.keyLight) {
+      const s = Math.max(maxDim * 0.9, 6);
+      const cam = this.keyLight.shadow.camera;
+      cam.left = -s;
+      cam.right = s;
+      cam.top = s;
+      cam.bottom = -s;
+      cam.far = Math.max(s * 4 + 20, 60);
+      cam.updateProjectionMatrix();
+    }
+  }
+
   // 同步：DSL 文档 → Three.js 对象（reconciler，方案第 2 节）
   // 简单可靠的销毁-重建策略；后续按需细化 diff（InstancedMesh 等留到优化阶段）
   sync(doc: SceneDocument): void {
@@ -257,6 +306,8 @@ export class Viewport {
       this.createNodeMesh(node, doc);
     }
 
+    // 生成内容变化后重新取景（撤销/重做也走这里，保持模型始终在画面中心）
+    this.frameScene();
     this.markDirty();
   }
 
@@ -293,7 +344,10 @@ export class Viewport {
     switch (smooth.type) {
       case 'box': {
         const p = smooth.params;
-        geo = new THREE.BoxGeometry(p.width, p.height, p.depth);
+        // 倒角半径：最短边的 12%，夹在 2mm~5cm 之间——边缘亮面，不再「积木」
+        const minDim = Math.min(p.width, p.height, p.depth);
+        const bevel = Math.min(Math.max(minDim * 0.12, 0.002), 0.05);
+        geo = new RoundedBoxGeometry(p.width, p.height, p.depth, 6, bevel);
         break;
       }
       case 'sphere': {

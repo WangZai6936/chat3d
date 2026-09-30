@@ -66,8 +66,8 @@ ok('真实生成：预览出现（确认按钮）', confirmed);
 if (confirmed) {
   // 用对象树节点判定（比聊天消息文本选择器稳）
   const aside = page.locator('aside').first();
-  const nodeCount = await aside.getByText(/桌面|桌腿/).count();
-  ok('真实生成：对象树出现工作台节点', nodeCount >= 2);
+  const nodeCount = await aside.getByText(/台面|桌面|腿|横梁|脚垫|层板|立柱|抽屉/).count();
+  ok(`真实生成：对象树出现工作台节点（${nodeCount} 个）`, nodeCount >= 2);
 }
 
 const failed = results.filter((r) => !r.pass);

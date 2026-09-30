@@ -72,17 +72,17 @@ ok('预览态：确认应用按钮出现', true);
 ok('预览态：状态行显示预览中', (await page.getByText(/预览中：创建工作台/).first().isVisible()));
 ok('预览态：助手消息包含工作台说明', (await page.getByText(/创建工作台：长\s*2m/).first().isVisible()));
 ok('预览态：头部「预览待确认」角标', (await page.getByText('预览待确认').isVisible()));
-ok('预览态：头部角标 5 个对象', (await page.getByText('5 个对象', { exact: false }).first().isVisible()));
+ok('预览态：头部角标 15 个对象', (await page.getByText('15 个对象', { exact: false }).first().isVisible()));
 ok('预览态：撤销按钮禁用（冻结历史）', await undoBtn.isDisabled());
 
 // 对象树：预览副本驱动，应出现 5 个节点
-for (const name of ['桌面', '桌腿1', '桌腿2', '桌腿3', '桌腿4']) {
+for (const name of ['台面', '左前腿', '右前腿', '左后腿', '右后腿', '前横梁', '后横梁', '背板', '抽屉箱', '抽屉面板', '抽屉把手', '脚垫1', '脚垫2', '脚垫3', '脚垫4']) {
   const node = page.locator('aside').first().getByText(name, { exact: true });
   const visible = await node.isVisible().catch(() => false);
   results.push({ name: `预览态：对象树节点「${name}」`, pass: visible, extra: '' });
   console.log(`${visible ? 'PASS' : 'FAIL'}  预览态：对象树节点「${name}」`);
 }
-ok('预览态：对象树计数 · 5', (await page.getByText('对象树 · 5').isVisible()));
+ok('预览态：对象树计数 · 15', (await page.getByText('对象树 · 15').isVisible()));
 await shotCanvas(page, 'preview');
 await page.screenshot({ path: `${SHOTS}/preview.png` });
 
@@ -91,8 +91,8 @@ await confirmBtn.click();
 await sleep(400);
 ok('确认后：状态回到就绪', (await page.getByText('就绪').first().isVisible()));
 ok('确认后：预览角标消失', !(await page.getByText('预览待确认').isVisible().catch(() => false)));
-ok('确认后：对象树仍有 5 节点（镜像基线）', (await page.getByText('对象树 · 5').isVisible()));
-ok('确认后：未保存角标', (await page.getByText(/未保存 · 5 个对象/).first().isVisible().catch(() => false)));
+ok('确认后：对象树仍有 15 节点（镜像基线）', (await page.getByText('对象树 · 15').isVisible()));
+ok('确认后：未保存角标', (await page.getByText(/未保存 · 15 个对象/).first().isVisible().catch(() => false)));
 ok('确认后：撤销按钮可用', !(await undoBtn.isDisabled()));
 await page.screenshot({ path: `${SHOTS}/committed.png` });
 
@@ -107,8 +107,8 @@ await page.screenshot({ path: `${SHOTS}/undo.png` });
 // ---- 重做 ----
 await page.getByRole('button', { name: '↻ 重做' }).click();
 await sleep(400);
-ok('重做后：对象树恢复 5 节点', (await page.getByText('对象树 · 5').isVisible()));
-ok('重做后：头部 5 个对象', (await page.getByText('5 个对象', { exact: false }).first().isVisible()));
+ok('重做后：对象树恢复 15 节点', (await page.getByText('对象树 · 15').isVisible()));
+ok('重做后：头部 15 个对象', (await page.getByText('15 个对象', { exact: false }).first().isVisible()));
 await shotCanvas(page, 'redo');
 await page.screenshot({ path: `${SHOTS}/redo.png` });
 

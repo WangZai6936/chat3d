@@ -7,10 +7,14 @@ import { applyBatch, cloneGeometry, Command, CommandBatch, CommandWithInverse, E
 import { Material, Quaternion, SceneDocument, SceneNode, SCHEMA_VERSION, Vec3 } from './domain/types';
 import { makeId } from './util/ids';
 
-// 方案第 7 节托管项目目录的默认材质
-// 喷漆铝合金/钢板质感：降饱和、提金属度，配合环境贴图反射出工业质感
-const MAT_GRAY: Material = { id: 'mat_gray', baseColor: '#A5ABB4', roughness: 0.5, metalness: 0.35 };
-const MAT_BLUE: Material = { id: 'mat_blue', baseColor: '#3F6BA0', roughness: 0.5, metalness: 0.35 };
+// 方案第 7 节托管项目目录的默认材质：工业设备常见外观（喷漆、裸钢、橡胶、警示色）
+const MAT_GRAY: Material = { id: 'mat_gray', baseColor: '#A5ABB4', roughness: 0.5, metalness: 0.35 }; // 喷漆铝灰
+const MAT_BLUE: Material = { id: 'mat_blue', baseColor: '#3F6BA0', roughness: 0.5, metalness: 0.35 }; // 工业蓝漆
+const MAT_DARK: Material = { id: 'mat_dark', baseColor: '#41474F', roughness: 0.55, metalness: 0.5 }; // 深灰钢（框架/型材）
+const MAT_METAL: Material = { id: 'mat_metal', baseColor: '#B2B7BE', roughness: 0.32, metalness: 0.85 }; // 亮钢（裸露金属件）
+const MAT_WHITE: Material = { id: 'mat_white', baseColor: '#D6D6CF', roughness: 0.6, metalness: 0.2 }; // 米白面板（柜体外壳）
+const MAT_RUBBER: Material = { id: 'mat_rubber', baseColor: '#1A1D21', roughness: 0.95, metalness: 0.0 }; // 橡胶黑（轮胎/把手/脚垫）
+const MAT_YELLOW: Material = { id: 'mat_yellow', baseColor: '#C8982E', roughness: 0.5, metalness: 0.3 }; // 警示黄（标识/护栏）
 
 // 历史限制：条数与字节双计算（方案第 6 节）
 const MAX_HISTORY_ENTRIES = 200;
@@ -19,11 +23,11 @@ const MAX_HISTORY_BYTES = 64 * 1024 * 1024; // 64MB
 export function createInitialDoc(): SceneDocument {
   return {
     schemaVersion: SCHEMA_VERSION,
+    materials: [MAT_GRAY, MAT_BLUE, MAT_DARK, MAT_METAL, MAT_WHITE, MAT_RUBBER, MAT_YELLOW],
     projectId: makeId(),
     revision: 0,
     unit: 'm',
     upAxis: 'Y',
-    materials: [MAT_GRAY, MAT_BLUE],
     assets: [],
     nodes: [],
   };

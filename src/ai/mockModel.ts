@@ -95,103 +95,160 @@ export function parseInput(text: string): ParsedIntent {
   }
 
   // ===== 工作台模板（方案示例任务：创建一个工作台）=====
+  // ===== 工作台模板（与真实模型提示词范例同构：15 个零件、材质混搭）=====
   if (/工作台|桌子|台面|操作台|钳工台/.test(t)) {
     const len = dim('长') ?? dim('长度') ?? 2.0;
     const wid = dim('宽') ?? dim('宽度') ?? 0.8;
     const hgt = dim('高') ?? dim('高度') ?? 0.75;
-    const ops: Command[] = [box('桌面', len, 0.05, wid, 0, hgt - 0.025, 0, 'mat_gray')];
-    // 四条桌腿
-    const legH = hgt - 0.05;
+    const topT = 0.05; // 台面厚 5cm
+    const leg = 0.06; // 方腿 60mm 型材
+    const ops: Command[] = [];
+    // 台面（米白面板）
+    ops.push(box('台面', len, topT, wid, 0, hgt - topT / 2, 0, 'mat_white'));
+    // 四条方腿（深灰钢，四角内缩 5cm）
+    const legH = hgt - topT;
     const lx = len / 2 - 0.05;
     const lz = wid / 2 - 0.05;
-    for (let i = 0; i < 4; i++) {
-      const sx = i % 2 === 0 ? -lx : lx;
-      const sz = i < 2 ? -lz : lz;
-      ops.push(cylinder(`桌腿${i + 1}`, 0.03, legH, sx, legH / 2, sz, 'mat_gray', 16));
-    }
+    const legPos: [string, number, number][] = [
+      ['左前腿', -lx, -lz],
+      ['右前腿', lx, -lz],
+      ['左后腿', -lx, lz],
+      ['右后腿', lx, lz],
+    ];
+    for (const [nm, x, z] of legPos) ops.push(box(nm, leg, legH, leg, x, legH / 2, z, 'mat_dark'));
+    // 前后横梁（铝灰结构拉杆）
+    const beamY = Math.max(hgt * 0.35, 0.2);
+    ops.push(box('前横梁', len - 0.24, 0.05, leg, 0, beamY, -lz, 'mat_gray'));
+    ops.push(box('后横梁', len - 0.24, 0.05, leg, 0, beamY, lz, 'mat_gray'));
+    // 背板（工业蓝，台面上方）
+    ops.push(box('背板', len, 0.45, 0.02, 0, hgt + 0.225, lz - 0.01, 'mat_blue'));
+    // 桌下抽屉（浅面板 + 亮钢把手）
+    const drW = Math.min(0.5, len * 0.3);
+    const drX = -len / 2 + drW / 2 + 0.05;
+    const drY = hgt - topT - 0.07;
+    ops.push(box('抽屉箱', drW, 0.14, wid - 0.1, drX, drY, 0, 'mat_white'));
+    ops.push(box('抽屉面板', drW - 0.04, 0.1, 0.02, drX, drY, wid / 2 - 0.05, 'mat_white'));
+    ops.push(box('抽屉把手', 0.15, 0.02, 0.03, drX, drY, wid / 2 - 0.03, 'mat_metal'));
+    // 四个橡胶脚垫
+    legPos.forEach((p, i) => ops.push(box(`脚垫${i + 1}`, 0.08, 0.02, 0.08, p[1], 0.01, p[2], 'mat_rubber')));
     return {
-      summary: `创建工作台：长 ${len}m × 宽 ${wid}m × 高 ${hgt}m（桌面 + 4 桌腿）`,
+      summary: `创建工作台：长 ${len}m × 宽 ${wid}m × 高 ${hgt}m（台面+钢框架+背板+抽屉+脚垫，共 15 件）`,
       operations: ops,
     };
   }
 
-  // ===== 货架 / 储物架：4 立柱 + N 层板 =====
+  // ===== 货架 / 储物架：4 立柱 + N 层板 + 顶部拉杆 + 警示踢脚 =====
   if (/货架|架子|储物架|置物架|物料架|层架/.test(t)) {
     const len = dim('长') ?? dim('长度') ?? 1.2;
     const wid = dim('宽') ?? dim('宽度') ?? 0.4;
     const hgt = dim('高') ?? dim('高度') ?? 1.8;
     const layers = num(/(\d+)\s*层/) ?? 3;
     const ops: Command[] = [];
-    const post = 0.04; // 立柱粗细
+    const post = 0.06; // 立柱 60mm 型材
     const lx = len / 2 - post / 2;
     const lz = wid / 2 - post / 2;
-    // 4 根立柱（贯穿全高）
+    // 4 根立柱（深灰钢，贯穿全高）
     for (let i = 0; i < 4; i++) {
       const sx = i % 2 === 0 ? -lx : lx;
       const sz = i < 2 ? -lz : lz;
-      ops.push(box(`立柱${i + 1}`, post, hgt, post, sx, hgt / 2, sz, 'mat_gray'));
+      ops.push(box(`立柱${i + 1}`, post, hgt, post, sx, hgt / 2, sz, 'mat_dark'));
     }
-    // 层板：从底到顶均分
+    // 层板（铝灰，从底到顶均分）
+    const thick = 0.04;
     for (let l = 0; l < layers; l++) {
       const y = (hgt / (layers - 1 || 1)) * l;
-      const thick = 0.03;
-      ops.push(box(`层板${l + 1}`, len, thick, wid, 0, y + thick / 2, 0, 'mat_blue'));
+      ops.push(box(`层板${l + 1}`, len, thick, wid, 0, y + thick / 2, 0, 'mat_gray'));
     }
+    // 顶部纵梁拉杆 ×2（长向，深灰钢）
+    ops.push(box('顶拉杆1', len - post * 2, 0.05, 0.05, 0, hgt - 0.025, -lz, 'mat_dark'));
+    ops.push(box('顶拉杆2', len - post * 2, 0.05, 0.05, 0, hgt - 0.025, lz, 'mat_dark'));
+    // 底部警示踢脚 ×2（前后，警示黄）
+    ops.push(box('警示踢脚1', len - post * 2, 0.05, 0.05, 0, 0.025, -lz, 'mat_yellow'));
+    ops.push(box('警示踢脚2', len - post * 2, 0.05, 0.05, 0, 0.025, lz, 'mat_yellow'));
     return {
-      summary: `创建货架：长 ${len}m × 宽 ${wid}m × 高 ${hgt}m（4 立柱 + ${layers} 层板）`,
+      summary: `创建货架：长 ${len}m × 宽 ${wid}m × 高 ${hgt}m（4 立柱 + ${layers} 层板 + 2 拉杆 + 2 警示踢脚）`,
       operations: ops,
     };
   }
 
-  // ===== 托盘 =====
+  // ===== 托盘：面板 + 纵梁 + 垫块 + 警示边条 =====
   if (/托盘|栈板/.test(t)) {
     const len = dim('长') ?? dim('长度') ?? 1.2;
     const wid = dim('宽') ?? dim('宽度') ?? 0.8;
     const hgt = dim('高') ?? dim('高度') ?? 0.15;
-    return {
-      summary: `创建托盘：${len}m × ${wid}m × ${hgt}m`,
-      operations: [box('托盘', len, hgt, wid, 0, hgt / 2, 0, 'mat_gray')],
-    };
+    const beam = 0.08; // 纵梁高
+    const ops: Command[] = [];
+    ops.push(box('面板', len, 0.03, wid, 0, hgt - 0.015, 0, 'mat_gray'));
+    // 3 根纵梁（深灰钢）
+    for (let i = 0; i < 3; i++) {
+      const z = (i - 1) * (wid / 3);
+      ops.push(box(`纵梁${i + 1}`, len, beam, 0.08, 0, (hgt - 0.03) / 2, z, 'mat_dark'));
+    }
+    // 3 个落地垫块（橡胶黑）
+    for (let i = 0; i < 3; i++) {
+      const z = (i - 1) * (wid / 3);
+      const h2 = hgt - 0.03 - beam;
+      ops.push(box(`垫块${i + 1}`, 0.15, h2, 0.08, 0, h2 / 2, z, 'mat_rubber'));
+    }
+    // 前后警示边条
+    ops.push(box('警示边条1', len, 0.02, 0.02, 0, hgt - 0.01, -wid / 2 + 0.01, 'mat_yellow'));
+    ops.push(box('警示边条2', len, 0.02, 0.02, 0, hgt - 0.01, wid / 2 - 0.01, 'mat_yellow'));
+    return { summary: `创建托盘：${len}m × ${wid}m × ${hgt}m（面板+纵梁+垫块+警示边条，共 9 件）`, operations: ops };
   }
 
-  // ===== 柜子 / 储物柜 =====
+  // ===== 柜子 / 储物柜：底座 + 柜体 + 双门 + 把手 + 顶板 =====
   if (/柜子|储物柜|工具柜|柜|更衣柜/.test(t)) {
     const len = dim('长') ?? dim('长度') ?? 0.8;
     const wid = dim('宽') ?? dim('宽度') ?? 0.5;
     const hgt = dim('高') ?? dim('高度') ?? 1.8;
+    const ops: Command[] = [];
+    ops.push(box('底座', len, 0.08, wid, 0, 0.04, 0, 'mat_dark'));
+    const bodyH = hgt - 0.08;
+    const bodyY = 0.08 + bodyH / 2;
+    ops.push(box('柜体', len - 0.02, bodyH, wid - 0.02, 0, bodyY, 0, 'mat_white'));
+    // 双门（工业蓝，上门）
+    const doorW = (len - 0.06) / 2;
+    const doorY = 0.08 + bodyH * 0.5;
+    ops.push(box('左门板', doorW, bodyH * 0.6, 0.02, -len / 4, doorY, wid / 2 - 0.01, 'mat_blue'));
+    ops.push(box('右门板', doorW, bodyH * 0.6, 0.02, len / 4, doorY, wid / 2 - 0.01, 'mat_blue'));
+    ops.push(box('左把手', 0.02, 0.15, 0.03, -0.05, doorY, wid / 2 + 0.01, 'mat_metal'));
+    ops.push(box('右把手', 0.02, 0.15, 0.03, 0.05, doorY, wid / 2 + 0.01, 'mat_metal'));
+    ops.push(box('顶板', len, 0.03, wid, 0, hgt - 0.015, 0, 'mat_gray'));
     return {
-      summary: `创建储物柜：${len}m × ${wid}m × ${hgt}m`,
-      operations: [box('储物柜', len, hgt, wid, 0, hgt / 2, 0, 'mat_blue')],
+      summary: `创建储物柜：${len}m × ${wid}m × ${hgt}m（底座+柜体+双门+把手+顶板，共 7 件）`,
+      operations: ops,
     };
   }
 
-  // ===== 桶 / 油桶 / 圆桶 =====
+  // ===== 桶 / 油桶 / 圆桶：桶身 + 桶盖 + 警示环 =====
   if (/油桶|圆桶|水桶|桶/.test(t)) {
     const r = dim('半径') ?? dim('口径') ?? 0.3;
     const h = dim('高') ?? dim('高度') ?? 0.8;
-    return {
-      summary: `创建桶：半径 ${r}m × 高 ${h}m`,
-      operations: [cylinder('桶', r, h, 0, h / 2, 0, 'mat_blue')],
-    };
+    const ops: Command[] = [
+      cylinder('桶身', r, h, 0, h / 2, 0, 'mat_blue'),
+      cylinder('桶盖', r * 0.98, 0.03, 0, h - 0.015, 0, 'mat_metal'),
+      cylinder('警示环', r * 1.01, 0.06, 0, h * 0.5, 0, 'mat_yellow'),
+    ];
+    return { summary: `创建油桶：半径 ${r}m × 高 ${h}m（桶身+桶盖+警示环，共 3 件）`, operations: ops };
   }
 
-  // ===== 锥 / 圆锥 / 漏斗 =====
+  // ===== 锥 / 圆锥 / 路锥：锥体 + 反光环 + 底座 =====
   if (/圆锥|锥体|锥|漏斗|警示锥|路锥/.test(t)) {
     const r = dim('半径') ?? dim('底') ?? 0.2;
     const h = dim('高') ?? dim('高度') ?? 0.5;
-    return {
-      summary: `创建圆锥：底半径 ${r}m × 高 ${h}m`,
-      operations: [
-        {
-          op: 'createPrimitive',
-          name: '圆锥',
-          parentId: null,
-          geometry: { type: 'cone', params: { radius: r, height: h, radialSegments: 32 } },
-          materialId: 'mat_blue',
-          transform: { position: [0, h / 2, 0], rotationQuaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
-        },
-      ],
-    };
+    const ops: Command[] = [
+      {
+        op: 'createPrimitive',
+        name: '锥体',
+        parentId: null,
+        geometry: { type: 'cone', params: { radius: r, height: h, radialSegments: 32 } },
+        materialId: 'mat_yellow',
+        transform: { position: [0, h / 2, 0], rotationQuaternion: [0, 0, 0, 1], scale: [1, 1, 1] },
+      },
+      cylinder('反光环', r * 0.75, 0.06, 0, h * 0.55, 0, 'mat_white'),
+      box('底座', r * 2.2, 0.04, r * 2.2, 0, 0.02, 0, 'mat_rubber'),
+    ];
+    return { summary: `创建路锥：底半径 ${r}m × 高 ${h}m（锥体+反光环+底座，共 3 件）`, operations: ops };
   }
 
   // ===== 简单立方体 =====

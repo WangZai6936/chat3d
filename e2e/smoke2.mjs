@@ -54,8 +54,8 @@ const confirmBtn = page.getByRole('button', { name: '确认应用' });
 await confirmBtn.waitFor({ timeout: 8000 });
 await sleep(300);
 ok('货架预览：确认按钮出现', true);
-ok('货架预览：摘要含 4 立柱', (await page.getByText(/4 立柱 \+ 3 层板/).first().isVisible()));
-ok('货架预览：对象树 7 节点（4 立柱 + 3 层板）', (await page.getByText('对象树 · 7').isVisible()));
+ok('货架预览：摘要含 4 立柱 + 拉杆', (await page.getByText(/4 立柱 \+ 3 层板 \+ 2 拉杆/).first().isVisible()));
+ok('货架预览：对象树 11 节点（4 立柱 + 3 层板 + 2 拉杆 + 2 踢脚）', (await page.getByText('对象树 · 11').isVisible()));
 
 // 放弃预览，回到就绪
 await page.getByRole('button', { name: '放弃' }).first().click();
@@ -68,11 +68,10 @@ await ta.press('Enter');
 await page.getByRole('button', { name: '确认应用' }).waitFor({ timeout: 8000 });
 await page.getByRole('button', { name: '确认应用' }).click();
 await sleep(400);
-ok('油桶已应用：树上出现「桶」', await page.getByText('桶', { exact: true }).isVisible());
+ok('油桶已应用：树上出现「桶身」', await page.getByText('桶身', { exact: true }).isVisible());
 
 // 选中它
-await page.locator('aside').first().getByText('桶', { exact: true }).click();
-await sleep(200);
+await page.locator('aside').first().getByText('桶身', { exact: true }).click();
 ok('选中「桶」后属性面板出现', await page.getByText(/位置 X \/ Y \/ Z/).isVisible());
 
 await ta.fill('向左移动 0.5 米');

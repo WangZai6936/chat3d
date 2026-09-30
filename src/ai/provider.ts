@@ -45,7 +45,7 @@ const IMPLEMENTED_OPS = new Set([
 
 const GEOMETRY_TYPES = new Set(['box', 'sphere', 'cylinder', 'cone', 'plane']);
 
-const KNOWN_MATERIALS = new Set(['mat_gray', 'mat_blue']);
+const KNOWN_MATERIALS = new Set(['mat_gray', 'mat_blue', 'mat_dark', 'mat_metal', 'mat_white', 'mat_rubber', 'mat_yellow']);
 
 const DEFAULT_TRANSFORM = {
   position: [0, 0, 0] as [number, number, number],
@@ -58,18 +58,59 @@ function buildSystemPrompt(ctx: SceneContext): string {
     ? ctx.nodes.map((n) => `  - id:${n.id} name:${n.name} (${n.desc}) pos:[${n.position.join(',')}]`).join('\n')
     : '  （空场景，还没有任何对象）';
   const sel = ctx.selection.length ? `选中的节点 id：${ctx.selection.join(', ')}` : '当前没有选中对象。';
-  return `你是 chat3d 的三维建模助手。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
+  return `你是 chat3d 的三维建模助手，专门搭建工业设备 / 仓储设备场景。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
 
-# 坐标系与单位
-- Y 轴向上，单位是米，世界原点在场景中心。
-- 物体放置要符合物理常识：站在地上的物体底面 y=0（圆柱/桶放 y=半径或高度一半），桌面在桌腿上方。
-- 复杂设备请拆成多个基本体（桌面+4桌腿、4立柱+N层板 等），一次全部输出。
+# 第一原则：把设备拆成多个零件，绝不要用一两个光板盒子应付
+真实感来自三样东西：零件数量、尺寸层次、材质混搭。
+- 像玩具的回答：工作台 = 1 个大盒子；储物柜 = 1 个盒子。
+- 像真设备的回答：台面、4 条腿、横梁、背板、抽屉、把手、脚垫……每个零件单独一条命令。
+数量要求：小型设备（工作台/托盘/油桶/推车）8~15 个零件；大型设备（货架/储物柜/作业线）15~20 个零件。不要超过 25 个零件，否则输出太长会被截断。
+
+# 真实尺寸（单位：米）
+- 板材、层板厚度 0.02~0.06；承重板用 0.04 以上
+- 型材立柱、横梁边长 0.04~0.08
+- 参考：工作台高 0.75、柜深 0.4~0.6、货架高 1.8~2.5、油桶高 0.9 口径 0.6、托盘 1.2×0.8×0.15
+- 薄板件（门板、面板）厚度别超过 0.05；承重骨架别细于 0.04
+
+# 材质库（只能从这 7 种里选；相邻零件尽量混搭）
+mat_gray 喷漆铝灰 —— 结构件、支架、桌面，万能默认
+mat_blue 工业蓝漆 —— 设备主色：框架、柜门、护栏
+mat_dark 深灰钢 —— 承重骨架：立柱、横梁、底座
+mat_metal 亮钢 —— 裸露金属件：把手、导轨、轮毂、桶盖（强反射）
+mat_white 米白面板 —— 外壳：柜体、抽屉面板、电器外壳
+mat_rubber 橡胶黑 —— 轮胎、脚轮、脚垫、防撞条（哑光）
+mat_yellow 警示黄 —— 警示条、护栏、路锥、托盘边沿
+要点：整台设备只用一种颜色会显得假；「深骨架 + 浅面板 + 亮钢把手 + 橡胶脚垫」的组合最真实。
+
+# 坐标系与摆放
+- Y 轴向上，单位米，原点在场景中心，地面 y=0。
+- 几何体以自身中心定位：落地物体 y = 高度/2（圆柱/油桶放 y=高度一半）。
+- 零件之间贴合、不互相穿插：台面正好压在骨架顶上，脚轮贴地，抽屉嵌进柜体开口。
+
+# 参考范例（「创建一个 2 米工作台」的标准回答——注意零件数、材质混搭、重复结构要逐个列出）
+{"summary":"创建工业工作台 2.0×0.8×0.75m：台面+钢框架+背板+抽屉+把手+脚垫，共 15 件","operations":[
+{"op":"createPrimitive","tempId":"t1","name":"台面","geometry":{"type":"box","params":{"width":2.0,"height":0.05,"depth":0.8}},"materialId":"mat_white","transform":{"position":[0,0.725,0],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t2","name":"左前腿","geometry":{"type":"box","params":{"width":0.06,"height":0.70,"depth":0.06}},"materialId":"mat_dark","transform":{"position":[-0.90,0.35,-0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t3","name":"右前腿","geometry":{"type":"box","params":{"width":0.06,"height":0.70,"depth":0.06}},"materialId":"mat_dark","transform":{"position":[0.90,0.35,-0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t4","name":"左后腿","geometry":{"type":"box","params":{"width":0.06,"height":0.70,"depth":0.06}},"materialId":"mat_dark","transform":{"position":[-0.90,0.35,0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t5","name":"右后腿","geometry":{"type":"box","params":{"width":0.06,"height":0.70,"depth":0.06}},"materialId":"mat_dark","transform":{"position":[0.90,0.35,0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t6","name":"前横梁","geometry":{"type":"box","params":{"width":1.76,"height":0.05,"depth":0.06}},"materialId":"mat_gray","transform":{"position":[0,0.30,-0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t7","name":"后横梁","geometry":{"type":"box","params":{"width":1.76,"height":0.05,"depth":0.06}},"materialId":"mat_gray","transform":{"position":[0,0.30,0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t8","name":"背板","geometry":{"type":"box","params":{"width":2.0,"height":0.45,"depth":0.02}},"materialId":"mat_blue","transform":{"position":[0,1.00,0.39],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t9","name":"抽屉箱","geometry":{"type":"box","params":{"width":0.50,"height":0.14,"depth":0.70}},"materialId":"mat_white","transform":{"position":[-0.65,0.61,0],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t10","name":"抽屉面板","geometry":{"type":"box","params":{"width":0.46,"height":0.10,"depth":0.02}},"materialId":"mat_white","transform":{"position":[-0.65,0.61,0.36],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t11","name":"抽屉把手","geometry":{"type":"box","params":{"width":0.15,"height":0.02,"depth":0.03}},"materialId":"mat_metal","transform":{"position":[-0.65,0.61,0.38],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t12","name":"左前脚垫","geometry":{"type":"box","params":{"width":0.08,"height":0.02,"depth":0.08}},"materialId":"mat_rubber","transform":{"position":[-0.90,0.01,-0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t13","name":"右前脚垫","geometry":{"type":"box","params":{"width":0.08,"height":0.02,"depth":0.08}},"materialId":"mat_rubber","transform":{"position":[0.90,0.01,-0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t14","name":"左后脚垫","geometry":{"type":"box","params":{"width":0.08,"height":0.02,"depth":0.08}},"materialId":"mat_rubber","transform":{"position":[-0.90,0.01,0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}},
+{"op":"createPrimitive","tempId":"t15","name":"右后脚垫","geometry":{"type":"box","params":{"width":0.08,"height":0.02,"depth":0.08}},"materialId":"mat_rubber","transform":{"position":[0.90,0.01,0.35],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}}
+]}
 
 # 图片
 用户可能附图作为参考。看图估算尺寸（认常见物体比例：人、门、托盘等），仍只输出上面的命令；不确定时给合理默认值，并在 summary 里注明「按图片估算」。
 
-# 输出格式（严格遵守）
-只输出一个 JSON 对象，不要 markdown 代码块、不要任何解释文字：
+# 输出格式（最重要的一条，严格遵守）
+先想好要拆哪些零件，然后回复里只允许出现最终 JSON：第一个字符必须是 {，最后一个字符必须是 }，中间不得出现任何思考过程、草稿、英文或解释文字，不要 markdown 代码块：
 {"summary":"一句话中文说明做了什么","operations":[命令按执行顺序排列]}
 
 # 支持的命令
@@ -82,13 +123,13 @@ function buildSystemPrompt(ctx: SceneContext): string {
      sphere: radius,widthSegments(建议 32),heightSegments(建议 24)
      cone: radius,height,radialSegments(建议 32)
      plane: width,depth,widthSegments,depthSegments（默认竖直。做地面/地板时用 rotationQuaternion [-0.7071,0,0,0.7071] 绕 X 轴放平，position y=0）
-   - 材质只能二选一：mat_gray（灰）或 mat_blue（蓝）。没有更想要的颜色时，先选接近的。
+   - 材质只能从上面 7 种里选，按零件用途挑最合适的。
 2. 修改几何参数（整体替换）：{"op":"updateParameters","targetId":"t1","geometry":{...同上...}}
 3. 设置变换（set 为绝对）：{"op":"setTransform","targetId":"t1","transform":{"position":[...],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}}
 4. 移动（delta 为增量，单位米）：{"op":"translate","targetId":"t1","space":"world","mode":"delta","value":[0.5,0,0]}
 5. 重命名：{"op":"rename","targetId":"t1","name":"新名字"}
 6. 显隐：{"op":"setVisibility","targetId":"t1","visible":false}
-7. 材质：{"op":"setMaterial","targetId":"t1","materialId":"mat_blue"}
+7. 材质：{"op":"setMaterial","targetId":"t1","materialId":"mat_metal"}
 
 # targetId 规则
 - 引用同批次里前面创建的节点：用它的 tempId（如 "t1"）。
@@ -128,15 +169,17 @@ export function parseModelResponse(raw: string): GeneratedBatch {
   const fence = body.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) body = fence[1].trim();
 
-  // 取第一个 { 到最后一个 }，容忍模型在 JSON 外多说话
-  const start = body.indexOf('{');
+  // 优先锚定 {"summary" 开头：模型若在 JSON 前写了思考文字，第一个 { 会误锚到前面
+  const start = body.indexOf('{"summary"');
+  const fallbackStart = body.indexOf('{');
+  const jsonStart = start >= 0 ? start : fallbackStart;
   const end = body.lastIndexOf('}');
-  if (start < 0 || end <= start) throw new Error(`模型返回中找不到 JSON 对象（模型可能用纯文字作了回答，没按格式输出）。原文前 160 字：${text.slice(0, 160)}`);
+  if (jsonStart < 0 || end <= jsonStart) throw new Error(`模型返回中找不到 JSON 对象（模型可能用纯文字作了回答，没按格式输出）。原文前 160 字：${text.slice(0, 160)}`);
   let parsed: unknown;
   try {
-    parsed = JSON.parse(body.slice(start, end + 1));
+    parsed = JSON.parse(body.slice(jsonStart, end + 1));
   } catch (e) {
-    throw new Error(`JSON 解析失败：${e instanceof Error ? e.message : String(e)}。原文前 160 字：${(body.slice(start, end + 1)).slice(0, 160)}`);
+    throw new Error(`JSON 解析失败：${e instanceof Error ? e.message : String(e)}。原文前 160 字：${(body.slice(jsonStart, end + 1)).slice(0, 160)}`);
   }
 
   const obj = parsed as Record<string, unknown>;
@@ -338,6 +381,7 @@ async function fetchChat(
       model: cfg.model.trim(),
       messages,
       temperature: 0.2,
+      max_tokens: 8192,
       stream: false,
     }),
     signal,
