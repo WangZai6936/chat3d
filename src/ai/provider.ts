@@ -93,7 +93,7 @@ ${sel}`;
 export function buildMessages(text: string, ctx: SceneContext) {
   return [
     { role: 'system', content: buildSystemPrompt(ctx) },
-    { role: 'user', content: text },
+    { role: 'user', content: `${text}\n\n（请只输出一个 JSON 命令批对象，不要 markdown 代码块或任何解释文字）` },
   ];
 }
 
@@ -111,12 +111,12 @@ export function parseModelResponse(raw: string): GeneratedBatch {
   // 取第一个 { 到最后一个 }，容忍模型在 JSON 外多说话
   const start = body.indexOf('{');
   const end = body.lastIndexOf('}');
-  if (start < 0 || end <= start) throw new Error('模型返回中找不到 JSON 对象');
+  if (start < 0 || end <= start) throw new Error(`模型返回中找不到 JSON 对象（模型可能用纯文字作了回答，没按格式输出）。原文前 160 字：${text.slice(0, 160)}`);
   let parsed: unknown;
   try {
     parsed = JSON.parse(body.slice(start, end + 1));
   } catch (e) {
-    throw new Error(`JSON 解析失败：${e instanceof Error ? e.message : String(e)}`);
+    throw new Error(`JSON 解析失败：${e instanceof Error ? e.message : String(e)}。原文前 160 字：${(body.slice(start, end + 1)).slice(0, 160)}`);
   }
 
   const obj = parsed as Record<string, unknown>;
@@ -279,6 +279,34 @@ export async function generateBatch(
   if (!cfg.model.trim()) throw new Error('未配置模型名');
 
   const url = `${base}/chat/completions`;
+  const messages = buildMessages(text, ctx);
+
+  // 解析失败自动纠偏重试一次：把模型的错误回复顶回去，再强调格式
+  let lastErr: Error | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const content = await fetchChat(url, cfg, messages, signal);
+    try {
+      return parseModelResponse(content);
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+      if (attempt === 0) {
+        messages.push({ role: 'assistant', content: content.slice(0, 400) });
+        messages.push({
+          role: 'user',
+          content: '上一条回复无法解析为 JSON 命令批。请严格只输出一个 JSON 对象：{"summary":"一句话说明做了什么","operations":[...] 同系统提示词的命令格式}，不要 markdown 代码块、不要任何解释或其他文字。',
+        });
+      }
+    }
+  }
+  throw lastErr;
+}
+
+async function fetchChat(
+  url: string,
+  cfg: ModelConfig,
+  messages: { role: string; content: string }[],
+  signal?: AbortSignal,
+): Promise<string> {
   const res = await fetch(url, {
     method: 'POST',
     headers: {
@@ -287,7 +315,7 @@ export async function generateBatch(
     },
     body: JSON.stringify({
       model: cfg.model.trim(),
-      messages: buildMessages(text, ctx),
+      messages,
       temperature: 0.2,
       stream: false,
     }),
@@ -299,10 +327,17 @@ export async function generateBatch(
     throw new Error(`接口返回 HTTP ${res.status}：${detail.slice(0, 200) || res.statusText}`);
   }
 
-  const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('接口没有返回消息内容');
-  return parseModelResponse(content);
+  const data = (await res.json()) as {
+    choices?: { message?: { content?: string; reasoning_content?: string } }[];
+  };
+  const msg = data?.choices?.[0]?.message;
+  let content = msg?.content;
+  // 部分服务的思考型模型把最终答案放在 reasoning_content（content 为空）
+  if (!content && typeof msg?.reasoning_content === 'string' && msg.reasoning_content.trim()) {
+    content = msg.reasoning_content;
+  }
+  if (!content || !content.trim()) throw new Error('接口没有返回消息内容');
+  return content;
 }
 
 // 构造场景上下文（ChatPanel 调用）
