@@ -81,19 +81,17 @@ export function parseInput(text: string): ParsedIntent {
   if (/你是谁|你能做什么|可以做什么|帮助|help|怎么用|用法/.test(t)) {
     return {
       summary:
-        '我可以帮你搭工业/仓库场景。试试这些：\n创建类：「创建一个工作台」「创建 3 层货架」「创建油桶」「创建 0.5 米立方体」「创建围墙」「创建地面」\n修改类（先在左侧对象树点选对象）：「向左移动 1 米」「把它加粗到 6 厘米」「改成灰色」「重命名为 A 柱」「隐藏」\n其他：「复制」「删除」「清空场景」',
+        '我可以帮你搭工业/仓库场景。试试这些：\n创建类：「创建一个工作台」「创建 3 层货架」「创建油桶」「创建 0.5 米立方体」「创建围墙」「创建地面」\n修改类（先在左侧对象树点选对象）：「向左移动 1 米」「把它加粗到 6 厘米」「改成灰色」「重命名为 A 柱」「隐藏」\n其他：删除 / 复制 / 清空下一版支持（可先用工具栏撤销回退）',
       operations: [],
     };
   }
 
-  // ===== 清空场景：对现有每个节点发 delete =====
+  // ===== 清空场景：delete 命令尚未实现，先文本告知 =====
   if (/清空|全部删除|删掉全部|删除所有/.test(t)) {
-    const doc = useEditorStore.getState().doc;
-    if (doc.nodes.length === 0) {
-      return { summary: '场景已经是空的。', operations: [] };
-    }
-    const ops: Command[] = doc.nodes.map((n) => ({ op: 'delete', targetId: n.id }));
-    return { summary: `清空场景：删除 ${ops.length} 个对象`, operations: ops };
+    return {
+      summary: '删除与清空功能下一版支持。临时办法：用工具栏「↺ 撤销」逐步回退到空场景。',
+      operations: [],
+    };
   }
 
   // ===== 工作台模板（方案示例任务：创建一个工作台）=====
@@ -268,12 +266,12 @@ export function parseInput(text: string): ParsedIntent {
   const hasTarget = selection.length > 0;
   if (hasTarget) {
     const targetId = selection[0];
-    // 删除 / 复制
+    // 删除 / 复制：delete、duplicate 命令尚未实现，先文本告知（避免产出非法命令批）
     if (/删除|删掉|去掉/.test(t)) {
-      return { summary: '删除选中对象', operations: [{ op: 'delete', targetId }] };
+      return { summary: '删除功能下一版支持。临时办法：用工具栏「↺ 撤销」回退创建该对象的那一步。', operations: [] };
     }
     if (/复制|拷贝|再来一个/.test(t)) {
-      return { summary: '复制选中对象', operations: [{ op: 'duplicate', targetId }] };
+      return { summary: '复制功能下一版支持。临时办法：直接告诉我「创建一个 XXX」，我来新建。', operations: [] };
     }
     // "把它加粗到 6 厘米" / "改粗到 X"
     if (/加粗|改粗|粗/.test(t)) {
@@ -333,7 +331,7 @@ export function parseInput(text: string): ParsedIntent {
   // 未识别：不猜测、不执行（方案第 3 节：不从任意自然语言中猜命令）
   return {
     summary:
-      '这句话我还没学会（P0Demo 用的是模拟模型，只认关键词）。可以试试：\n创建：「创建一个工作台」「创建 3 层货架」「创建油桶」「创建围墙」「创建地面」\n修改（先在左侧对象树点选对象）：「向左移动 1 米」「改成灰色」「重命名为 A」「隐藏」「复制」「删除」\n输入「帮助」查看完整清单。',
+      '这句话我还没学会（模拟模型只认关键词；配置真实模型后由大模型理解任意说法）。可以试试：\n创建：「创建一个工作台」「创建 3 层货架」「创建油桶」「创建围墙」「创建地面」\n修改（先在左侧对象树点选对象）：「向左移动 1 米」「改成灰色」「重命名为 A」「隐藏」\n输入「帮助」查看完整清单。',
     operations: [],
   };
 }

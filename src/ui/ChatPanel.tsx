@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import { buildBatch } from '../ai/mockModel';
-import { applyBatch } from '../domain/commands';
+import { buildSceneContext, generateBatch, ModelConfig } from '../ai/provider';
+import { applyBatch, CommandBatch } from '../domain/commands';
+import { makeId } from '../util/ids';
 import { AiTaskStatus, useEditorStore } from '../store';
 
-// 对话面板（方案第 3 节）：自然语言输入 → 模拟 AI 管线 → 命令批预览 → 确认/放弃
+// 对话面板（方案第 3 节）：自然语言输入 → AI 管线 → 命令批预览 → 确认/放弃
+// - 生成阶段分路：配置完整且未开「离线演示」→ 调真实模型 API（OpenAI 兼容）
+//   开了「离线演示」→ 走内置模拟回包；未配置 → 友好提示，不进入管线
 // - 输入框处理中文输入法组合期（composition），组合中不发送
 // - 请求串行：一次只处理一个事务（方案：一个 AI 请求 = 一个事务 = 一条历史）
 // - 失败后允许继续输入：error / cancelled 不锁输入框（否则一次失败就卡死）
+// - 取消请求会 abort 正在进行的网络请求（fetch AbortSignal）
 
 const STATUS_TEXT: Record<AiTaskStatus, string> = {
   idle: '',
@@ -40,6 +45,7 @@ export function ChatPanel() {
   const [input, setInput] = useState('');
   const composingRef = useRef(false); // 输入法组合期标记
   const runIdRef = useRef(0); // 请求令牌：取消/重发时让旧请求的后续步骤失效
+  const abortRef = useRef<AbortController | null>(null); // 正在进行的网络请求
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // 新消息或状态变化时滚到底
@@ -55,6 +61,46 @@ export function ChatPanel() {
     aiStatus === 'validating' ||
     aiStatus === 'applying';
 
+  // 校验 + 预览：真实 API 与模拟回包共用同一段收尾逻辑
+  // - 基线漂移：请求发出后场景被改过 → 整批作废重试（一个事务对应一个稳定基线）
+  // - applyBatch dry-run：结构/引用/参数非法 → 拒绝，不进预览
+  // - 空操作（闲聊、说明）→ 只回文本，不进预览
+  const finalize = (batch: CommandBatch) => {
+    setAiStatus('validating');
+    const store = useEditorStore.getState();
+    if (store.doc.revision !== batch.baseRevision) {
+      const msg = '场景在请求期间已被修改，事务作废，请重试。';
+      setAiError(msg);
+      setAiStatus('error');
+      addAssistantMessage(msg, undefined, msg);
+      return;
+    }
+    const result = applyBatch(store.doc, { operations: batch.operations });
+    if (result.errors.length > 0) {
+      const msg = `命令批被拒绝（未应用到场景）：${result.errors.map((e) => e.message).join('；')}`;
+      setAiError(msg);
+      setAiStatus('error');
+      addAssistantMessage(msg, undefined, msg);
+      return;
+    }
+
+    // 空操作（如闲聊回复）：只回说明文本，不进入预览
+    if (batch.operations.length === 0) {
+      setAiError(null);
+      setAiStatus('idle');
+      addAssistantMessage(batch.summary);
+      return;
+    }
+
+    // 预演成功：视口/对象树/属性面板切到预览副本，等用户确认
+    setPendingBatch(batch);
+    setPendingResult(result);
+    setPreviewDoc(result.doc);
+    setAiError(null);
+    setAiStatus('previewing');
+    addAssistantMessage(batch.summary, batch);
+  };
+
   const send = async () => {
     const text = input.trim();
     if (!text || busy) return;
@@ -66,60 +112,90 @@ export function ChatPanel() {
     const myRun = ++runIdRef.current;
     const alive = () => runIdRef.current === myRun;
 
+    // 配置分路：未配置 → 引导去工具栏配置；离线演示 → 模拟回包；其余 → 真实 API
+    const cfg: ModelConfig | null = useEditorStore.getState().aiConfig;
+    if (!cfg || cfg.useMock) {
+      if (!cfg) {
+        addAssistantMessage(
+          '还没有配置模型。请点左上角工具栏「模型配置」，填入 API 地址、API Key 和模型名（兼容 OpenAI 协议的服务都行），保存后就能用真实模型生成了。',
+        );
+        return;
+      }
+      // 离线演示模式：模拟回包（不联网）
+      try {
+        setAiStatus('capturing');
+        await sleep(180);
+        if (!alive()) return;
+        setAiStatus('context');
+        await sleep(180);
+        if (!alive()) return;
+        setAiStatus('generating');
+        await sleep(450);
+        if (!alive()) return;
+
+        // 模拟回包：解析中文意图 → 命令批（含 projectId / baseRevision / 选择）
+        const batch = buildBatch(text);
+        if (!alive()) return;
+        finalize(batch);
+      } catch (err) {
+        if (!alive()) return;
+        const msg = `请求异常：${err instanceof Error ? err.message : String(err)}`;
+        setAiError(msg);
+        setAiStatus('error');
+        addAssistantMessage(msg, undefined, msg);
+      }
+      return;
+    }
+
+    // 真实模型路径
+    const missing = [
+      !cfg.baseURL.trim() && 'API 地址',
+      !cfg.apiKey.trim() && 'API Key',
+      !cfg.model.trim() && '模型名',
+    ].filter(Boolean);
+    if (missing.length > 0) {
+      addAssistantMessage(
+        `模型配置不完整（缺${missing.join('、')}）。请点工具栏「模型配置」补全后再发送。`,
+      );
+      return;
+    }
+
     try {
-      // 模拟 AI 管线各阶段（P0 模拟回包；P2 换成 OpenAI 兼容适配器，阶段状态机不变）
+      // 速记本请求的基线：校验时发现漂移就整批作废
       setAiStatus('capturing');
-      await sleep(180);
+      const baseRevision = useEditorStore.getState().doc.revision;
+      const selection = [...useEditorStore.getState().selection];
+      await sleep(60);
       if (!alive()) return;
+
+      // 组织场景上下文（现有节点清单 + 选中对象）随提示词发给模型
       setAiStatus('context');
-      await sleep(180);
+      const ctx = buildSceneContext(useEditorStore.getState().doc, selection);
+      await sleep(60);
       if (!alive()) return;
+
+      // 生成：POST {baseURL}/chat/completions；取消即 abort
       setAiStatus('generating');
-      await sleep(450);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const generated = await generateBatch(text, cfg, ctx, controller.signal);
+      abortRef.current = null;
       if (!alive()) return;
 
-      // 生成：模拟模型解析中文意图 → 命令批（含 projectId / baseRevision / 选择）
-      const batch = buildBatch(text);
-
-      setAiStatus('validating');
-      await sleep(220);
+      // 组装事务：请求 ID / 基线 / 摘要都由应用侧管理，模型只负责内容
+      const batch: CommandBatch = {
+        requestId: makeId(),
+        projectId: useEditorStore.getState().doc.projectId,
+        baseRevision,
+        selectedIds: selection,
+        summary: generated.summary,
+        operations: generated.operations,
+      };
       if (!alive()) return;
-
-      // 校验：在最新文档上 dry-run（请求发出后已过数秒，基线可能已变）
-      const store = useEditorStore.getState();
-      if (store.doc.revision !== batch.baseRevision) {
-        const msg = '场景在请求期间已被修改，事务作废，请重试。';
-        setAiError(msg);
-        setAiStatus('error');
-        addAssistantMessage(msg, undefined, msg);
-        return;
-      }
-      const result = applyBatch(store.doc, { operations: batch.operations });
-      if (result.errors.length > 0) {
-        const msg = `命令批被拒绝（未应用到场景）：${result.errors.map((e) => e.message).join('；')}`;
-        setAiError(msg);
-        setAiStatus('error');
-        addAssistantMessage(msg, undefined, msg);
-        return;
-      }
-
-      // 空操作（如未识别指令）：只回说明文本，不进入预览
-      if (batch.operations.length === 0) {
-        setAiError(null);
-        setAiStatus('idle');
-        addAssistantMessage(batch.summary);
-        return;
-      }
-
-      // 预演成功：视口/对象树/属性面板切到预览副本，等用户确认
-      setPendingBatch(batch);
-      setPendingResult(result);
-      setPreviewDoc(result.doc);
-      setAiError(null);
-      setAiStatus('previewing');
-      addAssistantMessage(batch.summary, batch);
+      finalize(batch);
     } catch (err) {
-      if (!alive()) return;
+      abortRef.current = null;
+      if (!alive()) return; // 被取消的请求不报错
       const msg = `请求异常：${err instanceof Error ? err.message : String(err)}`;
       setAiError(msg);
       setAiStatus('error');
@@ -130,6 +206,8 @@ export function ChatPanel() {
   // 取消进行中的请求（预览态用「放弃」按钮，不走这里）
   const cancelRequest = () => {
     runIdRef.current++; // 旧请求的后续步骤全部作废
+    abortRef.current?.abort(); // 掐断正在等待的网络响应
+    abortRef.current = null;
     setAiStatus('cancelled');
     setTimeout(() => {
       if (useEditorStore.getState().aiStatus === 'cancelled') setAiStatus('idle');

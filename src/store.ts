@@ -69,6 +69,8 @@ interface EditorState {
   pendingBatch: CommandBatch | null; // 预览中的批次
   pendingResult: ExecutionResult | null; // 预演结果：确认后原样提交（新建节点 ID 与预览一致）
   previewDoc: SceneDocument | null; // 预览期间驱动视口/面板的副本
+  aiConfig: ModelConfig | null; // 模型 API 配置（baseURL / apiKey / model / useMock）
+  setAiConfig: (cfg: ModelConfig | null) => void;
   aiError: string | null;
 
   // 应用偏好
@@ -106,6 +108,22 @@ function pushHistory(past: HistoryEntry[], entry: HistoryEntry): HistoryEntry[] 
   return next;
 }
 
+// 模型配置持久化：localStorage（桌面单用户应用；API Key 明文本地存储，
+// P3 可升级到系统密钥链 / Tauri Stronghold）
+const CONFIG_KEY = 'chat3d.modelConfig';
+import type { ModelConfig } from './ai/provider';
+function loadConfig(): ModelConfig | null {
+  try {
+    const s = localStorage.getItem(CONFIG_KEY);
+    if (!s) return null;
+    const c = JSON.parse(s) as Partial<ModelConfig>;
+    if (typeof c.baseURL !== 'string' || typeof c.apiKey !== 'string' || typeof c.model !== 'string') return null;
+    return { baseURL: c.baseURL, apiKey: c.apiKey, model: c.model, useMock: c.useMock === true };
+  } catch {
+    return null;
+  }
+}
+
 export const useEditorStore = create<EditorState>((set, get) => ({
   doc: createInitialDoc(),
   past: [],
@@ -117,6 +135,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   pendingBatch: null,
   pendingResult: null,
   previewDoc: null,
+  aiConfig: loadConfig(),
+
+  setAiConfig: (cfg) => {
+    set({ aiConfig: cfg });
+    try {
+      if (cfg) localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+      else localStorage.removeItem(CONFIG_KEY);
+    } catch {
+      // 存储失败不阻塞使用
+    }
+  },
   aiError: null,
   displayUnit: 'm',
 

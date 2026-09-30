@@ -232,7 +232,15 @@ function findNode(doc: SceneDocument, id: string): SceneNode | undefined {
   return doc.nodes.find((n) => n.id === id);
 }
 
-export function applyCommand(doc: SceneDocument, op: Command): { doc: SceneDocument; inverse?: CommandWithInverse['before']; createdIds?: string[]; error?: Error } {
+export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<string, string> = new Map()): { doc: SceneDocument; inverse?: CommandWithInverse['before']; createdIds?: string[]; error?: Error } {
+  // tempId 解析：模型在同一批次里用 tempId 引用前面创建的节点，这里换成真实 ID
+  if ('targetId' in op && op.targetId && tempIdMap.has(op.targetId)) {
+    op = { ...op, targetId: tempIdMap.get(op.targetId)! } as Command;
+  }
+  const rawParentId = 'parentId' in op ? op.parentId : null;
+  if (rawParentId && tempIdMap.has(rawParentId)) {
+    op = { ...op, parentId: tempIdMap.get(rawParentId)! } as Command;
+  }
   // 目标存在性
   if ('targetId' in op) {
     if (!findNode(doc, op.targetId)) {
@@ -265,6 +273,7 @@ export function applyCommand(doc: SceneDocument, op: Command): { doc: SceneDocum
   switch (op.op) {
     case 'createPrimitive': {
       const id = makeId();
+      if (op.tempId) tempIdMap.set(op.tempId, id);
       createdIds = [id];
       const node: SceneNode = {
         id,
@@ -382,10 +391,10 @@ export function applyBatch(doc: SceneDocument, batch: { operations: Command[] })
     errors.push(new Error(`新增节点估计 ${cost.newNodes} 超出预算 ${DEFAULT_BUDGET.maxNewNodes}`));
     return { doc, applied, errors };
   }
-
   let current = doc;
+  const tempIdMap = new Map<string, string>(); // 同批次内 tempId → 真实 ID
   for (const op of batch.operations) {
-    const r = applyCommand(current, op);
+    const r = applyCommand(current, op, tempIdMap);
     if (r.error) {
       errors.push(new Error(`操作 ${op.op} 失败: ${r.error.message}`));
       break; // 整批拒绝，current 不写回，正式场景与撤销栈都不变化

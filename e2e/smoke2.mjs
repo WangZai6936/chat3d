@@ -21,6 +21,13 @@ const ta = page.locator('textarea');
 await ta.waitFor({ timeout: 10000 });
 await sleep(800);
 
+// 未配置模型时默认不生成：显式打开离线演示模式（模拟回包）跑后续冒烟
+await page.evaluate(async () => {
+  const m = await import('/src/store.ts');
+  m.useEditorStore.getState().setAiConfig({ baseURL: '', apiKey: '', model: '', useMock: true });
+});
+await sleep(300);
+
 // ---- 闲聊 ----
 await ta.fill('你好啊');
 await ta.press('Enter');

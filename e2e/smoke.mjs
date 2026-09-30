@@ -42,6 +42,22 @@ const undoBtn = page.getByRole('button', { name: '↺ 撤销' });
 ok('空场景：撤销按钮禁用', await undoBtn.isDisabled());
 await page.screenshot({ path: `${SHOTS}/empty.png` });
 
+// ---- 未配置模型时的引导（默认不内置生成）----
+ok('工具栏：显示「模型配置」按钮', (await page.getByRole('button', { name: '模型配置' }).isVisible()));
+ok('工具栏：显示「未配置模型」角标', (await page.getByText('未配置模型').isVisible()));
+await ta.fill('创建一个工作台');
+await ta.press('Enter');
+await sleep(1000);
+ok('未配置：助手引导去「模型配置」', await page.getByText(/还没有配置模型/).isVisible());
+
+// ---- 打开离线演示模式（模拟回包），恢复生成链路 ----
+await page.evaluate(async () => {
+  const m = await import('/src/store.ts');
+  m.useEditorStore.getState().setAiConfig({ baseURL: '', apiKey: '', model: '', useMock: true });
+});
+await sleep(300);
+ok('开启演示模式后：角标变为演示模式', (await page.getByText('演示模式（模拟回包）').isVisible()));
+
 // ---- 发送消息 ----
 await ta.fill('创建一个工作台');
 await ta.press('Enter');

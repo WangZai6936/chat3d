@@ -1,9 +1,12 @@
 // 应用外壳（方案第 2 节四区布局）：顶部工具栏 + 左对象树/属性 + 中视口 + 右对话
 // React 只画壳子与列表类 UI；Three.js 视口保持命令式（决策 #1）
 // 对话区放右侧整高：消息上下文完整可见（早期版本放底部，只能看到一两行）
+// 工具栏「模型配置」打开 SettingsDialog：baseURL/apiKey/model 存本机，对话生成走真实 API
+import { useState } from 'react';
 import { ChatPanel } from './ui/ChatPanel';
 import { ObjectTree } from './ui/ObjectTree';
 import { PropertiesPanel } from './ui/PropertiesPanel';
+import { SettingsDialog } from './ui/SettingsDialog';
 import { ViewportPanel } from './ui/ViewportPanel';
 import { useEditorStore, useDisplayDoc } from './store';
 
@@ -13,8 +16,18 @@ export default function App() {
   const canUndo = useEditorStore((s) => s.past.length > 0);
   const canRedo = useEditorStore((s) => s.future.length > 0);
   const dirty = useEditorStore((s) => s.dirty);
+  const aiConfig = useEditorStore((s) => s.aiConfig);
   const nodeCount = useDisplayDoc().nodes.length;
   const previewing = useEditorStore((s) => s.aiStatus === 'previewing');
+
+  const [showSettings, setShowSettings] = useState(false);
+
+  // 模式角标：演示模式 / 已配置模型名 / 未配置
+  const modeBadge = aiConfig
+    ? aiConfig.useMock
+      ? { text: '演示模式（模拟回包）', cls: 'text-amber-400' }
+      : { text: `模型：${aiConfig.model}`, cls: 'text-emerald-400' }
+    : { text: '未配置模型', cls: 'text-red-400' };
 
   return (
     <div className="h-screen w-screen flex flex-col bg-[#1b1e23] text-gray-100 overflow-hidden">
@@ -36,6 +49,12 @@ export default function App() {
         <ToolButton label="↻ 重做" onClick={redo} disabled={!canRedo || previewing} title="重做" />
 
         <div className="flex-1" />
+
+        {/* 模型状态角标 */}
+        <span className={`text-xs mr-1 ${modeBadge.cls}`}>{modeBadge.text}</span>
+        <ToolButton label="模型配置" onClick={() => setShowSettings(true)} title="配置模型 API（OpenAI 兼容）" />
+
+        <div className="w-px h-5 bg-white/10 mx-1" />
 
         {/* 状态角标 */}
         {previewing && (
@@ -64,6 +83,8 @@ export default function App() {
           <ChatPanel />
         </aside>
       </div>
+
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
