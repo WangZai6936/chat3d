@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# chat3d build & test artifacts
+src-tauri/target
+e2e/shots
+*.tmp.ps1

@@ -261,10 +261,11 @@ export function applyCommand(doc: SceneDocument, op: Command): { doc: SceneDocum
   const beforeSnapshot = 'targetId' in op ? snapshotAffected(doc, op) : { nodes: [], materialIds: [] };
 
   let createdIds: string[] | undefined;
-  case 'createPrimitive': {
-    const id = makeId();
-    createdIds = [id];
+
+  switch (op.op) {
+    case 'createPrimitive': {
       const id = makeId();
+      createdIds = [id];
       const node: SceneNode = {
         id,
         parentId: op.parentId ?? null,
@@ -343,7 +344,7 @@ export function applyCommand(doc: SceneDocument, op: Command): { doc: SceneDocum
   if (errs.length > 0) {
     return { doc, error: new Error(`提交后文档校验失败: ${errs.map((e) => e.message).join('; ')}`) };
   }
-  return { doc: newDoc, inverse: beforeSnapshot };
+  return { doc: newDoc, inverse: beforeSnapshot, createdIds };
 }
 
 function findNodeInList(nodes: SceneNode[], id: string): SceneNode | undefined {
@@ -357,6 +358,13 @@ function defaultMaterialId(doc: SceneDocument): string | undefined {
 function snapshotAffected(doc: SceneDocument, op: Command): { nodes: SceneNode[]; materialIds: string[] } {
   const ids = new Set(affectedNodeIds(op, doc));
   const nodes = doc.nodes.filter((n) => ids.has(n.id)).map(cloneNode);
+  const materialIds = Array.from(new Set(nodes.map((n) => n.materialId).filter((m): m is string => !!m)));
+  return { nodes, materialIds };
+}
+
+function snapshotIds(doc: SceneDocument, ids: string[]): { nodes: SceneNode[]; materialIds: string[] } {
+  const set = new Set(ids);
+  const nodes = doc.nodes.filter((n) => set.has(n.id)).map(cloneNode);
   const materialIds = Array.from(new Set(nodes.map((n) => n.materialId).filter((m): m is string => !!m)));
   return { nodes, materialIds };
 }
@@ -384,7 +392,9 @@ export function applyBatch(doc: SceneDocument, batch: { operations: Command[] })
     }
     current = r.doc;
     if (r.inverse) {
-      applied.push({ command: op, before: r.inverse, after: snapshotAffected(current, op) });
+      // create 类命令没有「受影响」节点：创建结果用新节点 id 快照，撤销时才删得掉
+      const after = r.createdIds && r.createdIds.length > 0 ? snapshotIds(current, r.createdIds) : snapshotAffected(current, op);
+      applied.push({ command: op, before: r.inverse, after });
     }
   }
   if (errors.length > 0) {
