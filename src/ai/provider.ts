@@ -330,6 +330,26 @@ function cleanCommand(opType: string, op: Record<string, unknown>): Command | nu
 }
 
 // ============ 网络请求 ============
+// 统一取 fetch：Tauri 打包环境走 Rust 网络层（@tauri-apps/plugin-http），无 CORS 限制；
+// 浏览器/dev 环境退回全局 fetch（能否跨域由服务方 CORS 决定——discovery 等服务的
+// /models 接口不响应 CORS 预检，浏览器里会被拦，exe 里走 Rust 转发不受影响）
+let resolvedFetch: typeof fetch | null = null;
+async function getFetch(): Promise<typeof fetch> {
+  if (resolvedFetch) return resolvedFetch;
+  const tauriInternals = (globalThis as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+  if (tauriInternals) {
+    try {
+      const mod = await import('@tauri-apps/plugin-http');
+      resolvedFetch = mod.fetch as unknown as typeof fetch;
+      return resolvedFetch;
+    } catch {
+      // 插件加载失败（不应发生）时退回全局 fetch
+    }
+  }
+  resolvedFetch = globalThis.fetch;
+  return resolvedFetch;
+}
+
 export async function generateBatch(
   text: string,
   cfg: ModelConfig,
@@ -371,7 +391,8 @@ async function fetchChat(
   messages: ChatMessage[],
   signal?: AbortSignal,
 ): Promise<string> {
-  const res = await fetch(url, {
+  const f = await getFetch();
+  const res = await f(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -414,7 +435,8 @@ export async function testConnection(cfg: ModelConfig): Promise<{ ok: boolean; t
   if (!cfg.model.trim()) return { ok: false, text: '未配置模型名' };
   const url = `${base}/chat/completions`;
   try {
-    const res = await fetch(url, {
+    const f = await getFetch();
+    const res = await f(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -460,6 +482,41 @@ function httpHint(status: number): string {
       return '请求太频繁或额度已用完，稍后再试或更换 key';
     default:
       return '';
+  }
+}
+
+// 拉取服务方支持的模型列表（OpenAI 兼容协议 GET {baseURL}/models）
+// 配置对话框用它做下拉选择；服务方不支持该接口时返回空列表+原因，调用方退回手动输入
+export async function fetchModels(cfg: ModelConfig): Promise<{ models: string[]; error?: string }> {
+  const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
+  if (!base) return { models: [], error: '未配置 API 地址（baseURL）' };
+  if (!cfg.apiKey.trim()) return { models: [], error: '未配置 API Key' };
+  try {
+    const f = await getFetch();
+    const res = await f(`${base}/models`, {
+      headers: { Authorization: `Bearer ${cfg.apiKey.trim()}` },
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      return { models: [], error: `HTTP ${res.status}：${httpHint(res.status)}${detail ? `（服务方返回：${detail.slice(0, 120)}）` : ''}` };
+    }
+    const data = (await res.json()) as unknown;
+    // 标准格式是 {data:[{id}]}；个别服务直接返回数组或 {models:[...]}
+    const arr: unknown[] = Array.isArray(data)
+      ? data
+      : Array.isArray((data as { data?: unknown[] })?.data)
+        ? (data as { data: unknown[] }).data
+        : Array.isArray((data as { models?: unknown[] })?.models)
+          ? (data as { models?: unknown[] }).models ?? []
+          : [];
+    const ids = arr
+      .map((m) => (typeof m === 'string' ? m : (m as { id?: unknown })?.id))
+      .filter((s): s is string => typeof s === 'string' && s.trim() !== '')
+      .map((s) => s.trim());
+    if (ids.length === 0) return { models: [], error: '接口返回的模型列表为空（该服务可能不支持 /models 列表）' };
+    return { models: ids };
+  } catch (e) {
+    return { models: [], error: `请求没发出去：${e instanceof Error ? e.message : String(e)}（可能是地址错误或网络不通）` };
   }
 }
 

@@ -37,7 +37,7 @@ await dialog.locator('input[type="password"]').fill(cfg.apiKey);
 await dialog.locator('input[type="text"]').nth(1).fill(cfg.model);
 await dialog.getByRole('button', { name: '测试连接' }).click();
 
-const msg = dialog.locator('.text-xs.rounded');
+const msg = dialog.locator('[data-testid="test-result"]');
 await msg.waitFor({ timeout: 30000 });
 await sleep(300);
 const testText = (await msg.textContent()) ?? '';
@@ -49,6 +49,21 @@ await dialog.getByRole('button', { name: '保存' }).click();
 await sleep(500);
 const badge = await page.locator('body').textContent() ?? '';
 ok('角标显示模型名', badge.includes('模型：') && badge.includes(cfg.model));
+// 3.5 重新打开对话框：已保存配置下应自动尝试拉取模型列表
+await page.getByRole('button', { name: '模型配置' }).click();
+await sleep(400);
+await dialog.waitFor({ timeout: 5000 });
+await dialog.locator('#chat3d-model-options option').first().waitFor({ timeout: 8000 }).catch(() => {});
+const dialogText = (await dialog.textContent() ?? '');
+const modelOptions = await dialog.locator('#chat3d-model-options option').count();
+const fetched = dialogText.includes('已获取');
+const fetchDegraded = dialogText.includes('模型列表获取失败');
+// 浏览器里 /models 常被 CORS 拦截，预期出现降级提示；exe 走 Rust 网络层应拿到列表
+ok(`模型列表自动获取（${modelOptions} 个，${fetched ? '成功' : fetchDegraded ? 'CORS 降级提示' : '无响应'}）`, fetched || fetchDegraded);
+// 从列表里选模型（模拟 datalist 点选的最终状态）
+await dialog.locator('input[type="text"]').nth(1).fill(cfg.model);
+await dialog.getByRole('button', { name: '取消' }).click();
+await sleep(300);
 
 // 4. 真实生成一次
 await page.locator('textarea').fill('创建一个工作台，台面 1.6m x 0.8m，高 0.75m，四条方腿');
