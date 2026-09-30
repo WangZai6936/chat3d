@@ -8,8 +8,9 @@ import { Material, Quaternion, SceneDocument, SceneNode, SCHEMA_VERSION, Vec3 } 
 import { makeId } from './util/ids';
 
 // 方案第 7 节托管项目目录的默认材质
-const MAT_GRAY: Material = { id: 'mat_gray', baseColor: '#9099A4', roughness: 0.6, metalness: 0.2 };
-const MAT_BLUE: Material = { id: 'mat_blue', baseColor: '#3B6EA5', roughness: 0.5, metalness: 0.3 };
+// 喷漆铝合金/钢板质感：降饱和、提金属度，配合环境贴图反射出工业质感
+const MAT_GRAY: Material = { id: 'mat_gray', baseColor: '#A5ABB4', roughness: 0.5, metalness: 0.35 };
+const MAT_BLUE: Material = { id: 'mat_blue', baseColor: '#3F6BA0', roughness: 0.5, metalness: 0.35 };
 
 // 历史限制：条数与字节双计算（方案第 6 节）
 const MAX_HISTORY_ENTRIES = 200;

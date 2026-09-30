@@ -2,7 +2,9 @@
 // - Scene DSL 文档是唯一可信来源；Three.js 对象是其渲染结果，不作为数据源
 // - 按需渲染：相机/选择/几何变化时才刷新
 // - 严格资源生命周期：geometry/material/texture 引用计数，dispose 不自动释放共享纹理
+// - 渲染质感：PMREM 室内环境贴图（反射+补光）+ ACES 色调映射 + 阴影地面 + 雾 + 渐变背景
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { Geometry, Material, SceneDocument, SceneNode } from '../domain/types';
 
 interface NodeResources {
@@ -29,6 +31,11 @@ export class Viewport {
   private readonly host: HTMLElement;
   private readonly onPick: (nodeId: string | null) => void;
   private resizeObserver: ResizeObserver | null = null;
+  // 视口固有资源（不随场景文档重建）
+  private envTexture: THREE.Texture | null = null;
+  private backgroundTexture: THREE.CanvasTexture | null = null;
+  private floorGeometry: THREE.PlaneGeometry | null = null;
+  private floorMaterial: THREE.MeshStandardMaterial | null = null;
 
   // 世界单位：米。相机近远裁剪面按工业设备场景尺度设定。
   constructor(host: HTMLElement, onPick: (nodeId: string | null) => void) {
@@ -39,56 +46,117 @@ export class Viewport {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // 方案 11 节：限制高 DPI 像素比
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // ACES 电影级色调映射：高光不截断、中间调更扎实，告别「塑料玩具」感
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 0.85;
     host.appendChild(this.renderer.domElement);
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
     this.renderer.domElement.style.display = 'block';
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#202428');
+    this.backgroundTexture = this.createGradientBackground();
+    this.scene.background = this.backgroundTexture;
+    // 线性雾：近处（8m）清晰、远处（60m）融进雾色，大地面不再「平到天边」
+    this.scene.fog = new THREE.Fog('#2e3640', 8, 60);
 
-    this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 2000);
+    // 窄视角（45°）：透视畸变更小，更接近观察工业设备的视觉
+    this.camera = new THREE.PerspectiveCamera(45, 1, 0.05, 2000);
     this.updateOrbitCamera();
 
-    this.defaultMaterial = new THREE.MeshStandardMaterial({ color: '#9099A4', roughness: 0.6, metalness: 0.2 });
+    this.defaultMaterial = new THREE.MeshStandardMaterial({
+      color: '#A9AEB6',
+      roughness: 0.45,
+      metalness: 0.35,
+    });
 
+    this.setupEnvironment();
     this.setupLights();
-    this.setupGrid();
+    this.setupGround();
     this.setupPicking();
 
     this.resizeObserver = new ResizeObserver(() => this.markDirty());
     this.resizeObserver.observe(host);
   }
 
-  // 方案：环境光 + 主方向光（带阴影）+ 补光
-  private setupLights(): void {
-    const ambient = new THREE.AmbientLight('#ffffff', 0.55);
-    this.scene.add(ambient);
+  // 垂直渐变背景：顶部深蓝灰、地平线偏暖，替代原来的纯色黑底
+  private createGradientBackground(): THREE.CanvasTexture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 8;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const grad = ctx.createLinearGradient(0, 0, 0, 256);
+    grad.addColorStop(0, '#171b21');
+    grad.addColorStop(0.55, '#232b34');
+    grad.addColorStop(1, '#3a4551');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    return tex;
+  }
 
-    const dir = new THREE.DirectionalLight('#ffffff', 1.1);
-    dir.position.set(6, 10, 4);
+  // 环境光照：RoomEnvironment 经 PMREM 预滤波后作为场景环境贴图
+  // - scene.environment 自动给所有 PBR 材质提供柔和补光与真实反射
+  // - 金属面不再「死平」，漆面有了漫反射层次
+  private setupEnvironment(): void {
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    const envScene = new RoomEnvironment();
+    this.envTexture = pmrem.fromScene(envScene, 0.04).texture;
+    this.scene.environment = this.envTexture;
+    pmrem.dispose();
+  }
+
+  // 半球补光 + 主方向光（带阴影）+ 冷色轮廓光
+  private setupLights(): void {
+    const hemi = new THREE.HemisphereLight('#dce8ff', '#1f1f1f', 0.35);
+    this.scene.add(hemi);
+
+    // 暖白主光：模拟厂房高侧窗，投影方向稳定、边缘柔和
+    const dir = new THREE.DirectionalLight('#fff4e6', 1.4);
+    dir.position.set(10, 14, 8);
     dir.castShadow = true;
     dir.shadow.mapSize.width = 2048;
     dir.shadow.mapSize.height = 2048;
     dir.shadow.camera.near = 0.5;
     dir.shadow.camera.far = 60;
-    dir.shadow.camera.left = -20;
-    dir.shadow.camera.right = 20;
-    dir.shadow.camera.top = 20;
-    dir.shadow.camera.bottom = -20;
+    dir.shadow.camera.left = -14;
+    dir.shadow.camera.right = 14;
+    dir.shadow.camera.top = 14;
+    dir.shadow.camera.bottom = -14;
+    dir.shadow.bias = -0.0002;
+    dir.shadow.normalBias = 0.02;
     this.scene.add(dir);
 
-    const fill = new THREE.DirectionalLight('#bcd0ff', 0.35);
-    fill.position.set(-5, 4, -6);
-    this.scene.add(fill);
+    // 冷色逆光：把物体轮廓从暗背景里剌出来
+    const rim = new THREE.DirectionalLight('#a8c4ff', 0.6);
+    rim.position.set(-8, 6, -10);
+    this.scene.add(rim);
   }
 
-  private setupGrid(): void {
-    // 网格地面：1m 格子，便于目测尺寸
-    const grid = new THREE.GridHelper(40, 40, '#4a5568', '#3a424d');
+  // 地面：接收阴影的哑光地面 + 1m 网格（尺度参照）
+  private setupGround(): void {
+    this.floorGeometry = new THREE.PlaneGeometry(200, 200);
+    this.floorMaterial = new THREE.MeshStandardMaterial({
+      color: '#2b3037',
+      roughness: 0.92,
+      metalness: 0.0,
+      envMapIntensity: 0.4,
+    });
+    const floor = new THREE.Mesh(this.floorGeometry, this.floorMaterial);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    floor.name = '__floor';
+    this.scene.add(floor);
+
+    const grid = new THREE.GridHelper(60, 60, '#5a6672', '#414a55');
     (grid.material as THREE.Material).transparent = true;
-    (grid.material as THREE.Material).opacity = 0.7;
-    grid.position.y = 0;
+    (grid.material as THREE.Material).opacity = 0.55;
+    grid.position.y = 0.002; // 抬高 2mm 避免 Z-fighting
+    grid.name = '__grid';
     this.scene.add(grid);
   }
 
@@ -215,34 +283,36 @@ export class Viewport {
 
   // 几何构建：几何默认以局部原点为中心（方案第 4 节）
   private buildGeometry(g: Geometry): THREE.BufferGeometry {
-    const key = JSON.stringify(g);
+    // 渲染端平滑度下限：DSL 允许低细分，但渲染一律提到工业展示级
+    const smooth = this.smoothGeometry(g);
+    const key = JSON.stringify(smooth);
     const cached = this.sharedGeometryCache.get(key);
     if (cached) return cached;
 
     let geo: THREE.BufferGeometry;
-    switch (g.type) {
+    switch (smooth.type) {
       case 'box': {
-        const p = g.params;
+        const p = smooth.params;
         geo = new THREE.BoxGeometry(p.width, p.height, p.depth);
         break;
       }
       case 'sphere': {
-        const p = g.params;
+        const p = smooth.params;
         geo = new THREE.SphereGeometry(p.radius, p.widthSegments, p.heightSegments);
         break;
       }
       case 'cylinder': {
-        const p = g.params;
+        const p = smooth.params;
         geo = new THREE.CylinderGeometry(p.radiusTop, p.radiusBottom, p.height, p.radialSegments);
         break;
       }
       case 'cone': {
-        const p = g.params;
+        const p = smooth.params;
         geo = new THREE.ConeGeometry(p.radius, p.height, p.radialSegments);
         break;
       }
       case 'plane': {
-        const p = g.params;
+        const p = smooth.params;
         geo = new THREE.PlaneGeometry(p.width, p.depth, p.widthSegments, p.depthSegments);
         break;
       }
@@ -253,6 +323,27 @@ export class Viewport {
     }
     this.sharedGeometryCache.set(key, geo);
     return geo;
+  }
+
+  // 曲面段数下限：球 48×24、柱/锥 48 段。直线体（box/plane）不变
+  private smoothGeometry(g: Geometry): Geometry {
+    switch (g.type) {
+      case 'sphere':
+        return {
+          ...g,
+          params: {
+            ...g.params,
+            widthSegments: Math.max(g.params.widthSegments, 48),
+            heightSegments: Math.max(g.params.heightSegments, 24),
+          },
+        };
+      case 'cylinder':
+        return { ...g, params: { ...g.params, radialSegments: Math.max(g.params.radialSegments, 48) } };
+      case 'cone':
+        return { ...g, params: { ...g.params, radialSegments: Math.max(g.params.radialSegments, 48) } };
+      default:
+        return g;
+    }
   }
 
   private buildMaterial(materialId: string | undefined, doc: SceneDocument): THREE.MeshStandardMaterial {
@@ -330,6 +421,10 @@ export class Viewport {
     this.resizeObserver?.disconnect();
     this.disposeAllNodes();
     this.defaultMaterial.dispose();
+    this.envTexture?.dispose();
+    this.backgroundTexture?.dispose();
+    this.floorGeometry?.dispose();
+    this.floorMaterial?.dispose();
     this.renderer.dispose();
     if (this.renderer.domElement.parentElement === this.host) {
       this.host.removeChild(this.renderer.domElement);

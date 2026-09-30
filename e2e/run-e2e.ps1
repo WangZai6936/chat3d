@@ -30,33 +30,56 @@ $domCode = $LASTEXITCODE
 Write-Host "DOM assertion exit=$domCode"
 
 # ---- 3. canvas pixel analysis ----
+# viewport background is a gradient since the render-quality upgrade, so compare
+# screenshots against the empty-scene baseline pixel-by-pixel instead of a fixed bg color
 Add-Type -AssemblyName System.Drawing
-function NonBgCount($path) {
+function LoadSamples($path) {
   $b = New-Object System.Drawing.Bitmap($path)
-  $n = 0
-  for ($y = 0; $y -lt $b.Height; $y += 2) {
-    for ($x = 0; $x -lt $b.Width; $x += 2) {
+  $w = $b.Width; $h = $b.Height
+  # sample every 2px both axes => 1/4 of pixels
+  $samples = New-Object 'int[]' (($w / 2) * ($h / 2) * 3)
+  $i = 0
+  for ($y = 0; $y -lt $h; $y += 2) {
+    for ($x = 0; $x -lt $w; $x += 2) {
       $c = $b.GetPixel($x, $y)
-      if (-not ([Math]::Abs([int]$c.R - 32) -le 6 -and [Math]::Abs([int]$c.G - 36) -le 6 -and [Math]::Abs([int]$c.B - 40) -le 6)) { $n++ }
+      $samples[$i++] = [int]$c.R
+      $samples[$i++] = [int]$c.G
+      $samples[$i++] = [int]$c.B
     }
   }
-  $size = "$($b.Width)x$($b.Height)"
+  $size = "$w x $h"
   $b.Dispose()
-  return @{ n = $n; size = $size }
+  return @{ samples = $samples; size = $size; w = $w; h = $h; wstep = $w / 2 }
 }
-$empty = NonBgCount "$shots\canvas-empty.png"
-$preview = NonBgCount "$shots\canvas-preview.png"
-$undo = NonBgCount "$shots\canvas-undo.png"
-$redo = NonBgCount "$shots\canvas-redo.png"
-Write-Host ("canvas empty : {0} ({1})" -f $empty.n, $empty.size)
-Write-Host ("canvas preview: {0} (delta {1})" -f $preview.n, ($preview.n - $empty.n))
-Write-Host ("canvas undo  : {0} (delta {1})" -f $undo.n, ($undo.n - $empty.n))
-Write-Host ("canvas redo  : {0} (delta {1})" -f $redo.n, ($redo.n - $empty.n))
+function DiffCount($base, $shot, $tol) {
+  # both must be same size; returns count of sampled pixels that differ
+  $n = 0
+  $len = $base.samples.Length
+  for ($i = 0; $i -lt $len; $i += 3) {
+    $dr = [Math]::Abs($base.samples[$i] - $shot.samples[$i])
+    $dg = [Math]::Abs($base.samples[$i + 1] - $shot.samples[$i + 1])
+    $db = [Math]::Abs($base.samples[$i + 2] - $shot.samples[$i + 2])
+    if (($dr -gt $tol) -or ($dg -gt $tol) -or ($db -gt $tol)) { $n++ }
+  }
+  return $n
+}
+$empty = LoadSamples "$shots\canvas-empty.png"
+$preview = LoadSamples "$shots\canvas-preview.png"
+$undo = LoadSamples "$shots\canvas-undo.png"
+$redo = LoadSamples "$shots\canvas-redo.png"
+$tol = 10
+$dPreview = DiffCount $empty $preview $tol
+$dUndo = DiffCount $empty $undo $tol
+$dRedo = DiffCount $preview $redo $tol
+Write-Host ("canvas size : {0}" -f $empty.size)
+Write-Host ("canvas preview vs empty: {0}" -f $dPreview)
+Write-Host ("canvas undo   vs empty: {0}" -f $dUndo)
+Write-Host ("canvas redo   vs preview: {0}" -f $dRedo)
 
-# workbench geometry projected at low viewing angle is ~1-2% of viewport; key signal is state symmetry
-$p1 = $preview.n -ge $empty.n + 1000
-$p2 = [Math]::Abs($undo.n - $empty.n) -le 200
-$p3 = [Math]::Abs($redo.n - $preview.n) -le 200
+# workbench geometry projected at low viewing angle is a decent chunk of viewport; key signal is state symmetry
+$p1 = $dPreview -ge 1000
+$p2 = $dUndo -le 200
+$p3 = $dRedo -le 200
 if ($p1) { Write-Host 'PASS  preview: viewport renders workbench geometry' } else { Write-Host 'FAIL  preview: viewport renders workbench geometry' }
 if ($p2) { Write-Host 'PASS  undo: viewport back to empty scene' } else { Write-Host 'FAIL  undo: viewport back to empty scene' }
 if ($p3) { Write-Host 'PASS  redo: viewport re-renders workbench' } else { Write-Host 'FAIL  redo: viewport re-renders workbench' }
