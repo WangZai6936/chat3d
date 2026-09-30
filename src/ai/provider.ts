@@ -23,6 +23,15 @@ export interface GeneratedBatch {
   operations: Command[];
 }
 
+// OpenAI 兼容协议的多模态消息：user 消息可由文本段 + 图片段组成
+export type ContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } };
+export type ChatMessage = {
+  role: 'system' | 'user' | 'assistant';
+  content: string | ContentPart[];
+};
+
 // P0 已实现的命令集；模型若输出其他 op（rotate/scale/delete 等），解析层拦截
 const IMPLEMENTED_OPS = new Set([
   'createPrimitive',
@@ -55,6 +64,9 @@ function buildSystemPrompt(ctx: SceneContext): string {
 - Y 轴向上，单位是米，世界原点在场景中心。
 - 物体放置要符合物理常识：站在地上的物体底面 y=0（圆柱/桶放 y=半径或高度一半），桌面在桌腿上方。
 - 复杂设备请拆成多个基本体（桌面+4桌腿、4立柱+N层板 等），一次全部输出。
+
+# 图片
+用户可能附图作为参考。看图估算尺寸（认常见物体比例：人、门、托盘等），仍只输出上面的命令；不确定时给合理默认值，并在 summary 里注明「按图片估算」。
 
 # 输出格式（严格遵守）
 只输出一个 JSON 对象，不要 markdown 代码块、不要任何解释文字：
@@ -90,10 +102,18 @@ ${nodeLines}
 ${sel}`;
 }
 
-export function buildMessages(text: string, ctx: SceneContext) {
+export function buildMessages(text: string, ctx: SceneContext, images: string[] = []): ChatMessage[] {
+  const reminder = '\n\n（请只输出一个 JSON 命令批对象，不要 markdown 代码块或任何解释文字）';
+  // 有图时 user 消息走多模态数组（OpenAI 兼容协议）；无图保持纯文本（兼容所有模型）
+  const userContent: string | ContentPart[] = images.length
+    ? [
+        { type: 'text', text: text + reminder },
+        ...images.map((url): ContentPart => ({ type: 'image_url', image_url: { url } })),
+      ]
+    : text + reminder;
   return [
     { role: 'system', content: buildSystemPrompt(ctx) },
-    { role: 'user', content: `${text}\n\n（请只输出一个 JSON 命令批对象，不要 markdown 代码块或任何解释文字）` },
+    { role: 'user', content: userContent },
   ];
 }
 
@@ -272,6 +292,7 @@ export async function generateBatch(
   cfg: ModelConfig,
   ctx: SceneContext,
   signal?: AbortSignal,
+  images: string[] = [],
 ): Promise<GeneratedBatch> {
   const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
   if (!base) throw new Error('未配置 API 地址（baseURL）');
@@ -279,7 +300,7 @@ export async function generateBatch(
   if (!cfg.model.trim()) throw new Error('未配置模型名');
 
   const url = `${base}/chat/completions`;
-  const messages = buildMessages(text, ctx);
+  const messages = buildMessages(text, ctx, images);
 
   // 解析失败自动纠偏重试一次：把模型的错误回复顶回去，再强调格式
   let lastErr: Error | null = null;
@@ -304,7 +325,7 @@ export async function generateBatch(
 async function fetchChat(
   url: string,
   cfg: ModelConfig,
-  messages: { role: string; content: string }[],
+  messages: ChatMessage[],
   signal?: AbortSignal,
 ): Promise<string> {
   const res = await fetch(url, {

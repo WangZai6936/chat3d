@@ -84,6 +84,27 @@ await page.getByRole('button', { name: '确认应用' }).click();
 await sleep(400);
 ok('移动后：未保存角标更新', await page.getByText(/未保存/).isVisible());
 
+// ---- 图片附件：📎 选图 → 预览 → 空文字也能发送 ----
+const IMG = 'C:\\Users\\10071\\.pi-desktop\\scratch\\364d1615-5e59-4f46-bfcf-44ffabd0c66c\\chat3d-new.png';
+const fs = await import('node:fs');
+if (fs.existsSync(IMG)) {
+  const clipBtn = page.locator('button[title^="附图"]');
+  ok('图片：📎 按钮存在', await clipBtn.isVisible());
+  await ta.fill('');
+  const fileInput = page.locator('input[type="file"]');
+  await fileInput.setInputFiles(IMG);
+  await sleep(300);
+  ok('图片：选择后出现预览缩略图', await page.locator('img[alt="附件1"]').isVisible());
+  const sendBtn2 = page.getByRole('button', { name: '发送' });
+  ok('图片：空输入但有附件时发送可用', await sendBtn2.isEnabled());
+  await sendBtn2.click();
+  await sleep(400);
+  ok('图片：发出后用户消息记录在案', (await page.getByText('只发了图片，没有文字').first().isVisible()));
+  ok('图片：演示模式给出不看图提示', (await page.getByText(/离线演示模式不看图/).first().isVisible()));
+} else {
+  console.log('SKIP  图片附件用例（缺测试图片 ' + IMG + '）');
+}
+
 const failed = results.filter((r) => !r.pass);
 console.log(`\n==== ${results.length - failed.length}/${results.length} 项断言通过 ====`);
 if (failed.length) failed.forEach((r) => console.log('  - ' + r.name));
