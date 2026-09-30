@@ -1,5 +1,6 @@
-// 应用外壳（方案第 2 节四区布局）：顶部工具栏 + 左对象树 + 中视口 + 右属性 + 底对话
+// 应用外壳（方案第 2 节四区布局）：顶部工具栏 + 左对象树/属性 + 中视口 + 右对话
 // React 只画壳子与列表类 UI；Three.js 视口保持命令式（决策 #1）
+// 对话区放右侧整高：消息上下文完整可见（早期版本放底部，只能看到一两行）
 import { ChatPanel } from './ui/ChatPanel';
 import { ObjectTree } from './ui/ObjectTree';
 import { PropertiesPanel } from './ui/PropertiesPanel';
@@ -46,23 +47,23 @@ export default function App() {
         </span>
       </header>
 
-      {/* 主区：左 树 / 中 视口 / 右 属性 */}
+      {/* 主区：左 对象树/属性 · 中 视口 · 右 对话 */}
       <div className="flex-1 flex min-h-0">
-        <aside className="w-56 shrink-0 border-r border-black/40">
-          <ObjectTree />
+        <aside className="w-72 shrink-0 border-r border-black/40 flex flex-col">
+          <div className="flex-1 min-h-0">
+            <ObjectTree />
+          </div>
+          <div className="h-80 shrink-0 border-t border-black/40 overflow-auto">
+            <PropertiesPanel />
+          </div>
         </aside>
         <main className="flex-1 min-w-0 flex">
           <ViewportPanel />
         </main>
-        <aside className="w-64 shrink-0 border-l border-black/40">
-          <PropertiesPanel />
+        <aside className="w-[420px] shrink-0 border-l border-black/40">
+          <ChatPanel />
         </aside>
       </div>
-
-      {/* 底部对话区 */}
-      <footer className="h-56 shrink-0 border-t border-black/40">
-        <ChatPanel />
-      </footer>
     </div>
   );
 }

@@ -6,7 +6,7 @@ import { AiTaskStatus, useEditorStore } from '../store';
 // 对话面板（方案第 3 节）：自然语言输入 → 模拟 AI 管线 → 命令批预览 → 确认/放弃
 // - 输入框处理中文输入法组合期（composition），组合中不发送
 // - 请求串行：一次只处理一个事务（方案：一个 AI 请求 = 一个事务 = 一条历史）
-// - 状态机文案与后端阶段一一对应，P2 换真实适配器时这套 UI 不用改
+// - 失败后允许继续输入：error / cancelled 不锁输入框（否则一次失败就卡死）
 
 const STATUS_TEXT: Record<AiTaskStatus, string> = {
   idle: '',
@@ -48,13 +48,19 @@ export function ChatPanel() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length, aiStatus]);
 
-  const busy = aiStatus !== 'idle';
+  const busy =
+    aiStatus === 'capturing' ||
+    aiStatus === 'context' ||
+    aiStatus === 'generating' ||
+    aiStatus === 'validating' ||
+    aiStatus === 'applying';
 
   const send = async () => {
     const text = input.trim();
     if (!text || busy) return;
     setInput('');
     addUserMessage(text);
+    setAiError(null); // 新请求开始，清掉上一条错误
 
     // 本请求的令牌：被取消后后续 await 全部丢弃
     const myRun = ++runIdRef.current;
@@ -72,7 +78,7 @@ export function ChatPanel() {
       await sleep(450);
       if (!alive()) return;
 
-      // 生成：模拟模型解析中文意图 → 命令批（含 projectId / baseRevision / 选择快照）
+      // 生成：模拟模型解析中文意图 → 命令批（含 projectId / baseRevision / 选择）
       const batch = buildBatch(text);
 
       setAiStatus('validating');
@@ -187,7 +193,7 @@ export function ChatPanel() {
 
       {/* 状态行 + 预览确认条 */}
       <div className="border-t border-black/30 px-3 py-1 flex items-center gap-2 text-xs">
-        {busy && aiStatus !== 'previewing' && (
+        {busy && (
           <>
             <span className="inline-block w-3 h-3 rounded-full bg-amber-400 animate-pulse" />
             <span className="text-amber-300 flex-1">{STATUS_TEXT[aiStatus]}</span>
@@ -204,13 +210,13 @@ export function ChatPanel() {
             </span>
             <button
               onClick={confirmPending}
-              className="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-0.5 rounded"
+              className="bg-emerald-600 hover:bg-emerald-500 text-white text-xs px-3 py-0.5 rounded"
             >
               确认应用
             </button>
             <button
               onClick={discardPending}
-              className="bg-white/10 hover:bg-white/20 text-gray-200 px-3 py-0.5 rounded"
+              className="bg-white/10 hover:bg-white/20 text-gray-200 text-xs px-3 py-0.5 rounded"
             >
               放弃
             </button>
@@ -228,18 +234,25 @@ export function ChatPanel() {
       <div className="p-2 flex gap-2 border-t border-black/30 bg-[#252A31]">
         <textarea
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            // 失败状态下重新打字即清错：对话框始终可用
+            if (aiStatus === 'error' || aiStatus === 'cancelled') {
+              setAiStatus('idle');
+              setAiError(null);
+            }
+          }}
           onCompositionStart={() => (composingRef.current = true)}
           onCompositionEnd={() => (composingRef.current = false)}
           onKeyDown={(e) => {
             // Enter 发送，Shift+Enter 换行；输入法组合期（拼音候选）不发送
             if (e.key === 'Enter' && !e.shiftKey && !composingRef.current) {
               e.preventDefault();
-              void send();
+              if (!busy) void send();
             }
           }}
           disabled={busy}
-          rows={2}
+          rows={3}
           placeholder="描述要创建或修改的对象…（Enter 发送，Shift+Enter 换行）"
           className="flex-1 bg-black/30 border border-white/10 rounded px-3 py-2 text-sm resize-none focus:outline-none focus:border-blue-400 disabled:opacity-50"
         />
