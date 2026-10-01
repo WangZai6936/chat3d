@@ -310,6 +310,12 @@ function restoreFromBefore(doc: SceneDocument, entry: HistoryEntry): SceneDocume
     const before = new Map(item.before.nodes.map((n) => [n.id, n]));
     const afterIds = new Set(item.after.nodes.map((n) => n.id));
     nodes = nodes.filter((n) => !afterIds.has(n.id) || before.has(n.id));
+    if(item.before.nodeIndices){
+      nodes=nodes.filter(n=>!before.has(n.id));
+      const indices=item.before.nodeIndices;
+      for(const n of [...item.before.nodes].sort((a,b)=>(indices[a.id]??0)-(indices[b.id]??0)))nodes.splice(Math.min(indices[n.id]??nodes.length,nodes.length),0,cloneSnapshot(n));
+      continue;
+    }
     const existing = new Set(nodes.map((n) => n.id));
     nodes = nodes.map((n) => before.has(n.id) ? cloneSnapshot(before.get(n.id)!) : n);
     for (const n of item.before.nodes) {

@@ -1,5 +1,6 @@
 import { WORKSHOP_MATERIALS } from '../workshop/materials';
-import { Material, SceneDocument } from './types';
+import { Material, SceneDocument, type SceneRole } from './types';
+export const SCENE_ROLE_MATERIALS:Record<SceneRole,string>={equipment:'mat_paint',conveyor:'mat_brushed',workstation:'mat_paint',storage:'mat_blue',person:'mat_fabric',safety:'mat_yellow',building:'mat_wall',floor:'mat_floor',transport:'mat_dark',other:'mat_gray'};
 export const EXTRA_MATERIALS: Material[] = [...WORKSHOP_MATERIALS,
   {id:'mat_floor',baseColor:'#73858A',roughness:.78,metalness:0},
   {id:'mat_wall',baseColor:'#D2D9D8',roughness:.92,metalness:0},

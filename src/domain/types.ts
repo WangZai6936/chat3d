@@ -84,12 +84,16 @@ export interface AssetRef {
   licenseNote: string;
 }
 
+export const SCENE_ROLES=['equipment','conveyor','workstation','storage','person','safety','building','floor','transport','other'] as const;
+export type SceneRole=typeof SCENE_ROLES[number];
 export type SceneNodeKind = 'primitive' | 'asset' | 'group';
 
 export interface SceneNode {
   id: string; // 全项目唯一且稳定；名称不承担身份
   parentId: string | null;
   assemblyName?: string;
+  sceneRole?:SceneRole;
+  planKey?:string;
   zone?: string;
   label?: string;
   assemblyId?: string; // Flat editable equipment assembly, no transform hierarchy
@@ -215,7 +219,8 @@ export function validateNode(node: SceneNode): Error[] {
   if (!node || !isValidId(node.id)) {
     errs.push(new Error(`节点 id 非法：${node?.id ?? '?'}`));
   }
-  for(const key of ['assemblyName','zone','label'] as const)if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key]!.length>200))errs.push(new Error('场景标注或分组名称无效'));
+  for(const key of ['assemblyName','zone','label','planKey'] as const)if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key]!.length>200))errs.push(new Error('场景标注或分组名称无效'));
+  if(node.sceneRole!==undefined&&!SCENE_ROLES.includes(node.sceneRole))errs.push(new Error('场景角色无效'));
   if(node.assemblyId!==undefined&&!isValidId(node.assemblyId))errs.push(new Error('设备组件标识无效'));
   if (typeof node.name !== 'string') errs.push(new Error(`节点 ${node?.id} name 不是字符串`));
   errs.push(...validateVec3(node.transform.position, `节点 ${node.id} position`));

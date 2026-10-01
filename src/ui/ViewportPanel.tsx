@@ -9,6 +9,7 @@ export function ViewportPanel() {
   const [viewportError,setViewportError]=useState('');
   const [attempt,setAttempt]=useState(0);
   const [gridVisible,setGridVisible]=useState(false);
+  const [backdrop,setBackdrop]=useState<'light'|'slate'>('slate');
   const viewportRef = useRef<Viewport | null>(null);
   const doc = useDisplayDoc(); // 预览期间自动切到预演副本，确认/放弃后回到真实文档
   const selection = useEditorStore((s) => s.selection);
@@ -35,6 +36,7 @@ export function ViewportPanel() {
   }, [attempt]);
 
   useEffect(()=>{viewportRef.current?.setGridVisible(gridVisible);},[gridVisible,attempt]);
+  useEffect(()=>{viewportRef.current?.setBackdrop(backdrop);},[backdrop,attempt]);
   // 文档变化 → 同步到视口
   useEffect(() => {
     viewportRef.current?.sync(doc);
@@ -48,7 +50,7 @@ export function ViewportPanel() {
   return (
     <div className="relative flex-1 bg-[#202428] min-w-0">
       {!!selection.length&&<div className="absolute bottom-3 left-3 z-10 flex gap-2"><button className="rounded bg-black/60 px-3 py-2 text-sm text-gray-200" onClick={()=>viewportRef.current?.fitToSelection(selection)}>聚焦选中</button>{doc.nodes.find(n=>n.id===selection[0])?.assemblyId&&<button className="rounded bg-black/60 px-3 py-2 text-sm text-gray-200" onClick={()=>{const id=doc.nodes.find(n=>n.id===selection[0])?.assemblyId;select(doc.nodes.filter(n=>n.assemblyId===id).map(n=>n.id));}}>选择整台设备</button>}</div>}
-      <div className="absolute top-11 left-3 z-10 flex gap-2"><button className="rounded bg-white/90 border border-slate-200 px-3 py-1.5 text-xs text-slate-700" onClick={()=>viewportRef.current?.presentationView()}>沙盘视角</button><button className="rounded bg-white/90 border border-slate-200 px-3 py-1.5 text-xs text-slate-700" onClick={()=>viewportRef.current?.topView()}>俯视布局</button><button aria-pressed={gridVisible} className="rounded bg-white/90 border border-slate-200 px-3 py-1.5 text-xs text-slate-700" onClick={()=>{setGridVisible(!gridVisible);viewportRef.current?.setGridVisible(!gridVisible);}}>网格</button></div>
+      <div className="absolute top-11 left-3 z-10 flex gap-2"><button className="rounded bg-white/90 border border-slate-200 px-3 py-1.5 text-xs text-slate-700" onClick={()=>viewportRef.current?.presentationView()}>沙盘视角</button><button className="rounded bg-white/90 border border-slate-200 px-3 py-1.5 text-xs text-slate-700" onClick={()=>viewportRef.current?.topView()}>俯视布局</button><button aria-pressed={gridVisible} className="rounded bg-white/90 border border-slate-200 px-3 py-1.5 text-xs text-slate-700" onClick={()=>{setGridVisible(!gridVisible);viewportRef.current?.setGridVisible(!gridVisible);}}>网格</button><button className="rounded bg-white/90 border border-slate-200 px-3 py-1.5 text-xs text-slate-700" onClick={()=>setBackdrop(backdrop==='slate'?'light':'slate')}>{backdrop==='slate'?'切换浅色背景':'切换深色背景'}</button></div>
       <button onClick={() => viewportRef.current?.fitToScene()} className="absolute bottom-3 right-3 z-10 rounded bg-black/60 px-3 py-2 text-sm text-gray-200 hover:bg-black/80">适应场景</button>
       {viewportError&&<div role="alert" className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-[#18212c] p-6 text-center text-sm text-gray-300"><strong>无法启动三维视图</strong><p>请检查浏览器 WebGL 与硬件加速设置，其他会话管理功能仍可使用。</p><button onClick={()=>setAttempt(v=>v+1)} className="rounded bg-blue-700 px-4 py-2">重试视图</button><details className="text-xs text-gray-500"><summary>技术详情</summary>{viewportError}</details></div>}
       <div ref={hostRef} className="absolute inset-0" />

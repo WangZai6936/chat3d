@@ -3,9 +3,9 @@
 // - 系统提示词把 Scene DSL 讲清楚，模型输出结构化 JSON 命令批
 // - 响应解析带容错与清洗：模型输出不可信，未知 op/坏参数一律丢弃并报错
 // - 同一批次内模型可用 tempId 引用前面创建的节点（commands.applyBatch 负责映射）
-import { Geometry, Transform, SceneDocument, validateGeometry } from '../domain/types';
+import { Geometry, Transform, SceneDocument, SCENE_ROLES, type SceneRole, validateGeometry } from '../domain/types';
 import {buildAssembly,type AssemblyPart} from '../domain/assembly';
-import { EXTRA_MATERIALS } from '../domain/materials';
+import { EXTRA_MATERIALS, SCENE_ROLE_MATERIALS } from '../domain/materials';
 import { Euler, Quaternion } from 'three';
 import { Command } from '../domain/commands';
 import { GenerationProgress, readChatResponse } from './stream';
@@ -22,6 +22,7 @@ export interface ModelConfig {
 export interface SceneContext {
   nodes: { id: string; name: string; desc: string; position: [number, number, number]; rotationQuaternion?: Transform['rotationQuaternion']; scale?: Transform['scale']; materialId?: string; visible?: boolean; parentId?: string | null }[];
   selection: string[];
+  selectedAssemblies?:string[];
 }
 
 export interface GeneratedBatch {
@@ -40,13 +41,13 @@ export type ChatMessage = {
 
 // P0 已实现的命令集；模型若输出其他 op（rotate/scale/delete 等），解析层拦截
 const IMPLEMENTED_OPS = new Set([
-  'createPrimitive', 'createAssembly', 'duplicateAssembly', 'translateAssembly',
+  'transformAssembly','appendAssemblyParts','replaceAssemblyParts','createPrimitive', 'createAssembly', 'duplicateAssembly', 'translateAssembly',
   'updateParameters',
   'setTransform',
   'translate',
   'rename',
   'setVisibility',
-  'setMaterial','setAppearance',
+  'setMaterial','setAppearance','setAssemblyMetadata',
 ]);
 
 const GEOMETRY_TYPES = new Set(['box', 'sphere', 'cylinder', 'cone', 'plane', 'roundedPlate','capsule','frame','tube','trapezoid']);
@@ -63,7 +64,7 @@ export function buildSystemPrompt(ctx: SceneContext): string {
   const nodeLines = ctx.nodes.length
     ? ctx.nodes.map((n) => `  - id:${n.id} name:${n.name} (${n.desc}) pos:[${n.position.join(',')}] rotation:${JSON.stringify(n.rotationQuaternion)} scale:${JSON.stringify(n.scale)} material:${n.materialId} visible:${n.visible} parent:${n.parentId}`).join('\n')
     : '  （空场景，还没有任何对象）';
-  const sel = ctx.selection.length ? `选中的节点 id：${ctx.selection.join(', ')}` : '当前没有选中对象。';
+  const sel = ctx.selectedAssemblies?.length ? `选中的完整组件 id：${ctx.selectedAssemblies.join(', ')}，包含各组件全部零件。其他单独选中节点：${ctx.selection.join(', ')||'无'}。` : ctx.selection.length ? `选中的节点 id：${ctx.selection.join(', ')}` : '当前没有选中对象。';
   return `你是 chat3d 的三维建模助手，专门搭建工业设备 / 仓储设备场景。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
 
 # 建模优先级
@@ -141,9 +142,16 @@ box 可指定 bevelRadius（米，0为锐边），用小倒角表达钣金，不
 # 自由组合与阵列建模
 优先以 createAssembly 定义每个自设计设备/结构的部件、尺寸、材质和局部变换；没有预设几何或工艺。parts最多100条，repeat用count与step排列重复部件；单组合最多2000零件。
 格式：{"op":"createAssembly","tempId":"custom1","name":"按需求命名的自设计组合","position":[0,0,0],"yaw":0,"parts":[{"name":"自定义支柱","geometry":{"type":"box","params":{"width":0.05,"height":1,"depth":0.05}},"materialId":"mat_metal","transform":{"position":[0,0.5,0]},"repeat":{"count":4,"step":[0.4,0,0]}}]}
+createAssembly还可指定sceneRole（equipment/conveyor/workstation/storage/person/safety/building/floor/transport/other）、planKey（对应设计清单名称）、zone（区域名）。省略materialId时按sceneRole选择基础材质，细分玻璃、金属、肤色等仍需显式设置。每个逻辑实体单独分组，例如一名人员为一个组合，不能把全车间塞成一个组合。重复同类可复制组并保留planKey。
+parts可加label短文本；仅用于尺寸足够的平面标牌/面板，使用plate/box薄片作承载，避免给曲面贴字。不写虚构品牌。
 上面只演示语法，不是设备模板；必须自己根据请求设计真实结构。position/yaw放置整体，parts位置是组合局部坐标；每条默认单位缩放和无旋转。transform可用rotationDegrees:[x,y,z]表示XYZ欧拉角（度），无需手算四元数；提供rotationQuaternion时以它为准。
 duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id或本批tempId","offset":[3,0,0],"name":"第二台自设计设备"} 可复制已生成组合，避免重复输出所有零件。translateAssembly只移动，duplicateAssembly才复制。
 用组合/阵列表达重复结构，把输出预算用在差异化形体、负空间、连接、尺度和材质层次上，而不是降级成占位箱体。
+
+# 已有组件的局部细化
+追加部件：{"op":"appendAssemblyParts","targetId":"组件任意零件真实ID","origin":[0,0,0],"yaw":0,"parts":[自由部件定义]}。origin为世界坐标，parts为相对origin的局部坐标；不是自动相对旧组件中心。先read_scene读取设备现有世界位置，避免零件落到原点。
+替换指定零件：{"op":"replaceAssemblyParts","targetId":"组件零件ID","partIds":["需替换的真实零件ID"],"origin":[0,0,0],"parts":[新部件定义]}。仅移除明确列出的原部件，其他组件与部件保留，全部可撤销。
+整机旋转/等比缩放：{"op":"transformAssembly","targetId":"组件零件ID","rotationDegrees":[0,90,0],"scaleFactor":1.2}。默认以当前组件包围盒底部中心为支点；可用pivot指定世界坐标。缩放为等比，不能传三轴非等比数值；不需要的参数省略。局部编辑范围和位置锁仍会校验，不得自行扩大。
 
 # 支持的命令
 1. 创建基本体：
@@ -167,7 +175,8 @@ duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id�
 5. 重命名：{"op":"rename","targetId":"t1","name":"新名字"}
 6. 显隐：{"op":"setVisibility","targetId":"t1","visible":false}
 7. 外观局部修改：{"op":"setAppearance","targetId":"真实零件ID","baseColor":"#3979AA"}；可选roughness/metalness/opacity(0–1)。整机用scope:"assembly"，仅外壳可加sourceMaterialIds:["原外壳材质ID"]，先read_scene读取材质与零件，不要把玻璃、屏幕、人物一起改色。未给出的材质属性保持原值。
-8. 材质：{"op":"setMaterial","targetId":"t1","materialId":"mat_metal"}
+8. 补齐已有组件的设计关联：{"op":"setAssemblyMetadata","targetId":"组件零件ID","sceneRole":"equipment","planKey":"设计清单名称","zone":"区域名"}，不改变几何。
+9. 材质：{"op":"setMaterial","targetId":"t1","materialId":"mat_metal"}
 
 # targetId 规则
 - 引用同批次里前面创建的节点：用它的 tempId（如 "t1"）。
@@ -337,8 +346,27 @@ function cleanCommand(opType: string, op: Record<string, unknown>): Command | nu
   switch (opType) {
     case 'createAssembly': {
       if(!Array.isArray(op.parts))return null;const position=op.position===undefined?[0,0,0] as [number,number,number]:toVec3(op.position),yaw=op.yaw===undefined?0:toNum(op.yaw);if(!position||yaw===null||typeof op.name!=='string')return null;
-      const parts:AssemblyPart[]=[];for(const value of op.parts){if(!value||typeof value!=='object')return null;const p=value as Record<string,unknown>,geometry=cleanGeometry(p.geometry);if(!geometry||typeof p.name!=='string')return null;let repeat:AssemblyPart['repeat'];if(p.repeat!==undefined){const r=p.repeat as {count?:unknown;step?:unknown};if(!r||typeof r!=='object')return null;const count=toNum(r.count),step=toVec3(r.step);if(count===null||!step)return null;repeat={count,step};}parts.push({name:p.name,geometry,transform:cleanTransform(p.transform),materialId:typeof p.materialId==='string'&&KNOWN_MATERIALS.has(p.materialId)?p.materialId:'mat_gray',...(repeat?{repeat}:{})});}
-      const definition={name:op.name,position,yaw,parts};try{buildAssembly(definition);}catch{return null;}return {op:'createAssembly',...definition,tempId:typeof op.tempId==='string'?op.tempId:undefined};
+      const parts:AssemblyPart[]=[];for(const value of op.parts){if(!value||typeof value!=='object')return null;const p=value as Record<string,unknown>,geometry=cleanGeometry(p.geometry);if(!geometry||typeof p.name!=='string')return null;let repeat:AssemblyPart['repeat'];if(p.repeat!==undefined){const r=p.repeat as {count?:unknown;step?:unknown};if(!r||typeof r!=='object')return null;const count=toNum(r.count),step=toVec3(r.step);if(count===null||!step)return null;repeat={count,step};}if(p.label!==undefined&&(typeof p.label!=='string'||p.label.length>80))return null;parts.push({name:p.name,...(typeof p.label==='string'?{label:p.label}:{}),geometry,transform:cleanTransform(p.transform),materialId:typeof p.materialId==='string'&&KNOWN_MATERIALS.has(p.materialId)?p.materialId:(p.materialId===undefined&&typeof op.sceneRole==='string'?SCENE_ROLE_MATERIALS[op.sceneRole as SceneRole]??'mat_gray':'mat_gray'),...(repeat?{repeat}:{})});}
+      if(op.sceneRole!==undefined&&(typeof op.sceneRole!=='string'||!SCENE_ROLES.includes(op.sceneRole as SceneRole)))return null;
+      const definition={name:op.name,position,yaw,parts,...(typeof op.sceneRole==='string'?{sceneRole:op.sceneRole as SceneRole}:{}),...(typeof op.planKey==='string'?{planKey:op.planKey}:{}),...(typeof op.zone==='string'?{zone:op.zone}:{} )};try{buildAssembly(definition);}catch{return null;}return {op:'createAssembly',...definition,tempId:typeof op.tempId==='string'?op.tempId:undefined};
+    }
+    case 'transformAssembly': {
+      const targetId=cleanTargetId(op);if(!targetId)return null;
+      const result:Extract<Command,{op:'transformAssembly'}>={op:'transformAssembly',targetId};
+      for(const key of ['rotationDegrees','pivot'] as const)if(op[key]!==undefined){const value=toVec3(op[key]);if(!value)return null;result[key]=value;}
+      if(op.scaleFactor!==undefined){const value=toNum(op.scaleFactor);if(value===null||value<.001||value>1000)return null;result.scaleFactor=value;}
+      return result.rotationDegrees!==undefined||result.scaleFactor!==undefined?result:null;
+    }
+    case 'appendAssemblyParts':
+    case 'replaceAssemblyParts': {
+      const targetId=cleanTargetId(op);if(!targetId)return null;
+      const built=cleanCommand('createAssembly',{name:'新部件',parts:op.parts,position:op.origin,yaw:op.yaw});if(!built||built.op!=='createAssembly')return null;
+      built.parts=built.parts.map((p,i)=>{const raw=(op.parts as Record<string,unknown>[])[i];return {...p,materialId:typeof raw.materialId==='string'?raw.materialId:undefined};});
+      if(opType==='replaceAssemblyParts'){
+        if(!Array.isArray(op.partIds)||!op.partIds.length||!op.partIds.every(id=>typeof id==='string'&&id))return null;
+        return {op:'replaceAssemblyParts',targetId,partIds:op.partIds,parts:built.parts,origin:built.position,yaw:built.yaw};
+      }
+      return {op:'appendAssemblyParts',targetId,parts:built.parts,origin:built.position,yaw:built.yaw};
     }
     case 'duplicateAssembly': {const targetId=cleanTargetId(op),offset=toVec3(op.offset);return targetId&&offset?{op:'duplicateAssembly',targetId,offset,name:typeof op.name==='string'?op.name:undefined,tempId:typeof op.tempId==='string'?op.tempId:undefined}:null;}
     case 'translateAssembly': {const targetId=cleanTargetId(op);const value=toVec3(op.value);return targetId&&value?{op:'translateAssembly',targetId,value}:null;}
@@ -392,6 +420,13 @@ function cleanCommand(opType: string, op: Record<string, unknown>): Command | nu
       const targetId = cleanTargetId(op);
       if (!targetId) return null;
       return { op: 'setVisibility', targetId, visible: op.visible !== false };
+    }
+    case 'setAssemblyMetadata': {
+      const targetId=cleanTargetId(op);if(!targetId)return null;
+      if(op.sceneRole!==undefined&&(typeof op.sceneRole!=='string'||!SCENE_ROLES.includes(op.sceneRole as SceneRole)))return null;
+      for(const key of ['planKey','zone'])if(op[key]!==undefined&&(typeof op[key]!=='string'||(op[key] as string).length>120))return null;
+      if(op.sceneRole===undefined&&op.planKey===undefined&&op.zone===undefined)return null;
+      return {op:'setAssemblyMetadata',targetId,sceneRole:op.sceneRole as SceneRole|undefined,planKey:op.planKey as string|undefined,zone:op.zone as string|undefined};
     }
     case 'setAppearance': {
       const targetId=cleanTargetId(op);if(!targetId)return null;
@@ -622,7 +657,7 @@ export function buildSceneContext(doc: Pick<SceneDocument, 'nodes'>, selection: 
             .map(([k, v]) => `${k}=${v}`)
             .join(' ')}`
         : 'group';
-      return { id: n.id, name: n.name, desc, position: n.transform.position, rotationQuaternion: n.transform.rotationQuaternion, scale: n.transform.scale, materialId: n.materialId, visible: n.visible, parentId: n.parentId, ...(n.assemblyId?{assemblyId:n.assemblyId}:{}) };
+      return { id: n.id, name: n.name, desc, position: n.transform.position, rotationQuaternion: n.transform.rotationQuaternion, scale: n.transform.scale, materialId: n.materialId, visible: n.visible, parentId: n.parentId, ...(n.assemblyId?{assemblyId:n.assemblyId}:{}),...(n.sceneRole?{sceneRole:n.sceneRole}:{}),...(n.planKey?{planKey:n.planKey}:{}),...(n.zone?{zone:n.zone}:{}) };
     }),
     selection,
   };

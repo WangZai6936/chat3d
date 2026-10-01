@@ -11,7 +11,7 @@ export function buildExportScene(doc: SceneDocument): THREE.Scene {
     if (n.kind!=='primitive'||!n.geometry||n.parentId!==null) throw new Error('当前 GLB 导出仅支持无分组的基础模型');
     const m=doc.materials.find((v)=>v.id===n.materialId);
     const mesh=new THREE.Mesh(buildPrimitiveGeometry(n.geometry),createSceneMaterial(m,n.label));
-    mesh.name=n.name;mesh.userData={nodeId:n.id,assemblyId:n.assemblyId,assemblyName:n.assemblyName,label:n.label};mesh.position.fromArray(n.transform.position);mesh.quaternion.fromArray(n.transform.rotationQuaternion);mesh.scale.fromArray(n.transform.scale);scene.add(mesh);
+    mesh.name=n.name;mesh.userData={nodeId:n.id,assemblyId:n.assemblyId,assemblyName:n.assemblyName,label:n.label,sceneRole:n.sceneRole,planKey:n.planKey,zone:n.zone};mesh.position.fromArray(n.transform.position);mesh.quaternion.fromArray(n.transform.rotationQuaternion);mesh.scale.fromArray(n.transform.scale);scene.add(mesh);
   }
   return scene;
 }

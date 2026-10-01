@@ -2,7 +2,8 @@
 // - 每个命令有固定参数 schema、目标类型限制、影响集计算、成本估计与逆操作
 // - 一次 AI 批量修改 = 一条历史记录；命令串行提交，原子生效
 // - 批量生成的 ID 由应用分配，不能相信模型生成的 ID
-import {buildAssembly,type AssemblyDefinition} from './assembly';
+import {transformedAssembly} from './assemblyEditing';
+import {buildAssembly,type AssemblyDefinition,type AssemblyPart} from './assembly';
 import { buildWorkshopNodes } from '../workshop/adapter';
 import { buildEquipment } from './equipment';
 import { makeId } from '../util/ids';
@@ -35,6 +36,10 @@ export type CommandOp =
   | 'translate'
   | 'rotate'
   | 'scale'
+  | 'transformAssembly'
+  | 'appendAssemblyParts'
+  | 'replaceAssemblyParts'
+  | 'setAssemblyMetadata'
   | 'setAppearance'
   | 'setMaterial'
   | 'rename'
@@ -137,6 +142,10 @@ export interface DeleteCommand {
 
 export type AppearancePatch=Partial<Pick<Material,'baseColor'|'roughness'|'metalness'|'opacity'>>;
 export type Command =
+  | {op:'transformAssembly';targetId:string;rotationDegrees?:Vec3;scaleFactor?:number;pivot?:Vec3}
+  | {op:'appendAssemblyParts';targetId:string;parts:AssemblyPart[];origin?:Vec3;yaw?:number}
+  | {op:'replaceAssemblyParts';targetId:string;partIds:string[];parts:AssemblyPart[];origin?:Vec3;yaw?:number}
+  | {op:'setAssemblyMetadata';targetId:string;sceneRole?:import('./types').SceneRole;planKey?:string;zone?:string}
   | ({op:'setAppearance';targetId:string;scope?:'assembly';sourceMaterialIds?:string[];materialId?:string}&AppearancePatch)
   | ({op:'createAssembly';tempId?:string}&AssemblyDefinition)
   | {op:'duplicateAssembly';targetId:string;offset:Vec3;name?:string;tempId?:string}
@@ -162,7 +171,7 @@ export interface CommandBatch {
   projectId: string;
   baseRevision: number;
   selectedIds: string[];
-  editScope?:{nodeIds?:string[];lockPlacement?:boolean};
+  editScope?:{nodeIds?:string[];lockPlacement?:boolean;allowAssemblyAdditions?:boolean};
   incomplete?: boolean; // 恢复的阶段草稿，未完成提交复核
   continuation?: string; // 继续阶段时填入输入框，不自动发送
   summary: string; // 模型给出的简短说明
@@ -182,6 +191,10 @@ export function affectedNodeIds(op: Command, doc: SceneDocument): string[] {
       const root=doc.nodes.find(n=>n.id===op.targetId);const candidates=op.scope==='assembly'&&root?.assemblyId?doc.nodes.filter(n=>n.assemblyId===root.assemblyId):doc.nodes.filter(n=>n.id===op.targetId);
       return candidates.filter(n=>!op.sourceMaterialIds||op.sourceMaterialIds.includes(n.materialId??'')).map(n=>n.id);
     }
+    case 'transformAssembly':
+    case 'appendAssemblyParts':
+    case 'replaceAssemblyParts':
+    case 'setAssemblyMetadata':
     case 'translateAssembly': { const assembly=doc.nodes.find(n=>n.id===op.targetId)?.assemblyId;return assembly?doc.nodes.filter(n=>n.assemblyId===assembly).map(n=>n.id):[op.targetId]; }
     case 'duplicate':
     case 'delete': {
@@ -213,6 +226,7 @@ const DEFAULT_BUDGET: Budget = { maxCommands: 200, maxNewNodes: 3000 }; // 方�
 export function estimateCost(ops: Command[]): { commands: number; newNodes: number } {
   let newNodes = 0;
   for (const op of ops) {
+    if(op.op==='appendAssemblyParts'||op.op==='replaceAssemblyParts')newNodes+=Array.isArray(op.parts)?op.parts.reduce((n,p)=>n+(p.repeat?.count??1),0):2001;
     if(op.op==='createAssembly')newNodes+=Array.isArray(op.parts)?op.parts.reduce((n,p)=>n+(p.repeat?.count??1),0):2001;
     if(op.op==='duplicateAssembly')newNodes+=2000;
     if (op.op === 'createPrimitive' || op.op === 'instantiateAsset') newNodes += 1;
@@ -226,7 +240,7 @@ export function estimateCost(ops: Command[]): { commands: number; newNodes: numb
 // 历史保存已接受命令及足够的 before/after 数据（方案第 6 节）
 export interface CommandWithInverse {
   command: Command;
-  before: { nodes: SceneNode[]; materialIds: string[] }; // 受影响节点快照 + 用到的材质
+  before: { nodes: SceneNode[]; materialIds: string[]; nodeIndices?:Record<string,number> }; // 受影响节点快照 + 用到的材质
   after: { nodes: SceneNode[]; materialIds: string[] };
 }
 
@@ -314,6 +328,31 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
       try { const parts=op.templateId==='smt_workshop'?buildWorkshopNodes(op.parameters,op.position,op.yaw):buildEquipment(op.templateId,op.parameters,op.position,op.yaw,op.name);createdIds=parts.map(n=>n.id);if(op.tempId)tempIdMap.set(op.tempId,parts[0].id);nodes.push(...parts); }
       catch(e){return {doc,error:e instanceof Error?e:new Error('设备参数无效')};}
       break;
+    }
+    case 'transformAssembly': {
+      if(op.rotationDegrees===undefined&&op.scaleFactor===undefined)return {doc,error:new Error('请指定旋转角或缩放倍数')};
+      const ids=new Set(affectedNodeIds(op,doc));try{const transformed=transformedAssembly(nodes.filter(n=>ids.has(n.id)),op);const byId=new Map(transformed.map(n=>[n.id,n]));for(let i=0;i<nodes.length;i++)if(byId.has(nodes[i].id))nodes[i]=byId.get(nodes[i].id)!;}catch(e){return {doc,error:e instanceof Error?e:new Error('整机变换失败')}}break;
+    }
+    case 'appendAssemblyParts':
+    case 'replaceAssemblyParts': {
+      const anchor=findNode(doc,op.targetId)!;const ids=new Set(affectedNodeIds(op,doc));const assemblyId=anchor.assemblyId??anchor.id,name=anchor.assemblyName??anchor.name;
+      const removed=new Set<string>();
+      if(op.op==='replaceAssemblyParts'){
+        if(!Array.isArray(op.partIds)||!op.partIds.length||op.partIds.some(id=>typeof id!=='string'||!ids.has(id)))return {doc,error:new Error('替换零件必须属于目标组件')};
+        for(const id of op.partIds)removed.add(id);
+      }
+      try{
+        const parts=buildAssembly({name,parts:op.parts,position:op.origin,yaw:op.yaw,sceneRole:anchor.sceneRole,planKey:anchor.planKey,zone:anchor.zone}).map(n=>({...n,assemblyId,assemblyName:name}));
+        if(ids.size-removed.size+parts.length>2000)return {doc,error:new Error('单个组件不能超过2000个零件')};
+        // Keep the assembly anchor addressable when its old geometry is replaced.
+        if(removed.has(assemblyId))parts[0].id=assemblyId;
+        for(let i=nodes.length-1;i>=0;i--)if(removed.has(nodes[i].id))nodes.splice(i,1);
+        for(const n of nodes)if(ids.has(n.id)){n.assemblyId=assemblyId;n.assemblyName=name;}
+        nodes.push(...parts);createdIds=parts.map(n=>n.id);
+      }catch(e){return {doc,error:e instanceof Error?e:new Error('追加或替换零件失败')}}break;
+    }
+    case 'setAssemblyMetadata': {
+      const ids=new Set(affectedNodeIds(op,doc));for(const n of nodes)if(ids.has(n.id)){if(op.sceneRole!==undefined)n.sceneRole=op.sceneRole;if(op.planKey!==undefined)n.planKey=op.planKey;if(op.zone!==undefined)n.zone=op.zone;}break;
     }
     case 'translateAssembly': {
       const ids=new Set(affectedNodeIds(op,doc));for(const n of nodes)if(ids.has(n.id))n.transform.position=n.transform.position.map((v,i)=>v+op.value[i]) as Vec3;break;
@@ -430,11 +469,11 @@ function defaultMaterialId(doc: SceneDocument): string | undefined {
   return doc.materials[0]?.id;
 }
 
-function snapshotAffected(doc: SceneDocument, op: Command): { nodes: SceneNode[]; materialIds: string[] } {
+function snapshotAffected(doc: SceneDocument, op: Command): CommandWithInverse['before'] {
   const ids = new Set(affectedNodeIds(op, doc));
   const nodes = doc.nodes.filter((n) => ids.has(n.id)).map(cloneNode);
   const materialIds = Array.from(new Set(nodes.map((n) => n.materialId).filter((m): m is string => !!m)));
-  return { nodes, materialIds };
+  return { nodes, materialIds, nodeIndices:Object.fromEntries(doc.nodes.flatMap((n,i)=>ids.has(n.id)?[[n.id,i]]:[])) };
 }
 
 function snapshotIds(doc: SceneDocument, ids: string[]): { nodes: SceneNode[]; materialIds: string[] } {
@@ -468,7 +507,7 @@ export function applyBatch(doc: SceneDocument, batch: { operations: Command[] })
     current = r.doc;
     if (r.inverse) {
       // create 类命令没有「受影响」节点：创建结果用新节点 id 快照，撤销时才删得掉
-      const after = r.createdIds && r.createdIds.length > 0 ? snapshotIds(current, r.createdIds) : snapshotAffected(current, op);
+      const after = op.op==='appendAssemblyParts'||op.op==='replaceAssemblyParts'?snapshotIds(current,[...r.inverse.nodes.map(n=>n.id),...(r.createdIds??[])]):r.createdIds && r.createdIds.length > 0 ? snapshotIds(current, r.createdIds) : snapshotAffected(current, op);
       applied.push({ command: op, before: r.inverse, after });
     }
   }

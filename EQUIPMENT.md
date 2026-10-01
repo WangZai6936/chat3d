@@ -36,3 +36,28 @@ New general operations replace that approach: `createAssembly` accepts arbitrary
 A prompt construction defect was also found: removal of the old single-JSON output section swallowed all intervening capability headings until the command heading. This removed the earlier template guides, and would have hidden new general assembly instructions. The removal now stops at the next heading; a test verifies that assembly/array instructions reach the actual Pi request context.
 
 This correction and the generic composition tools do not establish live-model visual quality. Direct-code-equivalent generation, richer shapes and reliable full-scene iteration remain ongoing work. Existing six-round/five-minute limits are unchanged.
+
+
+## Current generation and editing behavior (2026-10-01)
+
+The historical preset sections above are superseded. The model generates free assemblies, and does not insert equipment or workshop templates automatically. Productive tasks are not capped at six turns or five total minutes. No-activity, repeated-error and no-progress guards preserve successful drafts.
+
+The current editor supports generic frame, tube, capsule and trapezoid primitives; explicit material/appearance editing; selected-object scope protection; placement locks; reversible property edits; and before/after preview comparison. Complete new scenes require a design brief with flow, layout, equipment and inspection criteria. A representative new assembly must receive a focused visual review before duplication in these scenes.
+
+Composition plans add zones, links, supporting elements, palette and presentation. Assemblies can declare `sceneRole`, `planKey` and `zone`; these are metadata, not proof of physical or process correctness. `inspect_scene` compares declared components against the plan and reports conservative bounding-box overlap candidates, unusual standing-person heights, and high-metalness wall/floor materials. It does not certify collision-free geometry, connected conveyors, engineering compliance, or visual quality. New whole scenes must inspect the latest revision before submitting. Existing scenes may receive classifications with `setAssemblyMetadata`.
+
+Role-based defaults apply only when a part omits its material. Explicit materials remain authoritative. The viewport offers reversible light/slate backdrops; this does not recolor model objects.
+
+Validation uses automated domain/component tests with mocked model transport. Browser visual QA, actual provider quality/cost comparison, and native installer builds still require their respective environments. Run `npm test` and `npm run build` for the automated suite.
+
+### Local equipment editing and resource reuse
+
+`appendAssemblyParts` adds parts to an existing component; `replaceAssemblyParts` replaces only explicitly listed member IDs. Replacing the anchor preserves its addressable ID. Both operations preserve component metadata and support atomic undo/redo, including original node order. Origins are world coordinates; part transforms are relative to the supplied origin.
+
+`transformAssembly` rotates a complete component and applies uniform scaling around its bottom-centre bounds by default, or an explicit world pivot. The property panel exposes rotation and uniform scale for whole-component selection and for individual parts; single-part edits never silently expand to the entire component. Nonuniform assembly scaling is not supported.
+
+The selected-scope option can permit new parts within fully selected components. It does not permit new unrelated equipment, edits to unselected objects, or changes to shared materials that affect unselected objects. Original selection boundaries remain frozen throughout a run; newly appended parts can be refined in later turns. Placement locks still protect existing positions and orientations.
+
+The renderer reconciles meshes by stable ID and reuses geometry/material resources for unchanged objects, disposing resources after their last visible user disappears. Agent context summarizes fully selected assemblies and expands details on demand. These are implementation improvements, not measured browser FPS or live-token savings.
+
+Real-model generation, visual acceptance and elapsed-time/token comparisons are assigned to the user. Automated checks remain development safeguards and must not be presented as that acceptance.

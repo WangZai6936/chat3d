@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "test": "node tests/regression.mjs && node tests/settings-ui.mjs && node tests/chat-ui.mjs && node tests/stream-geometry.mjs && node tests/modeling-agent.mjs && node tests/workspace.mjs && node tests/session-ui.mjs && node tests/equipment.mjs && node tests/workshop.mjs && node tests/workshop-ui.mjs && node tests/workshop-routing.mjs && node tests/free-assembly.mjs && node tests/visual-capabilities.mjs && node tests/properties-ui.mjs && node tests/edit-scope.mjs"
+    "test": "node tests/regression.mjs && node tests/settings-ui.mjs && node tests/chat-ui.mjs && node tests/stream-geometry.mjs && node tests/modeling-agent.mjs && node tests/workspace.mjs && node tests/session-ui.mjs && node tests/equipment.mjs && node tests/workshop.mjs && node tests/workshop-ui.mjs && node tests/workshop-routing.mjs && node tests/free-assembly.mjs && node tests/visual-capabilities.mjs && node tests/properties-ui.mjs && node tests/edit-scope.mjs && node tests/scene-quality.mjs && node tests/assembly-editing.mjs && node tests/viewport-reconcile.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.99.1",

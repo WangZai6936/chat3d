@@ -1,5 +1,7 @@
-import {useState} from 'react';
+import {useMemo,useState} from 'react';
 import { Geometry, type SceneDocument, type SceneNode } from '../domain/types';
+import {assemblyBounds,transformedAssembly} from '../domain/assemblyEditing';
+import {Vector3} from 'three';
 import type {AppearancePatch, Command} from '../domain/commands';
 import { useDisplayDoc, useEditorStore } from '../store';
 
@@ -28,6 +30,7 @@ export function PropertiesPanel() {
     const same=!!assembly&&members.every(n=>n.assemblyId===assembly)&&members.length===doc.nodes.filter(n=>n.assemblyId===assembly).length;
     return <div className="p-4 bg-[#252A31] text-gray-200 text-sm h-full overflow-auto"><h3>{same?node.assemblyName??'组件':'多选对象'}</h3>{lockNotice}<p className="text-xs text-gray-400 my-3">已选 {members.length} 个零件。外观修改只影响所选范围，可撤销。</p>
       <fieldset disabled={locked} className="disabled:opacity-50">{same&&<div className="grid grid-cols-2 gap-2">{([['左移 1m',[-1,0,0]],['右移 1m',[1,0,0]],['前移 1m',[0,0,1]],['后移 1m',[0,0,-1]]] as const).map(([title,value])=><button key={title} className="rounded bg-white/10 p-2 text-xs" onClick={()=>{const r=applyCommandBatch([{op:'translateAssembly',targetId:node.id,value:[...value]}],title);if(!r.ok)window.alert(r.error);}}>{title}</button>)}</div>}
+      {same&&<AssemblyTransformEditor nodes={members} wholeAssembly/>}
       <AppearanceEditor key={members.map(n=>n.id+':'+n.materialId).join('|')} doc={doc} nodes={members} wholeAssembly={same}/></fieldset>
       <p className="mt-4 text-xs text-gray-400">展开对象树后选择单个零件，可编辑它的尺寸与位置。</p></div>;
   }
@@ -117,10 +120,25 @@ export function PropertiesPanel() {
           </div>
         )}
 
+        <AssemblyTransformEditor nodes={[node]}/>
         <AppearanceEditor key={node.id+':'+node.materialId} doc={doc} nodes={[node]} wholeAssembly={false}/>
       </fieldset>
     </div>
   );
+}
+
+function AssemblyTransformEditor({nodes,wholeAssembly=false}:{nodes:SceneNode[];wholeAssembly?:boolean}){
+ const [angles,setAngles]=useState(['0','0','0']),[factor,setFactor]=useState('1'),[error,setError]=useState('');
+ const size=useMemo(()=>assemblyBounds(nodes).getSize(new Vector3()),[nodes]);
+ const apply=()=>{
+  if(angles.some(v=>!v.trim()||!Number.isFinite(Number(v)))||!factor.trim()||!Number.isFinite(Number(factor))){setError('请输入有效的角度和缩放倍数');return;}
+  const rotationDegrees=angles.map(Number) as [number,number,number],scaleFactor=Number(factor);
+  if(rotationDegrees.every(v=>v===0)&&scaleFactor===1){setError('没有需要应用的变换');return;}
+  let command:Command;try{command=wholeAssembly?{op:'transformAssembly',targetId:nodes[0].id,rotationDegrees,scaleFactor}:{op:'setTransform',targetId:nodes[0].id,transform:transformedAssembly(nodes,{rotationDegrees,scaleFactor})[0].transform};}catch(e){setError(e instanceof Error?e.message:'变换参数无效');return;}
+  const result=useEditorStore.getState().applyCommandBatch([command],'旋转/等比缩放选中对象');
+  if(!result.ok){setError(result.error??'变换失败');return;}setAngles(['0','0','0']);setFactor('1');setError('');
+ };
+ return <section className="mt-4 space-y-2"><h4 className="text-xs">{wholeAssembly?'整机旋转与等比缩放':'零件旋转与等比缩放'}</h4><p className="text-xs text-gray-400">当前外包尺寸 {size.x.toFixed(2)} × {size.y.toFixed(2)} × {size.z.toFixed(2)} m，以底部中心为支点</p><div className="grid grid-cols-3 gap-1">{['X','Y','Z'].map((axis,i)=><label key={axis} className="text-xs">{axis} 旋转角<input aria-label={`整体旋转 ${axis}`} type="number" step="15" value={angles[i]} onChange={e=>setAngles(old=>old.map((v,j)=>i===j?e.target.value:v))} className="block w-full min-w-0 rounded bg-black/30 p-1"/></label>)}</div><label className="block text-xs">等比缩放倍数<input aria-label="整体等比缩放倍数" type="number" min="0.001" max="1000" step="0.1" value={factor} onChange={e=>setFactor(e.target.value)} className="block w-full rounded bg-black/30 p-1"/></label><button onClick={apply} className="rounded bg-white/10 px-2 py-1 text-xs">应用整体变换</button>{error&&<p role="status" className="text-xs text-amber-200">{error}</p>}</section>;
 }
 
 function AppearanceEditor({doc,nodes,wholeAssembly}:{doc:SceneDocument;nodes:SceneNode[];wholeAssembly:boolean}){

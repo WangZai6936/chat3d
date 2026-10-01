@@ -79,6 +79,7 @@ export class Viewport {
     this.setupEnvironment();
     this.setupLights();
     this.setupGround();
+    this.setBackdrop('slate');
     this.setupPicking();
 
     this.resizeObserver = new ResizeObserver(() => this.markDirty());
@@ -306,22 +307,26 @@ export class Viewport {
     }
   }
 
-  // 同步：DSL 文档 → Three.js 对象（reconciler，方案第 2 节）
-  // 简单可靠的销毁-重建策略；后续按需细化 diff（InstancedMesh 等留到优化阶段）
+  // Incremental reconciliation: preserve unchanged mesh/geometry/material identities.
   sync(doc: SceneDocument): void {
-    if(doc===this.lastSyncedDoc)return;this.lastSyncedDoc=doc;
-    // 仅首次加载自动取景；编辑参数时保留用户相机。
-    const firstContent = this.nodeMap.size === 0;
-    this.disposeAllNodes();
-
-    for (const node of doc.nodes) {
-      if (!node.visible) continue;
-      if (node.kind !== 'primitive' || !node.geometry) continue; // P0 只渲染基本体
-      this.createNodeMesh(node, doc);
+    if(doc===this.lastSyncedDoc)return;
+    const firstContent=this.nodeMap.size===0;this.clearSelectionHelpers();
+    const visible=new Set(doc.nodes.filter(n=>n.visible&&n.kind==='primitive'&&n.geometry).map(n=>n.id));
+    for(const [id,res] of this.nodeMap)if(!visible.has(id)){this.scene.remove(res.mesh);this.nodeMap.delete(id);}
+    for(const node of doc.nodes){
+      if(!visible.has(node.id))continue;
+      const existing=this.nodeMap.get(node.id);
+      if(!existing){this.createNodeMesh(node,doc);continue;}
+      const geometry=this.buildGeometry(node.geometry!),material=this.buildMaterial(node.materialId,doc,node.label);
+      existing.geometry=geometry;existing.material=material;existing.mesh.geometry=geometry;existing.mesh.material=material;
+      existing.mesh.position.fromArray(node.transform.position);existing.mesh.quaternion.fromArray(node.transform.rotationQuaternion);existing.mesh.scale.fromArray(node.transform.scale);
+      existing.mesh.name=node.name;existing.mesh.castShadow=material.opacity>=.95&&!node.label;
     }
-
-    // 生成内容变化后重新取景（撤销/重做也走这里，保持模型始终在画面中心）
-    if (firstContent) this.frameScene();
+    const geometries=new Set([...this.nodeMap.values()].map(v=>v.geometry)),materials=new Set([...this.nodeMap.values()].map(v=>v.material));
+    for(const [key,g] of this.sharedGeometryCache)if(!geometries.has(g)){g.dispose();this.sharedGeometryCache.delete(key);}
+    for(const [key,m] of this.materialCache)if(!materials.has(m)){m.map?.dispose();m.dispose();this.materialCache.delete(key);}
+    this.lastSyncedDoc=doc;
+    if(firstContent||!this.nodeMap.size)this.frameScene();
     this.markDirty();
   }
 
@@ -417,6 +422,8 @@ export class Viewport {
       this.updateOrbitCamera();this.markDirty();
     }
   }
+
+  setBackdrop(mode:'light'|'slate'):void {this.scene.background=new THREE.Color(mode==='slate'?'#465b69':'#e8edef');this.floorMaterial?.color.set(mode==='slate'?'#536a77':'#e0e7e9');this.markDirty();}
 
   setGridVisible(visible:boolean):void {const grid=this.scene.getObjectByName('__grid');if(grid)grid.visible=visible;this.markDirty();}
   topView():void {this.orbitPhi=.02;this.orbitTheta=0;this.frameScene();this.updateOrbitCamera();this.markDirty();}
