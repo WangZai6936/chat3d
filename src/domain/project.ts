@@ -9,7 +9,7 @@ export function serializeProject(doc: SceneDocument): string {
   const scene: SceneDocument = {
     schemaVersion: doc.schemaVersion, projectId: doc.projectId, revision: doc.revision,
     unit: doc.unit, upAxis: doc.upAxis, nodes: doc.nodes, materials: doc.materials,
-    assets: doc.assets, ...(doc.viewState ? { viewState: doc.viewState } : {}),
+    assets: doc.assets, ...(doc.animation?{animation:doc.animation}:{}), ...(doc.viewState ? { viewState: doc.viewState } : {}),
   };
   return JSON.stringify({ format: 'chat3d-project', version: 1, scene }, null, 2);
 }

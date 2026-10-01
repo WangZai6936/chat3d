@@ -1,3 +1,4 @@
+import {createAnimationEvaluator} from '../domain/animation';
 import { Agent, type AgentTool, type StreamFn, type AgentMessage } from '@earendil-works/pi-agent-core';
 import { Type, type Model, type ImageContent, type TSchema } from '@earendil-works/pi-ai';
 import { stream } from '@earendil-works/pi-ai/api/openai-completions';
@@ -30,7 +31,7 @@ interface AgentOptions {
   onCheckpoint?: (result: AgentResult) => void;
   // Dependency injection for automated checks; production uses Pi's OpenAI-compatible adapter.
   streamFn?: StreamFn;
-  capture?: (doc: SceneDocument, view: CaptureView, targetIds?:string[]) => Promise<string>;
+  capture?: (doc: SceneDocument, view: CaptureView, targetIds?:string[],time?:number) => Promise<string>;
 }
 const asImage = (url: string): ImageContent => {
   const m=/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(url);
@@ -89,7 +90,8 @@ export function compactAgentContext(messages: AgentMessage[]): AgentMessage[] {
   for(const m of messages)if(m.role==='assistant')for(const c of m.content)if(c.type==='toolCall'&&historical.has(c.id))paired.add(c.id);
   return messages.map((m,i)=>{
     if(m.role==='assistant')return {...m,content:m.content.map(c=>c.type==='toolCall'&&paired.has(c.id)?{type:'text' as const,text:`[历史edit_scene已成功：${String(c.arguments.summary??'场景修改').slice(0,180)}。参数已省略，以最新场景与read_scene为准。]`}:c)};
-    if(m.role!=='toolResult'||m.isError)return m;
+    if(m.role!=='toolResult')return m;
+    if(m.isError){if(m.toolName!=='plan_model')return m;return {...m,content:m.content.map(c=>c.type==='text'?{...c,text:c.text.split('Received arguments:')[0].slice(0,1800)+'\n规划参数未通过校验，场景未改变。steps和每类设备features最多24项；合并同类条目后重新调用plan_model，保留需求含义。不要原样重复失败参数。'}:c)};}
     if(m.toolName==='inspect_scene'&&i!==latestInspection)return {...m,content:[{type:'text' as const,text:'历史场景检查已省略，请以最新检查和当前几何为准。'}]};
     if((m.toolName==='read_scene'||m.toolName==='edit_scene')&&i!==latestScene&&i!==latestEdit)
       return {...m,content:[{type:'text' as const,text:'该历史场景快照已由后续成功操作更新。请以最新场景工具结果为准；本工具执行成功。'}]};
@@ -115,8 +117,9 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   const operations: Command[]=[];
   const applied: ExecutionResult['applied']=[];
   let capturedRevision=-1, capturedTurn=-1, reviewedRevision=-1, reviewedWholeRevision=-1, captureScope='whole', submitted=false, summary='';
-  let progressVersion=0, observedProgress=0, stagnantTurns=0, consecutiveErrors=0, pauseReason='';
-  const capturedViews=new Set<string>();
+  let progressVersion=0, observedProgress=0, stagnantTurns=0, consecutiveErrors=0, pauseReason='',lastToolError='';
+  const capturedViews=new Set<string>(),reviewedViews=new Set<string>();
+  let latestCaptureKey='',animationCheckedRevision=-1;
   const progress=()=>{progressVersion++;consecutiveErrors=0;};
   let reviewIssues:string[]=[];
   let activity: AgentActivity={title:'准备 Pi 建模任务',turn:0,toolCalls:0,characters:0,inputTokens:0,outputTokens:0,usageReported:false,lastEventAt:Date.now(),plan:[],events:[],timings:[]};
@@ -135,8 +138,9 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   const check=() => {if(signal?.aborted)throw new DOMException('已停止','AbortError');};
   const tool=<T extends TSchema>(name:string,label:string,description:string,parameters:T,execute:AgentTool<T>['execute']):AgentTool<any>=>({name,label,description,parameters,executionMode:'sequential',execute:execute as AgentTool['execute']});
   const tools: AgentTool<any>[]=[
-    tool('plan_model','规划建模步骤','修改前记录操作计划与尺寸假设。完整车间/产线/仓库需提供design和composition：工艺顺序、布局、设备特征、分区、连接、配套、配色取景与验收检查。只记录交付设计，不输出内部推理。',Type.Object({steps:Type.Array(Type.String({maxLength:120}),{minItems:1,maxItems:6}),assumptions:Type.String({maxLength:600}),design:Type.Optional(Type.Object({flow:Type.Array(Type.String({maxLength:100}),{minItems:1,maxItems:12}),layout:Type.String({minLength:5,maxLength:600}),equipment:Type.Array(Type.Object({name:Type.String({minLength:1,maxLength:80}),count:Type.Integer({minimum:1,maximum:100}),features:Type.Array(Type.String({maxLength:100}),{minItems:1,maxItems:6})}),{minItems:1,maxItems:16}),checks:Type.Array(Type.String({maxLength:120}),{minItems:1,maxItems:8}),composition:Type.Optional(compositionSchema)}))}),async(_id,args)=>{
+    tool('plan_model','规划建模步骤','修改前记录操作计划与尺寸假设：steps为1–24项，每类设备features为1–24项。超限请合并同类条目，不能删除用户要求。完整车间/产线/仓库需提供design和composition：工艺顺序、布局、设备特征、分区、连接、配套、配色取景与验收检查。只记录交付设计，不输出内部推理。',Type.Object({steps:Type.Array(Type.String({maxLength:240}),{minItems:1,maxItems:24}),assumptions:Type.String({maxLength:1600}),design:Type.Optional(Type.Object({flow:Type.Array(Type.String({maxLength:100}),{minItems:1,maxItems:12}),layout:Type.String({minLength:5,maxLength:600}),equipment:Type.Array(Type.Object({name:Type.String({minLength:1,maxLength:80}),count:Type.Integer({minimum:1,maximum:100}),features:Type.Array(Type.String({maxLength:240}),{minItems:1,maxItems:24})}),{minItems:1,maxItems:16}),checks:Type.Array(Type.String({maxLength:120}),{minItems:1,maxItems:8}),composition:Type.Optional(compositionSchema)}))}),async(_id,args)=>{
       check();if(needsDesign&&(!args.design||!args.design.composition))throw new Error('完整场景请先补全design：flow、layout、equipment（名称/数量/特征）、checks，以及composition（分区、连接、配套、配色与取景），不能直接堆占位模型');
+      if(!activity.plan.length)progress();
       activity.plan=args.steps;activity.design=args.design;emit(`计划：${args.steps.join(' → ')}；${args.assumptions}`,true);return textResult('设计已记录。按设备→输送/转运→工位→物料→人员动作建立关系；先完成各类代表设备近景，再布置同类设备与配套。createAssembly的planKey对应设计清单名称，sceneRole标明类别；不适用的配套不添加。局部编辑严格遵守本次作用范围。');
     }),
     tool('read_scene','读取当前场景','读取草稿真实对象。默认设备按组件摘要返回；需要修改设备零件时传 assemblyId 读取该设备全部零件的真实 ID 和几何。',Type.Object({assemblyId:Type.Optional(Type.String())}),async(_id,args)=>{
@@ -156,7 +160,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       const scopeErrors=checkEditScope(base,result.doc,options.editScope);if(scopeErrors.length)throw new Error(scopeErrors.join('；'));
       const errors=validateDocument(result.doc);if(errors.length)throw new Error(errors.map(e=>e.message).join('；'));
       check();
-      const changed=JSON.stringify(draft.nodes)!==JSON.stringify(result.doc.nodes)||JSON.stringify(draft.materials)!==JSON.stringify(result.doc.materials);
+      const changed=JSON.stringify(draft.nodes)!==JSON.stringify(result.doc.nodes)||JSON.stringify(draft.materials)!==JSON.stringify(result.doc.materials)||JSON.stringify(draft.animation)!==JSON.stringify(result.doc.animation);
       if(!changed)throw new Error('本次操作未改变场景，请执行计划中的有效修改或复核提交');
       progress();
       draft=result.doc;applied.push(...result.applied);operations.push(...parsed.operations);
@@ -166,26 +170,39 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
     tool('inspect_scene','检查场景完整度','根据当前真实草稿返回组件空间边界并核对设计清单、配套连接间距、设备包围盒交叠、人物尺度和墙地面材质。结果是检查线索，不是工程或视觉合格证明。修改后需重新检查；可与最终截图同一轮调用。',Type.Object({}),async()=>{
       check();const report=inspectSceneQuality(draft,activity.design);if(activity.quality?.revision!==draft.revision)progress();activity.quality=report;emit(`场景检查：${report.componentCount}个组件，${report.issues.length}条待核对事项`,true);return textResult(JSON.stringify(report));
     }),
-    tool('capture_view','获取模型截图','渲染最新草稿并返回实际截图供视觉检查。必须在最后一次修改后截图。只在关键阶段或修正后截图。传assemblyId可聚焦设备细节，省略则拍全场景；提交前必须完成最终全景复核。',Type.Object({view:Type.Union([Type.Literal('perspective'),Type.Literal('front'),Type.Literal('side'),Type.Literal('top')]),assemblyId:Type.Optional(Type.String())}),async(_id,args)=>{
+    tool('capture_view','获取模型截图','渲染最新草稿并返回实际截图供视觉检查。必须在最后一次修改后截图。只在关键阶段或修正后截图。最终提交必须用scope=scene获取全场景，且不传assemblyId；设备近景使用scope=assembly及assemblyId。省略scope时兼容旧调用：传assemblyId为近景，否则为全场景。',Type.Object({view:Type.Union([Type.Literal('perspective'),Type.Literal('front'),Type.Literal('side'),Type.Literal('top')]),scope:Type.Optional(Type.Union([Type.Literal('scene'),Type.Literal('assembly')])),assemblyId:Type.Optional(Type.String())}),async(_id,args)=>{
       check();
+      if(args.scope==='scene'&&args.assemblyId)throw new Error('全场景截图scope=scene时请省略assemblyId，不能把近景称为全景');
+      if(args.scope==='assembly'&&!args.assemblyId)throw new Error('设备近景scope=assembly需要真实assemblyId');
       const targetIds=args.assemblyId?draft.nodes.filter(n=>n.assemblyId===args.assemblyId).map(n=>n.id):undefined;
       if(targetIds&&!targetIds.length)throw new Error('截图目标组合不存在，请读取真实assemblyId');
-      const data=await (options.capture??captureScene)(draft,args.view,targetIds);check();captureScope=args.assemblyId??'whole';const key=`${draft.revision}:${args.view}:${captureScope}`;if(!capturedViews.has(key)){capturedViews.add(key);progress();}capturedRevision=draft.revision;capturedTurn=calls;
-      emit(`已获取 ${args.view} 视角截图，等待模型复核`,true);
-      return {content:[{type:'text' as const,text:`这是草稿 revision=${draft.revision} scope=${captureScope} 的真实渲染截图。对照用户参考图检查。`},asImage(data)],details:{revision:draft.revision,view:args.view}};
+      const data=await (options.capture??captureScene)(draft,args.view,targetIds);check();captureScope=args.assemblyId??'whole';const key=`${draft.revision}:${args.view}:${captureScope}`;latestCaptureKey=key;if(!capturedViews.has(key)){capturedViews.add(key);progress();}capturedRevision=draft.revision;capturedTurn=calls;
+      emit(`已获取 ${captureScope==='whole'?'全场景':'设备近景 '+captureScope} / ${args.view} 截图（版本 ${draft.revision}），等待模型复核`,true);
+      return {content:[{type:'text' as const,text:`这是草稿 revision=${draft.revision} scope=${captureScope} 的真实渲染截图。对照用户参考图检查。`},asImage(data)],details:{revision:draft.revision,view:args.view,scope:captureScope}};
+    }),
+    tool('preview_animation','检查动态预览','对当前动画在三个不同时间点实际求值并渲染，检查运动对象与场景关系。不能代替真实碰撞/生产仿真。动画变更后提交前必须调用，下一轮review_model复核图片。',Type.Object({}),async()=>{
+      check();if(!draft.animation)throw new Error('尚无动画，请先通过edit_scene的setAnimation配置运动轨道');
+      const evaluate=createAnimationEvaluator(draft),candidates=new Set<number>([draft.animation.duration*.381966,draft.animation.duration*.618034,draft.animation.duration]);
+      for(const track of draft.animation.tracks){const keys=track.keyframes??[];for(let i=1;i<keys.length;i++)if(JSON.stringify(keys[i].value)!==JSON.stringify(keys[i-1].value)){candidates.add((keys[i].time+keys[i-1].time)/2);candidates.add(keys[i].time);break;}if(track.channel==='follow')candidates.add((track.start!+track.end!)/2);}
+      const first=evaluate(0),times=[0];let previous=JSON.stringify([...first]);for(const time of candidates){const current=JSON.stringify([...evaluate(time)]);if(current!==previous){times.push(time);previous=current;if(times.length===3)break;}}if(times.length<3)times.push(draft.animation.duration);
+      const content:({type:'text';text:string}|ImageContent)[]=[];let moving=false;
+      for(const time of times){const poses=evaluate(time);if([...poses].some(([id,p])=>JSON.stringify(p)!==JSON.stringify(first.get(id))))moving=true;const picture=await (options.capture??captureScene)(draft,'perspective',undefined,time);check();content.push({type:'text',text:`动态样本 time=${time.toFixed(2)}s revision=${draft.revision} scope=whole；不是完整碰撞或动画验收`},asImage(picture));}
+      if(!moving)throw new Error('三个动画样本没有可见变化，请检查目标、关键帧/表达式和时长，不要声称已让场景动起来');
+      const key=`${draft.revision}:animation:whole`;if(!capturedViews.has(key)){capturedViews.add(key);progress();}latestCaptureKey=key;capturedRevision=draft.revision;capturedTurn=calls;captureScope='whole';animationCheckedRevision=draft.revision;
+      emit(`动态预览：${draft.animation.tracks.length}条轨道，已检查三个时间样本，等待视觉复核`,true);return {content,details:{revision:draft.revision,times}};
     }),
     tool('review_model','记录视觉检查','看过最新截图后记录外轮廓、比例、悬空/穿插、颜色和参考图差异。存在差距必须如实记录。',Type.Object({observations:Type.String({minLength:5,maxLength:1200}),issues:Type.Array(Type.String({maxLength:200}),{maxItems:8})}),async(_id,args)=>{
       check();if(calls<=capturedTurn)throw new Error('截图刚刚返回，请在下一轮读取图片后再调用 review_model，不能提前编造视觉检查');
       if(capturedRevision!==draft.revision)throw new Error('请先获取当前版本截图，再做视觉检查');
-      if(reviewedRevision!==draft.revision)progress();
+      if(!reviewedViews.has(latestCaptureKey)){reviewedViews.add(latestCaptureKey);progress();}
       if(captureScope!=='whole'&&!args.issues.length)reviewedPrototypes.set(captureScope,assemblyFingerprint(captureScope));
       reviewedRevision=draft.revision;if(captureScope==='whole')reviewedWholeRevision=draft.revision;reviewIssues=[...args.issues];
-      emit(`视觉检查：${args.observations}${args.issues.length?'；待改进：'+args.issues.join('；'):''}`,true);
-      return textResult(args.issues.length ? '差异已记录。预算足够时修改后重新截图检查；无法解决的差异需在 submit_preview 明确列出。' : '已记录模型自检，不代表人工验收通过。可提交预览。');
+      emit(`视觉检查（${captureScope==='whole'?'全场景':'设备近景'} / 版本 ${draft.revision}）：${args.observations}${args.issues.length?'；待改进：'+args.issues.join('；'):''}`,true);
+      return textResult((args.issues.length?'差异已记录，未解决问题必须在submit_preview明确列出。':'已记录模型自检，不代表人工验收通过。')+(reviewedWholeRevision===draft.revision?' 当前版本的全场景复核已完成。如本轮目标已完成，可以立即submit_preview；沙盘简化、视角遮挡或未要求的动画功能可如实列为限制，不要仅因此反复截图空转。':' 当前仅有设备近景复核，提交前还需capture_view({view:"perspective",scope:"scene"})，下一轮review_model。'));
     }),
     tool('submit_preview','提交待确认预览','结束本轮，把草稿交给用户确认，不能直接写入正式场景。必须先完成最新截图复核。',Type.Object({summary:Type.String({minLength:1,maxLength:1200}),remainingIssues:Type.Array(Type.String({maxLength:200}),{maxItems:8})}),async(_id,args)=>{
-      check();if(needsDesign&&activity.quality?.revision!==draft.revision)throw new Error('完整场景提交前请调用inspect_scene检查最新草稿的配套、连接与尺度');if(!operations.length)throw new Error('未修改场景，无需提交；直接回答用户即可');
-      if(reviewedRevision!==draft.revision||reviewedWholeRevision!==draft.revision)throw new Error('必须先对最后一次修改获取全场景截图并调用 review_model');
+      check();if(draft.animation&&JSON.stringify(draft.animation)!==JSON.stringify(base.animation)&&animationCheckedRevision!==draft.revision)throw new Error('动画已修改，请先preview_animation检查运动样本，并在下一轮review_model复核后提交');if(needsDesign&&activity.quality?.revision!==draft.revision)throw new Error('完整场景提交前请调用inspect_scene检查最新草稿的配套、连接与尺度');if(!operations.length)throw new Error('未修改场景，无需提交；直接回答用户即可');
+      if(reviewedRevision!==draft.revision||reviewedWholeRevision!==draft.revision)throw new Error(`尚未完成版本 ${draft.revision} 的全场景复核（最近截图范围：${captureScope==='whole'?'全场景':'设备近景 '+captureScope}；最近全景复核版本：${reviewedWholeRevision<0?'无':reviewedWholeRevision}）。请调用 capture_view({view:"perspective",scope:"scene"})，省略assemblyId；下一轮读取图片并调用review_model，再submit_preview。`);
       const remaining=[...new Set([...reviewIssues,...args.remainingIssues,...(activity.quality?.revision===draft.revision?activity.quality.issues:[])])];
       summary=args.summary+(remaining.length?'\n仍需改进：'+remaining.join('；'):'\n已完成模型自检，仍请人工核对参考图。');
       submitted=true;emit('已完成本轮，等待你确认应用',true);
@@ -194,7 +211,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   ];
   const model:Model<'openai-completions'>={id:cfg.model,name:cfg.model,api:'openai-completions',provider:'chat3d-gateway',baseUrl:cfg.baseURL.trim().replace(/\/+$/,''),reasoning:false,input:['text','image'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:AGENT_LIMITS.outputPerTurn,compat:{supportsDeveloperRole:false,supportsReasoningEffort:false,supportsStore:false,supportsUsageInStreaming:true,maxTokensField:'max_tokens'}};
   const geometryGuide=buildSystemPrompt(agentSceneContext(draft,selectionForDoc(draft))).replace(/# 参考范例[\s\S]*?# 图片/, '# 图片').replace(/# 输出格式[\s\S]*?(?=\n# |$)/, '');
-  const prompt=`你是 chat3d 的分步建模 agent。用工具操作草稿，用户确认前禁止修改正式场景。\n建模顺序：plan_model → read_scene/edit_scene → capture_view → review_model → 必要时局部修正并再次截图 → submit_preview。\n每轮可调用多个工具，顺序执行。没有固定总轮数；有有效进展就继续。连续4轮没有实际场景变化或新的视觉检查进展，或连续3次工具失败时会暂停并保留草稿。
+  const prompt=`你是 chat3d 的分步建模 agent。用工具操作草稿，用户确认前禁止修改正式场景。\n用户要求动态时必须生成可播放的setAnimation配置，不能用文字建议代替实现，也不要求用户先建动作库。支持通用关键帧与受限数学表达式、绑定及时间编排；不支持任意JavaScript/物理仿真。修改动画后preview_animation→下一轮review_model→submit_preview。\n建模顺序：plan_model → read_scene/edit_scene → capture_view → review_model → 必要时局部修正并再次截图 → submit_preview。\n每轮可调用多个工具，顺序执行。没有固定总轮数；有有效进展就继续。连续4轮没有实际场景变化或新的视觉检查进展，或连续3次工具失败时会暂停并保留草稿。
 完整车间/产线/仓库必须先用plan_model.design明确工艺顺序、布局、设备清单及数量/识别特征、验收项，并填写composition：zones分区用途、connections设备之间经何种配套连接（from/to/via用清单名称）、support配套名称/角色/数量/目的、palette统一配色、presentation镜头与材质层次。没有关系的场景connections可空，用户不需要的机器人/人员等不要强加。
 完整度标准：每个生产单元根据其工艺需要安排操作面、进出料位置、线边物料、人员动作；输送与人工工位应实际接近而非分散摆放。人员面向实际操作区域，手部与工作高度相称。生产/暂存/物流分区有连续通路；紧凑作业区与留白通道协调，避免任意放大空地。
 细节标准：同类设备的门窗、HMI、把手/通风/灯等按实际功能保持相近完成度；货架配合实际物料容器，台面配合工件，安全设施按需要设置。不要堆装饰零件刷数量。灰蓝低饱和主体、有限的安全/状态强调色可作为无指定风格时的默认假设；用户指定色优先。墙地面、设备喷漆、金属、玻璃和服装区别处理，主要设备避免全黑或全白一块。
@@ -208,7 +225,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
 效率规则：空场景创建时，尽量在同一响应依次调用 plan_model、edit_scene；复杂场景按计划分批编辑后再 capture_view；工具仍按顺序执行。拿到截图后，在下一响应调用 review_model；达到用户要求后再 submit_preview。只在需要真实ID或额外信息时调用 read_scene，edit_scene 已返回最新完整场景，不要重复读取。必须依赖工具结果的操作放在下一轮，不能猜测ID。
 创建时省略默认字段：parentId 默认 null、单位 scale 默认[1,1,1]、rotationQuaternion 默认[0,0,0,1]；只给非默认位置或朝向。参数使用紧凑JSON，避免在工具调用前复述长篇说明。
 可用现有工具修正的穿插、悬空与明显比例错误，应集中一次修正再截图；不支持的复杂曲面和标识如实列出，不要反复尝试无效方法。
-capture_view 和 review_model 必须分在不同模型轮次，先收到图片才允许描述检查结果。\n如果只是询问、闲聊或缺少关键需求，直接中文回答或澄清，不要强行建模。\n不能把“生成成功”写成“精确还原”。模型自检不是客观质量评分。先外形比例、再部件关系、后细节，不要用配色掩盖结构错误。只看参考图确定可见部分，未见部分标为假设。\n工具命令参数参考如下；其中“一次输出最终JSON”的旧规则只适用于 edit_scene 的参数，当前必须使用原生工具调用，不能把工具调用写成普通JSON文本。\n${geometryGuide}\n本次编辑约束：${JSON.stringify(scopeContext(base,options.editScope))}。有nodeIds或selectedAssemblies时只可修改所列节点或所列完整组件；仅allowAssemblyAdditions=true且完整组件都被选中时，允许向该组件追加/替换部件。禁止新建其他组件或修改未选中对象；lockPlacement为true时保留所有已有对象的位置与朝向。范围不够就说明需要用户调整，不能自行扩大。\n最近对话（只供意图理解，场景以工具返回为准）：\n${(options.history??[]).slice(-8).map(m=>m.role+': '+m.text.slice(0,1000)).join('\n')}`;
+capture_view 和 review_model 必须分在不同模型轮次，先收到图片才允许描述检查结果。\n如果只是询问、闲聊或缺少关键需求，直接中文回答或澄清，不要强行建模。\n不能把“生成成功”写成“精确还原”。模型自检不是客观质量评分。先外形比例、再部件关系、后细节，不要用配色掩盖结构错误。只看参考图确定可见部分，未见部分标为假设。\n工具命令参数参考如下；其中“一次输出最终JSON”的旧规则只适用于 edit_scene 的参数，当前必须使用原生工具调用，不能把工具调用写成普通JSON文本。\n${geometryGuide}\n本次编辑约束：${JSON.stringify(scopeContext(base,options.editScope))}。有nodeIds或selectedAssemblies时只可修改所列节点或所列完整组件；动画targetIds也受该范围约束，不能给未选中设备加动画。仅allowAssemblyAdditions=true且完整组件都被选中时，允许向该组件追加/替换部件。禁止新建其他组件或修改未选中对象；lockPlacement为true时保留所有已有对象的位置与朝向。范围不够就说明需要用户调整，不能自行扩大。\n最近对话（只供意图理解，场景以工具返回为准）：\n${(options.history??[]).slice(-8).map(m=>m.role+': '+m.text.slice(0,1000)).join('\n')}`;
   const f=options.streamFn?undefined:await getFetch();
   let calls=0;
   const seenCalls=new Set<string>();
@@ -220,7 +237,8 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
       if(pauseReason)throw new Error(pauseReason);
       if(JSON.stringify(context).length>2*1024*1024)throw new Error('本轮上下文超过2MB上限，请减少参考图或拆分场景');
       calls++;activity.turn=calls;activity.timings=[...activity.timings,{id:`model-${calls}`,kind:'model',label:`模型第 ${calls} 轮`,startedAt:Date.now()}];emit(`第 ${calls} 轮：等待模型决定下一步`);
-      const budgetNote=`\n当前第${calls}轮，连续${stagnantTurns}轮没有有效进展。继续完成计划与细节，不因轮数增加提前收尾。当前输入${activity.inputTokens}、输出${activity.outputTokens} Token；避免无效重复。`;
+      const recoveryNote=stagnantTurns>=2?'\n已连续无有效进展：不要重复read_scene或plan_model。若有校验错误，先修正失败参数；若计划已记录，执行一个最小有效edit_scene；若模型已完成，则完成最新截图、复核和提交。无法继续应明确说明阻碍。':'';
+      const budgetNote=`\n当前第${calls}轮，连续${stagnantTurns}轮没有有效进展。继续完成计划与细节，不因轮数增加提前收尾。当前输入${activity.inputTokens}、输出${activity.outputTokens} Token；避免无效重复。${recoveryNote}`;
       context={...context,messages:context.messages.map((message,index)=>index===0 && message.role==='system'?{...message,content:typeof message.content==='string'?message.content+budgetNote:[...message.content,{type:'text' as const,text:budgetNote}]}:message)};
       if(options.streamFn)return options.streamFn(m,context,streamOptions);
       return stream(model,context,{...streamOptions,apiKey:cfg.apiKey.trim(),fetch:f,maxTokens:AGENT_LIMITS.outputPerTurn,maxRetries:0,timeoutMs:AGENT_LIMITS.idleTimeoutMs,
@@ -244,7 +262,8 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
       if(event.isError){
         consecutiveErrors++;
         const result=event.result as {content?:{type:string;text?:string}[]};
-        const detail=(result?.content??[]).filter(c=>c.type==='text').map(c=>c.text??'').join(' ').slice(0,500);
+        const detail=(result?.content??[]).filter(c=>c.type==='text').map(c=>c.text??'').join(' ').split('Received arguments:')[0].slice(0,700);
+        lastToolError=`${event.toolName}：${detail}`;
         emit(`工具失败：${event.toolName}${detail?'：'+detail:''}`,true);
         if(consecutiveErrors>=AGENT_LIMITS.consecutiveErrors)pauseReason='连续3次工具失败，已暂停；请查看执行记录，成功草稿已保留';
       }else consecutiveErrors=0;
@@ -269,8 +288,8 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
     const last=[...runner.state.messages].reverse().find(m=>m.role==='assistant');
     if(last?.role==='assistant' && (last.stopReason==='error'||last.stopReason==='aborted'))throw new Error(last.errorMessage||'模型服务未完成请求，请检查工具调用兼容性');
     if(operations.length&&!submitted){emit('本轮结束，已保留未完成阶段草稿',true);return checkpoint(pauseReason||'本轮未完成“最新截图→复核→提交”，没有自动修改正式场景。');}
-    if(!operations.length && pauseReason)throw new Error(pauseReason);
-    if(!operations.length){summary=last?.role==='assistant'?last.content.filter(c=>c.type==='text').map(c=>c.text).join('\n'):'';if(!summary.trim())throw new Error('模型未返回有效回复，请检查模型工具调用支持');
+    if(!operations.length && pauseReason)throw new Error(pauseReason+(lastToolError?'\n最近工具错误：'+lastToolError:''));
+    if(!operations.length){summary=last?.role==='assistant'?last.content.filter(c=>c.type==='text').map(c=>c.text).join('\n'):'';if(!summary.trim())throw new Error(lastToolError?'工具调用未完成：'+lastToolError:'模型未返回有效回复，请检查模型工具调用支持');
       if(summary.trim().startsWith('{') && summary.includes('\"operations\"'))throw new Error('模型输出了普通JSON而未调用建模工具。请检查网关的工具调用支持，或在模型配置切回单次生成');}
     return {batch:{requestId:makeId(),projectId:base.projectId,baseRevision:base.revision,selectedIds:options.selection,editScope:options.editScope,summary,operations},result:{doc:draft,applied,errors:[]},activity};
   } catch(error) {

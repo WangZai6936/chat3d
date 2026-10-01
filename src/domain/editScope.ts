@@ -18,6 +18,18 @@ export function checkEditScope(before:SceneDocument,after:SceneDocument,scope?:E
   }
   if(scope.lockPlacement&&(!b||!same(n.transform.position,b.transform.position)||!same(n.transform.rotationQuaternion,b.transform.rotationQuaternion)))errors.push(`位置与朝向已锁定：${n.name}`);
  }
+ if(allowed){
+  const animationAllowed=new Set(allowed);for(const n of after.nodes)if(!oldIds.has(n.id)&&n.assemblyId&&fullySelected.has(n.assemblyId))animationAllowed.add(n.id);
+  const unselected=(d:SceneDocument)=>(d.animation?.tracks??[]).filter(t=>t.targetIds.some(id=>!animationAllowed.has(id))).map(t=>structuredClone(t));
+  if(!same(unselected(before),unselected(after)))errors.push('动画修改超出选中范围，必须保留其他对象的动画轨道');
+  const changed=new Set<string>();
+  const nodeTracks=(d:SceneDocument,id:string)=>(d.animation?.tracks??[]).filter(t=>t.targetIds.includes(id));
+  for(const n of before.nodes)if(!same(n.transform,next.get(n.id)?.transform)||!same(nodeTracks(before,n.id),nodeTracks(after,n.id)))changed.add(n.id);
+  const followers=[...(before.animation?.tracks??[]),...(after.animation?.tracks??[])].filter(t=>t.channel==='follow');
+  for(let i=0;i<16;i++)for(const track of followers)if(track.sourceId&&changed.has(track.sourceId))for(const id of track.targetIds)changed.add(id);
+  if([...changed].some(id=>oldIds.has(id)&&!animationAllowed.has(id)))errors.push('动画或绑定变化会间接影响未选中对象，请扩展选择范围后重试');
+  if(unselected(before).length&&(before.animation?.duration!==after.animation?.duration||before.animation?.loop!==after.animation?.loop))errors.push('动画总时长或循环会影响未选中对象，请切换全场景范围');
+ }
  return errors.slice(0,8);
 }
 export interface SceneChange {id:string;name:string;group:string;kind:'added'|'modified'|'removed';fields:string[]}
@@ -33,5 +45,6 @@ export function sceneChanges(before:SceneDocument,after:SceneDocument):SceneChan
   if(a.assemblyId!==n.assemblyId||a.parentId!==n.parentId||a.assemblyName!==n.assemblyName)fields.push('分组');
   if(fields.length)out.push(entry(n,'modified',fields));
  }
+ if(!same(before.animation,after.animation))out.push({id:'__animation__',name:after.animation?.name??before.animation?.name??'动画',group:'场景动画',kind:before.animation?after.animation?'modified':'removed':'added',fields:['动画轨道/时序/运动表达式']});
  for(const n of before.nodes)if(!next.has(n.id))out.push(entry(n,'removed',['移除']));return out;
 }

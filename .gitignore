@@ -27,3 +27,7 @@ dist-ssr
 src-tauri/target
 e2e/shots
 *.tmp.ps1
+
+.env
+.env.*
+!.env.example

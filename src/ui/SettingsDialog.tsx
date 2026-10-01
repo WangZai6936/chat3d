@@ -78,7 +78,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         <p className="text-sm text-gray-400">1. 填写接口和密钥　2. 获取并选择模型　3. 测试后保存</p>
         <label className="block text-sm space-y-1"><span>API 根地址</span><input className={inputClass} type="url" value={baseURL} disabled={useMock} onChange={(e)=>{invalidate();setBaseURL(e.target.value)}} onBlur={()=>void load(false)} placeholder="https://你的服务/v1" /><span className="block text-xs text-gray-400">填写到 /v1 或服务提供的 API 根路径，不要包含 /models 或 /chat/completions</span></label>
         <label className="block text-sm space-y-1"><span>API Key</span><input className={inputClass} type="password" autoComplete="off" value={apiKey} disabled={useMock} onChange={(e)=>{invalidate();setApiKey(e.target.value)}} onBlur={()=>void load(false)} placeholder="填写服务提供的密钥" /></label>
-        <p className="text-xs text-amber-200">密钥保存在当前浏览器的本地存储中。请使用专用低额度密钥。网页接口需要支持 HTTPS，并允许当前网页来源。</p>
+        <p className="text-xs text-amber-200">密钥保存在当前浏览器的本地存储中。请使用专用低额度密钥。网页版通过本站代理，桌面版通过原生网络请求；API 地址需由部署管理员统一允许。</p>
         {!useMock && <div className="space-y-3">
           <button onClick={()=>void load()} disabled={!ready || fetching} className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded text-sm">{fetching ? '正在获取模型列表…' : models?.length ? '重新获取模型列表' : '获取可用模型'}</button>
           {error && <div role="alert" className="text-sm p-3 bg-red-950/50 text-red-200 rounded break-words">{error}</div>}

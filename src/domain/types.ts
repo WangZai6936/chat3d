@@ -1,3 +1,4 @@
+import {validateAnimation,type AnimationProgram} from './animation';
 // Scene DSL — 可编辑场景文档是唯一可信来源（方案第 4 节）
 // 右手坐标系、Y 轴向上；内部长度统一为米；宽度沿 X、高度沿 Y、深度沿 Z
 import { isValidId } from '../util/ids';
@@ -115,6 +116,7 @@ export interface ViewState {
 }
 
 export interface SceneDocument {
+  animation?:AnimationProgram;
   schemaVersion: number;
   projectId: string;
   revision: number; // 每次提交递增；撤销也生成新 revision
@@ -283,5 +285,6 @@ export function validateDocument(doc: SceneDocument): Error[] {
       cur = node ? node.parentId : null;
     }
   }
+  errs.push(...validateAnimation(doc.animation,doc.nodes??[]));
   return errs;
 }

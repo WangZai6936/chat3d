@@ -175,7 +175,7 @@ export function ChatPanel({executionDetails=true}:{executionDetails?:boolean}={}
         if(!alive()) return;
         const generated = await runModelingAgent({text,config:cfg,document:store().doc,selection:selectedIds,images,history,signal:controller.signal,editScope,
           onCheckpoint:cp=>{if(alive()){checkpointRef.current=cp;useEditorStore.setState({pendingBatch:cp.batch,pendingResult:cp.result});}},
-          onActivity:event=>{if(alive()){armTimeout();setAgentActivity(event);if(Date.now()-lastActivitySave>=1000){store().setLastRun(event);lastActivitySave=Date.now();}if(checkpointRef.current)checkpointRef.current.activity=event;}},onPreview:document=>{if(alive())store().setPreviewDoc(document);}});
+          onActivity:event=>{if(alive()){armTimeout();setAgentActivity(event);if(Date.now()-lastActivitySave>=1000||/暂停|中断|工具失败/.test(event.title)){store().setLastRun(event);lastActivitySave=Date.now();}if(checkpointRef.current)checkpointRef.current.activity=event;}},onPreview:document=>{if(alive())store().setPreviewDoc(document);}});
         batch=generated.batch;prepared=generated.result;if(alive()){setAgentActivity(generated.activity);store().setLastRun(generated.activity);}
       } else {
         const generated = await generateBatch(text+`\n本次编辑范围约束：${JSON.stringify(editScope)}。nodeIds限定修改范围；allowAssemblyAdditions=true时可向完整选中的组件追加部件，不可新建其他组件；lockPlacement需保持所有已有位置和朝向。`, cfg, ctx, controller.signal, images, history, event => { if(alive()) setProgress(event); });
@@ -214,7 +214,7 @@ export function ChatPanel({executionDetails=true}:{executionDetails?:boolean}={}
     <div ref={scrollRef} onScroll={() => {const el=scrollRef.current; if(el) {stickRef.current=el.scrollHeight-el.scrollTop-el.clientHeight<64;if(stickRef.current)setNewMessages(false);}}} className="chat-transcript flex-1 overflow-auto p-3 space-y-4 min-h-0">
       {!messages.length && <div className="chat-welcome text-sm text-gray-400 py-5 leading-relaxed">
         <p className="text-gray-200 font-medium mb-2">从一个想法开始</p>
-        <p>可以附参考图，说明尺寸、用途和需要保留的细节。生成后先看预览，再决定应用。</p>
+        <p>可以附参考图，说明尺寸、用途和需要保留的细节。也可以通过对话给现有场景添加运动，先播放预览，再决定应用。</p>
         <button className="mt-3 text-blue-300 text-left" onClick={()=>setInput('创建一个长 1.2 米、宽 0.8 米、高 0.75 米的工作台')}>试试：创建一个有明确尺寸的工作台 ↗</button>
         <p className="mt-3 text-xs">图片建模是可编辑的近似重建，单张图无法确定背面与真实尺寸。</p>
       </div>}

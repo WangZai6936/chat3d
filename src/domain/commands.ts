@@ -1,3 +1,4 @@
+import {validateAnimation,type AnimationProgram} from './animation';
 // 命令系统（方案第 6 节）
 // - 每个命令有固定参数 schema、目标类型限制、影响集计算、成本估计与逆操作
 // - 一次 AI 批量修改 = 一条历史记录；命令串行提交，原子生效
@@ -25,6 +26,8 @@ export type TransformMode = 'set' | 'delta'; // set=移动到，delta=移动了�
 
 // 命令白名单（方案第一版开放集合的 P0 子集）
 export type CommandOp =
+  | 'setAnimation'
+  | 'clearAnimation'
   | 'createAssembly'
   | 'duplicateAssembly'
   | 'createPrimitive'
@@ -142,6 +145,8 @@ export interface DeleteCommand {
 
 export type AppearancePatch=Partial<Pick<Material,'baseColor'|'roughness'|'metalness'|'opacity'>>;
 export type Command =
+  | {op:'setAnimation';animation:AnimationProgram}
+  | {op:'clearAnimation'}
   | {op:'transformAssembly';targetId:string;rotationDegrees?:Vec3;scaleFactor?:number;pivot?:Vec3}
   | {op:'appendAssemblyParts';targetId:string;parts:AssemblyPart[];origin?:Vec3;yaw?:number}
   | {op:'replaceAssemblyParts';targetId:string;partIds:string[];parts:AssemblyPart[];origin?:Vec3;yaw?:number}
@@ -181,6 +186,8 @@ export interface CommandBatch {
 // ============ 影响 / 成本 ============
 export function affectedNodeIds(op: Command, doc: SceneDocument): string[] {
   switch (op.op) {
+    case 'setAnimation':
+    case 'clearAnimation':
     case 'createAssembly':
     case 'duplicateAssembly':
     case 'createPrimitive':
@@ -240,7 +247,7 @@ export function estimateCost(ops: Command[]): { commands: number; newNodes: numb
 // 历史保存已接受命令及足够的 before/after 数据（方案第 6 节）
 export interface CommandWithInverse {
   command: Command;
-  before: { nodes: SceneNode[]; materialIds: string[]; nodeIndices?:Record<string,number> }; // 受影响节点快照 + 用到的材质
+  before: { animation?:AnimationProgram|null; nodes: SceneNode[]; materialIds: string[]; nodeIndices?:Record<string,number> }; // 受影响节点快照 + 用到的材质
   after: { nodes: SceneNode[]; materialIds: string[] };
 }
 
@@ -309,11 +316,19 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
   if(op.op==='createTemplate'&&op.templateId==='smt_workshop'&&doc.nodes.length)return {doc,error:new Error('完整车间组件请在空会话创建，避免覆盖或重叠；已有场景请直接修改其中设备')};
   const nodes = doc.nodes.map(cloneNode);
   let materials=doc.materials;
-  const beforeSnapshot = 'targetId' in op ? snapshotAffected(doc, op) : { nodes: [], materialIds: [] };
+  let animation=doc.animation;
+  const beforeSnapshot:CommandWithInverse['before'] = {...('targetId' in op ? snapshotAffected(doc, op) : {nodes:[],materialIds:[]}),...(['setAnimation','clearAnimation'].includes(op.op)?{animation:structuredClone(doc.animation??null)}:{})};
 
   let createdIds: string[] | undefined;
 
   switch (op.op) {
+    case 'setAnimation': {
+      animation=structuredClone(op.animation);
+      if(animation&&Array.isArray(animation.tracks))for(const track of animation.tracks){if(track&&Array.isArray(track.targetIds))track.targetIds=track.targetIds.map(id=>tempIdMap.get(id)??id);if(track?.sourceId)track.sourceId=tempIdMap.get(track.sourceId)??track.sourceId;}
+      const errors=validateAnimation(animation,nodes);if(!animation||errors.length)return {doc,error:errors[0]??new Error('动画配置不能为空')};
+      break;
+    }
+    case 'clearAnimation': animation=undefined;break;
     case 'createAssembly': {
       try{const parts=buildAssembly(op);createdIds=parts.map(n=>n.id);if(op.tempId)tempIdMap.set(op.tempId,parts[0].id);nodes.push(...parts);}catch(e){return {doc,error:e instanceof Error?e:new Error('组合创建失败')};}break;
     }
@@ -454,6 +469,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     materials,
     revision: doc.revision + 1,
   };
+  if(animation)newDoc.animation=animation;else delete newDoc.animation;
   const errs = validateDocument(newDoc);
   if (errs.length > 0) {
     return { doc, error: new Error(`提交后文档校验失败: ${errs.map((e) => e.message).join('; ')}`) };

@@ -304,9 +304,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 // - after 里有但 before 里没有的节点：删除（即撤销创建）
 function restoreFromBefore(doc: SceneDocument, entry: HistoryEntry): SceneDocument {
   let nodes = doc.nodes.map(cloneSnapshot);
+  let animation=doc.animation;
   // 逐条反向还原，避免同一节点多次编辑覆盖批次最初状态。
   // 创建后再编辑的节点先还原编辑，再由创建操作的逆操作删除。
   for (const item of [...entry.applied].reverse()) {
+    if(Object.prototype.hasOwnProperty.call(item.before,'animation'))animation=structuredClone(item.before.animation??undefined);
     const before = new Map(item.before.nodes.map((n) => [n.id, n]));
     const afterIds = new Set(item.after.nodes.map((n) => n.id));
     nodes = nodes.filter((n) => !afterIds.has(n.id) || before.has(n.id));
@@ -322,7 +324,7 @@ function restoreFromBefore(doc: SceneDocument, entry: HistoryEntry): SceneDocume
       if (!existing.has(n.id)) nodes.push(cloneSnapshot(n));
     }
   }
-  return { ...doc, nodes, revision: doc.revision + 1 };
+  const restored={...doc,nodes,revision:doc.revision+1};if(animation)restored.animation=animation;else delete restored.animation;return restored;
 }
 
 function cloneSnapshot(n: SceneNode): SceneNode {

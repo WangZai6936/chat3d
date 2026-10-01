@@ -1,3 +1,5 @@
+import {createAnimationEvaluator} from '../domain/animation';
+import {AnimationClock,type PlaybackState} from './animationPlayback';
 // Three.js 视口 — 命令式渲染器（方案第 2、11 节）
 // - Scene DSL 文档是唯一可信来源；Three.js 对象是其渲染结果，不作为数据源
 // - 按需渲染：相机/选择/几何变化时才刷新
@@ -32,6 +34,11 @@ export class Viewport {
   private selectionHelpers: THREE.BoxHelper[] = [];
   private rafHandle: number | null = null;
   private dirty = true;
+  private animationClock=new AnimationClock();
+  private animationEvaluator:ReturnType<typeof createAnimationEvaluator>|null=null;
+  private onPlayback:((state:PlaybackState)=>void)|null=null;
+  private playbackNotified=0;
+  private lastFrame=0;
   private lastSyncedDoc:SceneDocument|null=null;
   private readonly host: HTMLElement;
   private readonly onPick: (nodeId: string | null) => void;
@@ -310,8 +317,12 @@ export class Viewport {
   // Incremental reconciliation: preserve unchanged mesh/geometry/material identities.
   sync(doc: SceneDocument): void {
     if(doc===this.lastSyncedDoc)return;
+    if(!this.animationClock)this.animationClock=new AnimationClock();
+    this.animationClock.configure(doc.animation?.duration,doc.animation?.loop);
+    this.animationEvaluator=doc.animation?createAnimationEvaluator(doc):null;
+    const animatedIds=new Set(doc.animation?.tracks.flatMap(t=>t.targetIds)??[]);
     const firstContent=this.nodeMap.size===0;this.clearSelectionHelpers();
-    const visible=new Set(doc.nodes.filter(n=>n.visible&&n.kind==='primitive'&&n.geometry).map(n=>n.id));
+    const visible=new Set(doc.nodes.filter(n=>(n.visible||animatedIds.has(n.id))&&n.kind==='primitive'&&n.geometry).map(n=>n.id));
     for(const [id,res] of this.nodeMap)if(!visible.has(id)){this.scene.remove(res.mesh);this.nodeMap.delete(id);}
     for(const node of doc.nodes){
       if(!visible.has(node.id))continue;
@@ -320,12 +331,13 @@ export class Viewport {
       const geometry=this.buildGeometry(node.geometry!),material=this.buildMaterial(node.materialId,doc,node.label);
       existing.geometry=geometry;existing.material=material;existing.mesh.geometry=geometry;existing.mesh.material=material;
       existing.mesh.position.fromArray(node.transform.position);existing.mesh.quaternion.fromArray(node.transform.rotationQuaternion);existing.mesh.scale.fromArray(node.transform.scale);
-      existing.mesh.name=node.name;existing.mesh.castShadow=material.opacity>=.95&&!node.label;
+      existing.mesh.visible=node.visible;existing.mesh.name=node.name;existing.mesh.castShadow=material.opacity>=.95&&!node.label;
     }
     const geometries=new Set([...this.nodeMap.values()].map(v=>v.geometry)),materials=new Set([...this.nodeMap.values()].map(v=>v.material));
     for(const [key,g] of this.sharedGeometryCache)if(!geometries.has(g)){g.dispose();this.sharedGeometryCache.delete(key);}
     for(const [key,m] of this.materialCache)if(!materials.has(m)){m.map?.dispose();m.dispose();this.materialCache.delete(key);}
     this.lastSyncedDoc=doc;
+    this.notifyPlayback();
     if(firstContent||!this.nodeMap.size)this.frameScene();
     this.markDirty();
   }
@@ -337,7 +349,7 @@ export class Viewport {
     mesh.castShadow = material.opacity >= 0.95 && !node.label;
     mesh.receiveShadow = true;
     mesh.userData.nodeId = node.id; // 视口只映射稳定 ID，不用数组下标或临时数字 ID
-    mesh.name = node.name;
+    mesh.name = node.name;mesh.visible=node.visible;
 
     // 变换：DSL 保存相对父节点的局部变换；P0 一层分组按世界放置
     const [px, py, pz] = node.transform.position;
@@ -396,13 +408,15 @@ export class Viewport {
     this.selectionHelpers = [];
   }
 
-  captureDocument(doc: SceneDocument, view: 'perspective' | 'front' | 'side' | 'top', targetIds?:string[]): string {
+  captureDocument(doc: SceneDocument, view: 'perspective' | 'front' | 'side' | 'top', targetIds?:string[],time?:number): string {
     if(this.renderer.getContext().isContextLost())throw new Error('WebGL 上下文丢失，无法截图');
     if(this.host.clientWidth<=0 || this.host.clientHeight<=0)throw new Error('视口不可见，无法截图');
     this.sync(doc);
+    const savedPlayback={...this.animationClock.state};this.animationClock.pause();
     const saved = {target:this.orbitTarget.clone(),radius:this.orbitRadius,theta:this.orbitTheta,phi:this.orbitPhi};
     const helpers = [...this.scene.children].filter(o => o.type === 'BoxHelper');
     try {
+      if(time!==undefined)this.applyAnimation(time);else this.restoreBasePose();
       helpers.forEach(h=>h.visible=false);
       const angles = {perspective:[0.7,1.05],front:[0,Math.PI/2],side:[Math.PI/2,Math.PI/2],top:[0,0.01]};
       [this.orbitTheta,this.orbitPhi] = angles[view];
@@ -418,10 +432,22 @@ export class Viewport {
       return data;
     } finally {
       helpers.forEach(h=>h.visible=true);
+      this.animationClock.state=savedPlayback;
+      if(savedPlayback.time>0||savedPlayback.playing)this.applyAnimation(savedPlayback.time);else this.restoreBasePose();
       this.orbitTarget.copy(saved.target);this.orbitRadius=saved.radius;this.orbitTheta=saved.theta;this.orbitPhi=saved.phi;
       this.updateOrbitCamera();this.markDirty();
     }
   }
+
+  setPlaybackListener(listener:((state:PlaybackState)=>void)|null){this.onPlayback=listener;this.notifyPlayback();}
+  private notifyPlayback(){this.onPlayback?.({...this.animationClock.state});}
+  private restoreBasePose(){for(const node of this.lastSyncedDoc?.nodes??[]){const mesh=this.nodeMap.get(node.id)?.mesh;if(mesh){mesh.position.fromArray(node.transform.position);mesh.quaternion.fromArray(node.transform.rotationQuaternion);mesh.scale.fromArray(node.transform.scale);mesh.visible=node.visible;}}this.markDirty();}
+  private applyAnimation(time:number){if(!this.animationEvaluator)return;const poses=this.animationEvaluator(time);for(const [id,pose] of poses){const mesh=this.nodeMap.get(id)?.mesh;if(mesh){mesh.position.fromArray(pose.transform.position);mesh.quaternion.fromArray(pose.transform.rotationQuaternion);mesh.scale.fromArray(pose.transform.scale);mesh.visible=pose.visible;}}for(const h of this.selectionHelpers)h.update();this.markDirty();}
+  playAnimation(){if(!this.animationEvaluator)return;try{this.animationClock.play();this.applyAnimation(this.animationClock.state.time);}catch(e){this.animationClock.fail(e instanceof Error?e.message:'动画播放失败');this.restoreBasePose();}this.notifyPlayback();}
+  pauseAnimation(){this.animationClock.pause();this.notifyPlayback();}
+  resetAnimation(){this.animationClock.reset();this.restoreBasePose();this.notifyPlayback();}
+  seekAnimation(time:number){this.animationClock.pause();this.animationClock.seek(time);try{this.applyAnimation(this.animationClock.state.time);}catch(e){this.animationClock.fail(e instanceof Error?e.message:'动画计算失败');this.restoreBasePose();}this.notifyPlayback();}
+  setAnimationSpeed(speed:number){this.animationClock.setSpeed(speed);this.notifyPlayback();}
 
   setBackdrop(mode:'light'|'slate'):void {this.scene.background=new THREE.Color(mode==='slate'?'#465b69':'#e8edef');this.floorMaterial?.color.set(mode==='slate'?'#536a77':'#e0e7e9');this.markDirty();}
 
@@ -460,7 +486,9 @@ export class Viewport {
 
   // 按需渲染循环：静态场景不持续刷新
   start(): void {
-    const loop = () => {
+    const loop = (now:number) => {
+      const delta=this.lastFrame?(now-this.lastFrame)/1000:0;this.lastFrame=now;
+      if(this.animationClock.tick(delta)){try{this.applyAnimation(this.animationClock.state.time);}catch(e){this.animationClock.fail(e instanceof Error?e.message:'动画计算失败');this.restoreBasePose();}if(now-this.playbackNotified>100||!this.animationClock.state.playing){this.notifyPlayback();this.playbackNotified=now;}}
       this.render();
       this.rafHandle = requestAnimationFrame(loop);
     };

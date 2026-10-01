@@ -9,7 +9,7 @@ globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.requestAnimat
 globalThis.ResizeObserver=class{observe(){} unobserve(){} disconnect(){}};
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 let handler=async()=>new Response(JSON.stringify({data:[{id:'model-b'},{id:'model-a'}]}));
-globalThis.fetch=(...args)=>handler(...args);
+globalThis.fetch=async(...args)=>{const r=await handler(...args);r.headers.set('x-chat3d-proxy','1');return r;};
 const {render,fireEvent,waitFor,cleanup,act}=await import('@testing-library/react');
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 let passed=0;

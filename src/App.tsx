@@ -42,7 +42,7 @@ export default function App() {
       const url = URL.createObjectURL(new Blob([data], { type: 'model/gltf-binary' }));
       const a = document.createElement('a'); a.href = url; a.download = 'chat3d-model.glb';
       document.body.appendChild(a); a.click(); a.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setProjectNotice('已发起 GLB 下载：包含可见模型及材质，不包含背景、灯光和选中框。编辑工程请另行下载项目。');
+      setProjectNotice('已发起 GLB 下载：包含可见模型及材质，不包含背景、灯光、选中框或动画。保存动画与编辑工程请下载项目 JSON。');
     } catch (e) { setProjectNotice(`GLB 导出失败：${e instanceof Error ? e.message : String(e)}`); }
     finally { setExporting(false); }
   };

@@ -1,3 +1,5 @@
+import type {AnimationProgram} from '../domain/animation';
+import {createBrowserProxyFetch} from './transport';
 // 真实模型适配器（方案 P2，提前到本轮实现）
 // OpenAI 兼容协议：POST {baseURL}/chat/completions
 // - 系统提示词把 Scene DSL 讲清楚，模型输出结构化 JSON 命令批
@@ -20,6 +22,7 @@ export interface ModelConfig {
 }
 
 export interface SceneContext {
+  animation?:AnimationProgram;
   nodes: { id: string; name: string; desc: string; position: [number, number, number]; rotationQuaternion?: Transform['rotationQuaternion']; scale?: Transform['scale']; materialId?: string; visible?: boolean; parentId?: string | null }[];
   selection: string[];
   selectedAssemblies?:string[];
@@ -41,7 +44,7 @@ export type ChatMessage = {
 
 // P0 已实现的命令集；模型若输出其他 op（rotate/scale/delete 等），解析层拦截
 const IMPLEMENTED_OPS = new Set([
-  'transformAssembly','appendAssemblyParts','replaceAssemblyParts','createPrimitive', 'createAssembly', 'duplicateAssembly', 'translateAssembly',
+  'setAnimation','clearAnimation','transformAssembly','appendAssemblyParts','replaceAssemblyParts','createPrimitive', 'createAssembly', 'duplicateAssembly', 'translateAssembly',
   'updateParameters',
   'setTransform',
   'translate',
@@ -66,6 +69,15 @@ export function buildSystemPrompt(ctx: SceneContext): string {
     : '  （空场景，还没有任何对象）';
   const sel = ctx.selectedAssemblies?.length ? `选中的完整组件 id：${ctx.selectedAssemblies.join(', ')}，包含各组件全部零件。其他单独选中节点：${ctx.selection.join(', ')||'无'}。` : ctx.selection.length ? `选中的节点 id：${ctx.selection.join(', ')}` : '当前没有选中对象。';
   return `你是 chat3d 的三维建模助手，专门搭建工业设备 / 仓储设备场景。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
+
+# 对话生成动态
+当前动画配置：${JSON.stringify(ctx.animation??null)}
+支持setAnimation和clearAnimation。setAnimation.animation是完整替换，必须保留未要求改变的已有轨道。结构：{version:1,name,duration:秒(0–3600),loop:boolean,tracks:[{id:稳定唯一名称,name,targetIds:[真实零件ID],channel,...}]}。最多128轨道、2048个绑定。移动整机时先read_scene获取组件全部零件ID，不能只动锚点。不同轨道并行，同一对象同一通道只能一条；顺序与停留通过关键帧时间表达，循环由loop控制。
+position/scale轨道的keyframes=[{time:0,value:[x,y,z]},...]；position为相对原始位置的世界偏移（米），scale为原始缩放的正倍率。rotation需要axis:[x,y,z]世界轴和pivot:[x,y,z]世界旋转中心，关键帧value为相对原始姿态的角度。visibility轨道关键帧value为boolean并采用阶跃。其他通道在关键帧间线性插值，首帧必须time=0，后面时间严格递增，结束后保持末帧。停留使用相同value的不同时间帧；往返用回到初始值的末帧。
+follow轨道使用sourceId、start、end，不用keyframes；跟随源对象从start到end的变换增量，开始时保持目标世界位置，结束后保持释放位置，目标自身位置轨道还可叠加运动。禁止循环绑定；不等于真实刚体抓取或碰撞。
+自定义运动可以用expression替代keyframes：position/scale为三个数学AST，rotation为一个AST。叶子为数字、"t"（秒）、"pi"；节点为{op,args}，仅支持add/sub/mul/div/mod/sin/cos/abs/min/max/clamp/gt/lt/if。最大深度8/每表达式64节点；禁止JavaScript字符串、eval、网络、文件及无限循环。visibility和follow不支持表达式。例如圆周偏移用sin/cos，停留用关键帧，不能把不支持能力说成已实现。
+示例：{op:"setAnimation",animation:{version:1,name:"物料输送",duration:10,loop:true,tracks:[{id:"material-move",name:"移动停留",targetIds:["真实ID"],channel:"position",keyframes:[{time:0,value:[0,0,0]},{time:3,value:[2,0,0]},{time:5,value:[2,0,0]},{time:10,value:[0,0,0]}]}]}}。
+动画会先进入用户可播放预览，确认后保存；用户无需建立动作库或手工绑定。只在对象或路线不明确时澄清。已有位置锁仅锁编辑基准，不禁止被授权对象的动画运动；仅选中范围仍必须遵守。GLB导出当前只含静态几何，动画保存在项目JSON。
 
 # 建模优先级
 先匹配外轮廓和长宽高比例，再匹配部件位置、真实开孔、负空间、颜色，最后补细节。零件数量不能替代准确性。
@@ -421,6 +433,10 @@ function cleanCommand(opType: string, op: Record<string, unknown>): Command | nu
       if (!targetId) return null;
       return { op: 'setVisibility', targetId, visible: op.visible !== false };
     }
+    case 'setAnimation': {
+      if(!op.animation||typeof op.animation!=='object'||JSON.stringify(op.animation).length>300000)return null;return {op:'setAnimation',animation:structuredClone(op.animation) as AnimationProgram};
+    }
+    case 'clearAnimation': return {op:'clearAnimation'};
     case 'setAssemblyMetadata': {
       const targetId=cleanTargetId(op);if(!targetId)return null;
       if(op.sceneRole!==undefined&&(typeof op.sceneRole!=='string'||!SCENE_ROLES.includes(op.sceneRole as SceneRole)))return null;
@@ -450,9 +466,7 @@ function cleanCommand(opType: string, op: Record<string, unknown>): Command | nu
 }
 
 // ============ 网络请求 ============
-// 统一取 fetch：Tauri 打包环境走 Rust 网络层（@tauri-apps/plugin-http），无 CORS 限制；
-// 浏览器/dev 环境退回全局 fetch（能否跨域由服务方 CORS 决定——discovery 等服务的
-// /models 接口不响应 CORS 预检，浏览器里会被拦，exe 里走 Rust 转发不受影响）
+// 浏览器统一走本站模型代理；Tauri 走原生 HTTP。失败不退回跨域直连。
 let resolvedFetch: typeof fetch | null = null;
 export async function getFetch(): Promise<typeof fetch> {
   if (resolvedFetch) return resolvedFetch;
@@ -463,10 +477,10 @@ export async function getFetch(): Promise<typeof fetch> {
       resolvedFetch = mod.fetch as unknown as typeof fetch;
       return resolvedFetch;
     } catch {
-      // 插件加载失败（不应发生）时退回全局 fetch
+      throw new Error('桌面原生网络插件无法加载，请重新安装完整桌面客户端；不会退回浏览器直连');
     }
   }
-  resolvedFetch = globalThis.fetch;
+  resolvedFetch = typeof window!=='undefined'?createBrowserProxyFetch(globalThis.fetch):globalThis.fetch;
   return resolvedFetch;
 }
 
@@ -582,7 +596,7 @@ export async function testConnection(cfg: ModelConfig, signal?: AbortSignal): Pr
     if (!content || !content.trim()) return { ok: false, text: '接口返回 200，但没有消息内容' };
     return { ok: true, text: `连接成功（模型回复：${content.trim().slice(0, 60)}）` };
   } catch (e) {
-    return { ok: false, text: `请求没发出去：${e instanceof Error ? e.message : String(e)}。可能是地址拼写错误、网络不通，或服务方不支持跨域调用` };
+    return { ok: false, text: `请求失败：${e instanceof Error ? e.message : String(e)}。请检查代理部署、API 地址和服务端网络` };
   }
 }
 
@@ -643,13 +657,14 @@ export async function fetchModels(cfg: ModelConfig, signal?: AbortSignal): Promi
     if (ids.length === 0) return { models: [], error: '接口返回的模型列表为空（该服务可能不支持 /models 列表）' };
     return { models: [...new Set(ids)].sort((a, b) => a.localeCompare(b)) };
   } catch (e) {
-    return { models: [], error: `请求没发出去：${e instanceof Error ? e.message : String(e)}（可能是网络、证书或网关 CORS 配置问题；可在浏览器控制台查看原因）` };
+    return { models: [], error: `请求失败：${e instanceof Error ? e.message : String(e)}（请检查代理部署或服务端网络；网页不再直接跨域请求模型服务）` };
   }
 }
 
 // 构造场景上下文（ChatPanel 调用）
-export function buildSceneContext(doc: Pick<SceneDocument, 'nodes'>, selection: string[]): SceneContext {
+export function buildSceneContext(doc: Pick<SceneDocument, 'nodes'|'animation'>, selection: string[]): SceneContext {
   return {
+    animation:doc.animation,
     nodes: doc.nodes.map((n) => {
       const g = n.geometry;
       const desc = g

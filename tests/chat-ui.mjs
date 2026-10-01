@@ -7,7 +7,7 @@ for(const name of ['window','document','HTMLElement','Node','MutationObserver','
 Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 let handler;let requests=[];
-globalThis.fetch=(...args)=>{requests.push(args);return handler(...args)};
+globalThis.fetch=async(...args)=>{requests.push(args);const r=await handler(...args);r.headers.set('x-chat3d-proxy','1');return r;};
 const {render,fireEvent,waitFor,cleanup,act}=await import('@testing-library/react');
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});
 let passed=0;
