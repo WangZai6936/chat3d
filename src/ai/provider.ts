@@ -3,18 +3,24 @@
 // - 系统提示词把 Scene DSL 讲清楚，模型输出结构化 JSON 命令批
 // - 响应解析带容错与清洗：模型输出不可信，未知 op/坏参数一律丢弃并报错
 // - 同一批次内模型可用 tempId 引用前面创建的节点（commands.applyBatch 负责映射）
-import { Geometry, Transform } from '../domain/types';
+import { Geometry, Transform, SceneDocument, validateGeometry } from '../domain/types';
+import {buildAssembly,type AssemblyPart} from '../domain/assembly';
+import { EXTRA_MATERIALS } from '../domain/materials';
+import { Euler, Quaternion } from 'three';
 import { Command } from '../domain/commands';
+import { GenerationProgress, readChatResponse } from './stream';
 
 export interface ModelConfig {
   baseURL: string; // 如 https://api.openai.com/v1
   apiKey: string;
   model: string; // 如 gpt-4o-mini
+  agentMode?: 'pi' | 'single';
+  stream?: boolean; // 默认流式；不支持 SSE 的服务可关闭
   useMock: boolean; // 离线演示开关：true 时走模拟回包，不联网
 }
 
 export interface SceneContext {
-  nodes: { id: string; name: string; desc: string; position: [number, number, number] }[];
+  nodes: { id: string; name: string; desc: string; position: [number, number, number]; rotationQuaternion?: Transform['rotationQuaternion']; scale?: Transform['scale']; materialId?: string; visible?: boolean; parentId?: string | null }[];
   selection: string[];
 }
 
@@ -34,18 +40,18 @@ export type ChatMessage = {
 
 // P0 已实现的命令集；模型若输出其他 op（rotate/scale/delete 等），解析层拦截
 const IMPLEMENTED_OPS = new Set([
-  'createPrimitive',
+  'createPrimitive', 'createAssembly', 'duplicateAssembly', 'translateAssembly',
   'updateParameters',
   'setTransform',
   'translate',
   'rename',
   'setVisibility',
-  'setMaterial',
+  'setMaterial','setAppearance',
 ]);
 
-const GEOMETRY_TYPES = new Set(['box', 'sphere', 'cylinder', 'cone', 'plane']);
+const GEOMETRY_TYPES = new Set(['box', 'sphere', 'cylinder', 'cone', 'plane', 'roundedPlate','capsule','frame','tube','trapezoid']);
 
-const KNOWN_MATERIALS = new Set(['mat_gray', 'mat_blue', 'mat_dark', 'mat_metal', 'mat_white', 'mat_rubber', 'mat_yellow']);
+const KNOWN_MATERIALS = new Set([...EXTRA_MATERIALS.map(m=>m.id),'mat_gray', 'mat_blue', 'mat_dark', 'mat_metal', 'mat_white', 'mat_rubber', 'mat_yellow', 'mat_red', 'mat_cyan', 'mat_black','mat_glass','mat_screen','mat_pcb','mat_green']);
 
 const DEFAULT_TRANSFORM = {
   position: [0, 0, 0] as [number, number, number],
@@ -53,18 +59,17 @@ const DEFAULT_TRANSFORM = {
   scale: [1, 1, 1] as [number, number, number],
 };
 
-function buildSystemPrompt(ctx: SceneContext): string {
+export function buildSystemPrompt(ctx: SceneContext): string {
   const nodeLines = ctx.nodes.length
-    ? ctx.nodes.map((n) => `  - id:${n.id} name:${n.name} (${n.desc}) pos:[${n.position.join(',')}]`).join('\n')
+    ? ctx.nodes.map((n) => `  - id:${n.id} name:${n.name} (${n.desc}) pos:[${n.position.join(',')}] rotation:${JSON.stringify(n.rotationQuaternion)} scale:${JSON.stringify(n.scale)} material:${n.materialId} visible:${n.visible} parent:${n.parentId}`).join('\n')
     : '  （空场景，还没有任何对象）';
   const sel = ctx.selection.length ? `选中的节点 id：${ctx.selection.join(', ')}` : '当前没有选中对象。';
   return `你是 chat3d 的三维建模助手，专门搭建工业设备 / 仓储设备场景。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
 
-# 第一原则：把设备拆成多个零件，绝不要用一两个光板盒子应付
-真实感来自三样东西：零件数量、尺寸层次、材质混搭。
-- 像玩具的回答：工作台 = 1 个大盒子；储物柜 = 1 个盒子。
-- 像真设备的回答：台面、4 条腿、横梁、背板、抽屉、把手、脚垫……每个零件单独一条命令。
-数量要求：小型设备（工作台/托盘/油桶/推车）8~15 个零件；大型设备（货架/储物柜/作业线）15~20 个零件。不要超过 25 个零件，否则输出太长会被截断。
+# 建模优先级
+先匹配外轮廓和长宽高比例，再匹配部件位置、真实开孔、负空间、颜色，最后补细节。零件数量不能替代准确性。
+按需要拆分主体、顶板、支承、轮胎轮毂、防撞边、传感器、灯带和按钮。每次 edit_scene 最多40项，复杂任务用多次调用连续完成；利用组合与阵列压缩重复部件，不以减少结构细节代替效率。不声称完整复刻。
+图像参考优先于下方通用工作台示例，不能把所有设备套成盒子。不要为了材质混搭而擅自改变参考色。
 
 # 真实尺寸（单位：米）
 - 板材、层板厚度 0.02~0.06；承重板用 0.04 以上
@@ -72,14 +77,21 @@ function buildSystemPrompt(ctx: SceneContext): string {
 - 参考：工作台高 0.75、柜深 0.4~0.6、货架高 1.8~2.5、油桶高 0.9 口径 0.6、托盘 1.2×0.8×0.15
 - 薄板件（门板、面板）厚度别超过 0.05；承重骨架别细于 0.04
 
-# 材质库（只能从这 7 种里选；相邻零件尽量混搭）
+# 材质库（按用途区分粗糙度与反射，以参考图颜色优先）
 mat_gray 喷漆铝灰 —— 结构件、支架、桌面，万能默认
 mat_blue 工业蓝漆 —— 设备主色：框架、柜门、护栏
 mat_dark 深灰钢 —— 承重骨架：立柱、横梁、底座
 mat_metal 亮钢 —— 裸露金属件：把手、导轨、轮毂、桶盖（强反射）
 mat_white 米白面板 —— 外壳：柜体、抽屉面板、电器外壳
 mat_rubber 橡胶黑 —— 轮胎、脚轮、脚垫、防撞条（哑光）
+mat_red 红色 —— 急停按钮、红色轮圈
+mat_cyan 浅青色 —— 青白灯带（仅表面颜色，不代表真实发光）
+mat_black 黑色涂层 —— 黑色顶板、盖板
 mat_yellow 警示黄 —— 警示条、护栏、路锥、托盘边沿
+mat_floor 青灰哑光环氧地面；mat_wall 浅灰非金属墙面；mat_paint 浅色半哑喷漆外壳
+mat_brushed 裸露拉丝金属；mat_glass 深色半透明观察窗（不要用黑板冒充玻璃）；mat_screen 深蓝操作屏
+mat_fabric 深蓝哑光工作服；mat_skin 肤色；mat_light 柔和发光灯面
+地面用mat_floor、墙面用mat_wall、外壳用mat_paint，避免把地面和墙都当金属。不要为装饰乱加灯光和警示色。
 要点：整台设备只用一种颜色会显得假；「深骨架 + 浅面板 + 亮钢把手 + 橡胶脚垫」的组合最真实。
 
 # 坐标系与摆放
@@ -107,43 +119,71 @@ mat_yellow 警示黄 —— 警示条、护栏、路锥、托盘边沿
 ]}
 
 # 图片
-用户可能附图作为参考。看图估算尺寸（认常见物体比例：人、门、托盘等），仍只输出上面的命令；不确定时给合理默认值，并在 summary 里注明「按图片估算」。
+用户可能附图作为参考。先核对外轮廓、宽高比、顶板厚度/开孔、轮组朝向、负空间、关键部件位置与颜色，再输出最终命令。单图只能估算，不可声称精确还原。
+- AGV 图像若是低矮圆角底盘，不能做成高方柜；轮子轴向应与车体侧面法线一致。
+- 真正的圆形通孔用 roundedPlate.holeRadius；不要用实心圆柱或白色圆片冒充孔洞。宽大圆角车身用 roundedPlate，cornerRadius 独立于高度。
+- 前面板凹槽可用外围窄条围出空腔，不能先放完整实体再把零件埋进去。
+- 看不到的背面不确定，logo、贴图、复杂曲面、任意布尔挖槽当前无法精确复刻，summary 必须明确未还原项。不要捏造可见细节。
+- summary 包含「按图估算尺寸」「保留的关键特征」「仍缺少的细节」，不能只报零件数量。
+- 后续消息携带的最近参考图用于连续修改，当前场景仍是事实来源，不要重复创建整车。
 
 # 输出格式（最重要的一条，严格遵守）
+如果只是回答问题或必须向用户澄清，允许 operations:[] 并把回答放入 summary，不要强行创建物体。
 先想好要拆哪些零件，然后回复里只允许出现最终 JSON：第一个字符必须是 {，最后一个字符必须是 }，中间不得出现任何思考过程、草稿、英文或解释文字，不要 markdown 代码块：
 {"summary":"一句话中文说明做了什么","operations":[命令按执行顺序排列]}
+
+# 按需生成原则
+严格按本次描述选择工艺、空间布局、设备类型与数量。机加工、SMT、仓储等不能互相替换，禁止自动插入现成车间或设备预设。需求不明时说明假设或澄清，不得擅自改成SMT。
+应从布局、结构关系、设备细节和统一配色构建场景；完成度不足的占位模型必须明确标为未完成，不能仅靠增加零件数量宣称达标。
+已存在的场景可使用 translateAssembly 移动一整个组件；它不创建新设备。
+box 可指定 bevelRadius（米，0为锐边），用小倒角表达钣金，不要一律使用肥厚圆角。
+
+# 自由组合与阵列建模
+优先以 createAssembly 定义每个自设计设备/结构的部件、尺寸、材质和局部变换；没有预设几何或工艺。parts最多100条，repeat用count与step排列重复部件；单组合最多2000零件。
+格式：{"op":"createAssembly","tempId":"custom1","name":"按需求命名的自设计组合","position":[0,0,0],"yaw":0,"parts":[{"name":"自定义支柱","geometry":{"type":"box","params":{"width":0.05,"height":1,"depth":0.05}},"materialId":"mat_metal","transform":{"position":[0,0.5,0]},"repeat":{"count":4,"step":[0.4,0,0]}}]}
+上面只演示语法，不是设备模板；必须自己根据请求设计真实结构。position/yaw放置整体，parts位置是组合局部坐标；每条默认单位缩放和无旋转。transform可用rotationDegrees:[x,y,z]表示XYZ欧拉角（度），无需手算四元数；提供rotationQuaternion时以它为准。
+duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id或本批tempId","offset":[3,0,0],"name":"第二台自设计设备"} 可复制已生成组合，避免重复输出所有零件。translateAssembly只移动，duplicateAssembly才复制。
+用组合/阵列表达重复结构，把输出预算用在差异化形体、负空间、连接、尺度和材质层次上，而不是降级成占位箱体。
 
 # 支持的命令
 1. 创建基本体：
    {"op":"createPrimitive","tempId":"t1","name":"桌面","parentId":null,"geometry":{"type":"box","params":{"width":2,"height":0.05,"depth":0.8}},"materialId":"mat_gray","transform":{"position":[0,0.725,0],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}}
    - tempId：本批次内唯一标记，供后面命令引用。parentId 一般 null。
    - 几何类型与参数：
+     capsule: radius,length。Y向胶囊体，总高length+2*radius；适合肢体/软管直段，人物头部用sphere缩放，禁止方盒头与粗方柱四肢。
+     frame: width,height,depth,thickness。XY平面真实矩形开口边框，沿Z厚度；thickness<min(width,height)/2；适合观察窗框、门洞、机架开口，中心为空。玻璃放开口内，不被实心机壳遮挡。
+     tube: outerRadius,innerRadius,height。沿Y中空管件，0<innerRadius<outerRadius，可用于管道/套筒/轮毂。
+     trapezoid: widthTop,widthBottom,height,depth。XY梯形沿Z拉伸；上窄下宽或上宽下窄，适合斜面机罩、底座、人体躯干。组合局部旋转可改变斜面方向。
+     roundedPlate: width,height,depth,cornerRadius,holeRadius(可选，默认0)。水平 XZ 圆角轮廓，厚度沿Y，中心圆孔沿Y贯穿。cornerRadius>0且<=短边/2；holeRadius>=0且<短边/2。
      box: width,height,depth
      cylinder: radiusTop,radiusBottom,height,radialSegments(建议 16-32)
      sphere: radius,widthSegments(建议 32),heightSegments(建议 24)
      cone: radius,height,radialSegments(建议 32)
      plane: width,depth,widthSegments,depthSegments（默认竖直。做地面/地板时用 rotationQuaternion [-0.7071,0,0,0.7071] 绕 X 轴放平，position y=0）
-   - 材质只能从上面 7 种里选，按零件用途挑最合适的。
+   - 材质从上述材质库按用途选择，按零件用途挑最合适的。
 2. 修改几何参数（整体替换）：{"op":"updateParameters","targetId":"t1","geometry":{...同上...}}
-3. 设置变换（set 为绝对）：{"op":"setTransform","targetId":"t1","transform":{"position":[...],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}}
+3. 设置变换（绝对值；可只给 position / rotationQuaternion / scale 中需要修改的分量，其他分量保持不变）：{"op":"setTransform","targetId":"t1","transform":{"position":[...],"rotationQuaternion":[0,0,0,1],"scale":[1,1,1]}}
 4. 移动（delta 为增量，单位米）：{"op":"translate","targetId":"t1","space":"world","mode":"delta","value":[0.5,0,0]}
 5. 重命名：{"op":"rename","targetId":"t1","name":"新名字"}
 6. 显隐：{"op":"setVisibility","targetId":"t1","visible":false}
-7. 材质：{"op":"setMaterial","targetId":"t1","materialId":"mat_metal"}
+7. 外观局部修改：{"op":"setAppearance","targetId":"真实零件ID","baseColor":"#3979AA"}；可选roughness/metalness/opacity(0–1)。整机用scope:"assembly"，仅外壳可加sourceMaterialIds:["原外壳材质ID"]，先read_scene读取材质与零件，不要把玻璃、屏幕、人物一起改色。未给出的材质属性保持原值。
+8. 材质：{"op":"setMaterial","targetId":"t1","materialId":"mat_metal"}
 
 # targetId 规则
 - 引用同批次里前面创建的节点：用它的 tempId（如 "t1"）。
 - 引用场景里已有的节点：用真实 id（见下方场景上下文）。
 
 # 当前版本不支持
-旋转、缩放、复制、删除、分组（reparent）以及模板/资产命令——请只用上面 7 种命令表达。
+独立 rotate/scale 命令、复制、删除、分组（reparent）及模板/资产命令尚不支持。旋转和缩放请使用 setTransform；四元数必须归一化。历史对话仅用于理解意图，不要重复执行先前创建操作；以当前场景上下文为准。
 
 # 场景上下文
 ${nodeLines}
 ${sel}`;
 }
 
-export function buildMessages(text: string, ctx: SceneContext, images: string[] = []): ChatMessage[] {
+export interface ConversationTurn { role: 'user' | 'assistant'; text: string }
+
+export function buildMessages(text: string, ctx: SceneContext, images: string[] = [], history: ConversationTurn[] = []): ChatMessage[] {
   const reminder = '\n\n（请只输出一个 JSON 命令批对象，不要 markdown 代码块或任何解释文字）';
   // 有图时 user 消息走多模态数组（OpenAI 兼容协议）；无图保持纯文本（兼容所有模型）
   const userContent: string | ContentPart[] = images.length
@@ -154,6 +194,7 @@ export function buildMessages(text: string, ctx: SceneContext, images: string[] 
     : text + reminder;
   return [
     { role: 'system', content: buildSystemPrompt(ctx) },
+    ...history.slice(-8).map((turn): ChatMessage => ({ role: turn.role, content: turn.text.slice(0, 1500) })),
     { role: 'user', content: userContent },
   ];
 }
@@ -202,7 +243,7 @@ export function parseModelResponse(raw: string): GeneratedBatch {
     else warns.push(`跳过参数不合法的命令「${opType}」`);
   }
 
-  if (operations.length === 0) {
+  if (operations.length === 0 && (obj.operations.length > 0 || !obj.summary || typeof obj.summary !== 'string')) {
     throw new Error(warns.length ? `没有可执行的命令：${warns.join('；')}` : '模型没有生成任何命令');
   }
   return { summary: warns.length ? `${summary}（${warns.join('；')}）` : summary, operations };
@@ -239,7 +280,8 @@ function cleanGeometry(raw: unknown): Geometry | null {
     params[k] = n;
   }
   if (!ok || Object.keys(params).length === 0) return null;
-  return { type: type as Geometry['type'], params } as unknown as Geometry;
+  const geometry = { type: type as Geometry['type'], params } as unknown as Geometry;
+  return validateGeometry(geometry).length ? null : geometry;
 }
 
 function cleanTransform(raw: unknown): Transform {
@@ -250,6 +292,7 @@ function cleanTransform(raw: unknown): Transform {
   };
   if (!raw || typeof raw !== 'object') return t;
   const r = raw as Record<string, unknown>;
+  const degrees=toVec3(r.rotationDegrees);if(degrees)t.rotationQuaternion=new Quaternion().setFromEuler(new Euler(...degrees.map(v=>v*Math.PI/180) as [number,number,number],'XYZ')).toArray() as Transform['rotationQuaternion'];
   const p = toVec3(r.position);
   if (p) t.position = p;
   const s = toVec3(r.scale);
@@ -261,6 +304,30 @@ function cleanTransform(raw: unknown): Transform {
   return t;
 }
 
+// 修改已有对象时只保留显式给出的分量；创建对象仍使用完整默认变换。
+function cleanTransformPatch(raw: unknown): Partial<Transform> | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const patch: Partial<Transform> = {};
+  if ('position' in r) {
+    const p = toVec3(r.position);
+    if (!p || !Array.isArray(r.position) || r.position.length !== 3) return null;
+    patch.position = p;
+  }
+  if ('scale' in r) {
+    const s = toVec3(r.scale);
+    if (!s || !Array.isArray(r.scale) || r.scale.length !== 3 || s.some((v) => v <= 0)) return null;
+    patch.scale = s;
+  }
+  if ('rotationQuaternion' in r) {
+    if (!Array.isArray(r.rotationQuaternion) || r.rotationQuaternion.length !== 4) return null;
+    const q = r.rotationQuaternion.map(toNum);
+    if (q.some((v) => v === null) || Math.hypot(...q as number[]) < 1e-8) return null;
+    patch.rotationQuaternion = q as Transform['rotationQuaternion'];
+  }
+  return Object.keys(patch).length ? patch : null;
+}
+
 function cleanTargetId(op: Record<string, unknown>): string | null {
   const t = op.targetId;
   return typeof t === 'string' && t.trim() ? t.trim() : null;
@@ -268,6 +335,13 @@ function cleanTargetId(op: Record<string, unknown>): string | null {
 
 function cleanCommand(opType: string, op: Record<string, unknown>): Command | null {
   switch (opType) {
+    case 'createAssembly': {
+      if(!Array.isArray(op.parts))return null;const position=op.position===undefined?[0,0,0] as [number,number,number]:toVec3(op.position),yaw=op.yaw===undefined?0:toNum(op.yaw);if(!position||yaw===null||typeof op.name!=='string')return null;
+      const parts:AssemblyPart[]=[];for(const value of op.parts){if(!value||typeof value!=='object')return null;const p=value as Record<string,unknown>,geometry=cleanGeometry(p.geometry);if(!geometry||typeof p.name!=='string')return null;let repeat:AssemblyPart['repeat'];if(p.repeat!==undefined){const r=p.repeat as {count?:unknown;step?:unknown};if(!r||typeof r!=='object')return null;const count=toNum(r.count),step=toVec3(r.step);if(count===null||!step)return null;repeat={count,step};}parts.push({name:p.name,geometry,transform:cleanTransform(p.transform),materialId:typeof p.materialId==='string'&&KNOWN_MATERIALS.has(p.materialId)?p.materialId:'mat_gray',...(repeat?{repeat}:{})});}
+      const definition={name:op.name,position,yaw,parts};try{buildAssembly(definition);}catch{return null;}return {op:'createAssembly',...definition,tempId:typeof op.tempId==='string'?op.tempId:undefined};
+    }
+    case 'duplicateAssembly': {const targetId=cleanTargetId(op),offset=toVec3(op.offset);return targetId&&offset?{op:'duplicateAssembly',targetId,offset,name:typeof op.name==='string'?op.name:undefined,tempId:typeof op.tempId==='string'?op.tempId:undefined}:null;}
+    case 'translateAssembly': {const targetId=cleanTargetId(op);const value=toVec3(op.value);return targetId&&value?{op:'translateAssembly',targetId,value}:null;}
     case 'createPrimitive': {
       const geometry = cleanGeometry(op.geometry);
       if (!geometry) return null;
@@ -296,7 +370,8 @@ function cleanCommand(opType: string, op: Record<string, unknown>): Command | nu
     case 'setTransform': {
       const targetId = cleanTargetId(op);
       if (!targetId) return null;
-      return { op: 'setTransform', targetId, transform: cleanTransform(op.transform) };
+      const transform = cleanTransformPatch(op.transform);
+      return transform ? { op: 'setTransform', targetId, transform } : null;
     }
     case 'translate': {
       const targetId = cleanTargetId(op);
@@ -318,6 +393,16 @@ function cleanCommand(opType: string, op: Record<string, unknown>): Command | nu
       if (!targetId) return null;
       return { op: 'setVisibility', targetId, visible: op.visible !== false };
     }
+    case 'setAppearance': {
+      const targetId=cleanTargetId(op);if(!targetId)return null;
+      const result:Extract<Command,{op:'setAppearance'}>={op:'setAppearance',targetId};
+      if(op.scope!==undefined){if(op.scope!=='assembly')return null;result.scope='assembly';}
+      if(op.sourceMaterialIds!==undefined){if(!Array.isArray(op.sourceMaterialIds)||!op.sourceMaterialIds.length||!op.sourceMaterialIds.every(v=>typeof v==='string'))return null;result.sourceMaterialIds=op.sourceMaterialIds;}
+      if(op.baseColor!==undefined){if(typeof op.baseColor!=='string'||!/^#[0-9a-f]{6}$/i.test(op.baseColor))return null;result.baseColor=op.baseColor;}
+      for(const key of ['roughness','metalness','opacity'] as const)if(op[key]!==undefined){const v=toNum(op[key]);if(v===null||v<0||v>1)return null;result[key]=v;}
+      if(op.materialId!==undefined){if(typeof op.materialId!=='string'||!op.materialId.trim())return null;result.materialId=op.materialId;}
+      return ['baseColor','roughness','metalness','opacity','materialId'].some(k=>k in result)?result:null;
+    }
     case 'setMaterial': {
       const targetId = cleanTargetId(op);
       if (!targetId) return null;
@@ -334,7 +419,7 @@ function cleanCommand(opType: string, op: Record<string, unknown>): Command | nu
 // 浏览器/dev 环境退回全局 fetch（能否跨域由服务方 CORS 决定——discovery 等服务的
 // /models 接口不响应 CORS 预检，浏览器里会被拦，exe 里走 Rust 转发不受影响）
 let resolvedFetch: typeof fetch | null = null;
-async function getFetch(): Promise<typeof fetch> {
+export async function getFetch(): Promise<typeof fetch> {
   if (resolvedFetch) return resolvedFetch;
   const tauriInternals = (globalThis as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
   if (tauriInternals) {
@@ -356,6 +441,8 @@ export async function generateBatch(
   ctx: SceneContext,
   signal?: AbortSignal,
   images: string[] = [],
+  history: ConversationTurn[] = [],
+  onProgress?: (event: GenerationProgress) => void,
 ): Promise<GeneratedBatch> {
   const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
   if (!base) throw new Error('未配置 API 地址（baseURL）');
@@ -363,12 +450,15 @@ export async function generateBatch(
   if (!cfg.model.trim()) throw new Error('未配置模型名');
 
   const url = `${base}/chat/completions`;
-  const messages = buildMessages(text, ctx, images);
+  const messages = buildMessages(text, ctx, images, history);
 
   // 解析失败自动纠偏重试一次：把模型的错误回复顶回去，再强调格式
   let lastErr: Error | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const content = await fetchChat(url, cfg, messages, signal);
+    const report = (phase: GenerationProgress['phase'], characters = 0, streaming = cfg.stream !== false) => onProgress?.({phase, characters, streaming, attempt: attempt + 1, lastEventAt: Date.now()});
+    report(attempt ? 'correcting' : 'waiting');
+    const content = await fetchChat(url, cfg, messages, signal, (characters, streaming) => report('receiving', characters, streaming));
+    report('validating', content.length);
     try {
       return parseModelResponse(content);
     } catch (e) {
@@ -390,6 +480,7 @@ async function fetchChat(
   cfg: ModelConfig,
   messages: ChatMessage[],
   signal?: AbortSignal,
+  update: (characters: number, streaming: boolean) => void = () => {},
 ): Promise<string> {
   const f = await getFetch();
   const res = await f(url, {
@@ -403,32 +494,22 @@ async function fetchChat(
       messages,
       temperature: 0.2,
       max_tokens: 8192,
-      stream: false,
+      stream: cfg.stream !== false,
     }),
     signal,
   });
 
   if (!res.ok) {
     const detail = await res.text().catch(() => '');
-    throw new Error(`接口返回 HTTP ${res.status}：${detail.slice(0, 200) || res.statusText}`);
+    throw new Error(describeHttpError(res.status, detail));
   }
 
-  const data = (await res.json()) as {
-    choices?: { message?: { content?: string; reasoning_content?: string } }[];
-  };
-  const msg = data?.choices?.[0]?.message;
-  let content = msg?.content;
-  // 部分服务的思考型模型把最终答案放在 reasoning_content（content 为空）
-  if (!content && typeof msg?.reasoning_content === 'string' && msg.reasoning_content.trim()) {
-    content = msg.reasoning_content;
-  }
-  if (!content || !content.trim()) throw new Error('接口没有返回消息内容');
-  return content;
+  return readChatResponse(res, signal, update);
 }
 
 // 测试连接：只验证「能联通 + key 有效 + 模型名被服务方接受」
 // 不要求模型按 DSL 格式回答（生成链路的 JSON 校验放在 chat 侧）
-export async function testConnection(cfg: ModelConfig): Promise<{ ok: boolean; text: string }> {
+export async function testConnection(cfg: ModelConfig, signal?: AbortSignal): Promise<{ ok: boolean; text: string }> {
   const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
   if (!base) return { ok: false, text: '未配置 API 地址（baseURL）' };
   if (!cfg.apiKey.trim()) return { ok: false, text: '未配置 API Key' };
@@ -438,6 +519,7 @@ export async function testConnection(cfg: ModelConfig): Promise<{ ok: boolean; t
     const f = await getFetch();
     const res = await f(url, {
       method: 'POST',
+      signal,
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${cfg.apiKey.trim()}`,
@@ -451,7 +533,7 @@ export async function testConnection(cfg: ModelConfig): Promise<{ ok: boolean; t
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
-      return { ok: false, text: `HTTP ${res.status}：${httpHint(res.status)}${detail ? `（服务方返回：${detail.slice(0, 150)}）` : ''}` };
+      return { ok: false, text: describeHttpError(res.status, detail) };
     }
     const data = (await res.json()) as {
       choices?: { message?: { content?: string; reasoning_content?: string } }[];
@@ -467,6 +549,15 @@ export async function testConnection(cfg: ModelConfig): Promise<{ ok: boolean; t
   } catch (e) {
     return { ok: false, text: `请求没发出去：${e instanceof Error ? e.message : String(e)}。可能是地址拼写错误、网络不通，或服务方不支持跨域调用` };
   }
+}
+
+export function describeHttpError(status: number, detail: string): string {
+  if (status === 403 && /origin[ _-]*(?:is[ _-]*)?not[ _-]*allowed|cors/i.test(detail)) {
+    const origin = typeof location !== 'undefined' ? location.origin : '当前网页来源';
+    return `网关拒绝当前网页来源（HTTP 403 / origin not allowed）。请在网关允许的来源中添加 ${origin}。手动填写模型名不能解决这个限制。`;
+  }
+  if (status === 404 || status === 405) return `HTTP ${status}：地址可能不正确，或服务没有提供此接口。请核对 API 根地址；若仅 /models 不受支持，可手动填写模型名。`;
+  return `HTTP ${status}：${httpHint(status) || '服务请求失败，请检查网关响应与网络状态'}`;
 }
 
 // 常见 HTTP 状态码的排查提示（面向非技术用户）
@@ -487,7 +578,7 @@ function httpHint(status: number): string {
 
 // 拉取服务方支持的模型列表（OpenAI 兼容协议 GET {baseURL}/models）
 // 配置对话框用它做下拉选择；服务方不支持该接口时返回空列表+原因，调用方退回手动输入
-export async function fetchModels(cfg: ModelConfig): Promise<{ models: string[]; error?: string }> {
+export async function fetchModels(cfg: ModelConfig, signal?: AbortSignal): Promise<{ models: string[]; error?: string }> {
   const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
   if (!base) return { models: [], error: '未配置 API 地址（baseURL）' };
   if (!cfg.apiKey.trim()) return { models: [], error: '未配置 API Key' };
@@ -495,10 +586,11 @@ export async function fetchModels(cfg: ModelConfig): Promise<{ models: string[];
     const f = await getFetch();
     const res = await f(`${base}/models`, {
       headers: { Authorization: `Bearer ${cfg.apiKey.trim()}` },
+      signal,
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');
-      return { models: [], error: `HTTP ${res.status}：${httpHint(res.status)}${detail ? `（服务方返回：${detail.slice(0, 120)}）` : ''}` };
+      return { models: [], error: describeHttpError(res.status, detail) };
     }
     const data = (await res.json()) as unknown;
     // 标准格式是 {data:[{id}]}；个别服务直接返回数组或 {models:[...]}
@@ -514,14 +606,14 @@ export async function fetchModels(cfg: ModelConfig): Promise<{ models: string[];
       .filter((s): s is string => typeof s === 'string' && s.trim() !== '')
       .map((s) => s.trim());
     if (ids.length === 0) return { models: [], error: '接口返回的模型列表为空（该服务可能不支持 /models 列表）' };
-    return { models: ids };
+    return { models: [...new Set(ids)].sort((a, b) => a.localeCompare(b)) };
   } catch (e) {
-    return { models: [], error: `请求没发出去：${e instanceof Error ? e.message : String(e)}（可能是地址错误或网络不通）` };
+    return { models: [], error: `请求没发出去：${e instanceof Error ? e.message : String(e)}（可能是网络、证书或网关 CORS 配置问题；可在浏览器控制台查看原因）` };
   }
 }
 
 // 构造场景上下文（ChatPanel 调用）
-export function buildSceneContext(doc: { nodes: { id: string; name: string; geometry?: Geometry; transform: { position: [number, number, number] } }[] }, selection: string[]): SceneContext {
+export function buildSceneContext(doc: Pick<SceneDocument, 'nodes'>, selection: string[]): SceneContext {
   return {
     nodes: doc.nodes.map((n) => {
       const g = n.geometry;
@@ -530,7 +622,7 @@ export function buildSceneContext(doc: { nodes: { id: string; name: string; geom
             .map(([k, v]) => `${k}=${v}`)
             .join(' ')}`
         : 'group';
-      return { id: n.id, name: n.name, desc, position: n.transform.position };
+      return { id: n.id, name: n.name, desc, position: n.transform.position, rotationQuaternion: n.transform.rotationQuaternion, scale: n.transform.scale, materialId: n.materialId, visible: n.visible, parentId: n.parentId, ...(n.assemblyId?{assemblyId:n.assemblyId}:{}) };
     }),
     selection,
   };

@@ -3,9 +3,11 @@
 // - 按需渲染：相机/选择/几何变化时才刷新
 // - 严格资源生命周期：geometry/material/texture 引用计数，dispose 不自动释放共享纹理
 // - 渲染质感：PMREM 环境贴图 + ACES 色调映射 + 阴影地面 + 雾 + 渐变背景 + 盒子倒角 + 自动取景
+import {fitDistance} from './framing';
+import {createSceneMaterial} from './material';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import { buildPrimitiveGeometry } from './geometry';
 import { Geometry, Material, SceneDocument, SceneNode } from '../domain/types';
 
 interface NodeResources {
@@ -21,14 +23,16 @@ export class Viewport {
   // 相机轨道：围绕目标点的球面坐标（左键拖拽旋转 / 右键平移 / 滚轮缩放）
   private readonly orbitTarget = new THREE.Vector3(0, 0.5, 0);
   private orbitRadius = 6.87;
-  private orbitTheta = 0.675; // 方位角
-  private orbitPhi = 1.2; // 仰角（自 +Y 起算，限制不穿越极点）
+  private orbitTheta = 0.733; // 方位角
+  private orbitPhi = 1.012; // 仰角（自 +Y 起算，限制不穿越极点）
   private readonly defaultMaterial: THREE.MeshStandardMaterial;
   private readonly sharedGeometryCache = new Map<string, THREE.BufferGeometry>();
   private readonly materialCache = new Map<string, THREE.MeshStandardMaterial>();
   private readonly nodeMap = new Map<string, NodeResources>();
+  private selectionHelpers: THREE.BoxHelper[] = [];
   private rafHandle: number | null = null;
   private dirty = true;
+  private lastSyncedDoc:SceneDocument|null=null;
   private readonly host: HTMLElement;
   private readonly onPick: (nodeId: string | null) => void;
   private resizeObserver: ResizeObserver | null = null;
@@ -50,7 +54,7 @@ export class Viewport {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     // ACES 电影级色调映射：高光不截断、中间调更扎实，告别「塑料玩具」感
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 0.85;
+    this.renderer.toneMappingExposure = 1.02;
     host.appendChild(this.renderer.domElement);
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
@@ -58,12 +62,12 @@ export class Viewport {
 
     this.scene = new THREE.Scene();
     this.backgroundTexture = this.createGradientBackground();
-    this.scene.background = this.backgroundTexture;
+    this.scene.background = new THREE.Color('#e8edef');
     // 线性雾：近处（8m）清晰、远处（60m）融进雾色，大地面不再「平到天边」
-    this.scene.fog = new THREE.Fog('#2e3640', 8, 60);
+    this.scene.fog = null; // Modeling view: do not wash out machines as camera distance grows.
 
     // 窄视角（45°）：透视畸变更小，更接近观察工业设备的视觉
-    this.camera = new THREE.PerspectiveCamera(45, 1, 0.05, 2000);
+    this.camera = new THREE.PerspectiveCamera(38, 1, 0.05, 2000);
     this.updateOrbitCamera();
 
     this.defaultMaterial = new THREE.MeshStandardMaterial({
@@ -109,18 +113,20 @@ export class Viewport {
     const envScene = new RoomEnvironment();
     this.envTexture = pmrem.fromScene(envScene, 0.04).texture;
     this.scene.environment = this.envTexture;
+    this.scene.environmentIntensity=.55;
+    envScene.dispose();
     pmrem.dispose();
   }
 
   // 半球补光 + 主方向光（带阴影）+ 冷色轮廓光
   private setupLights(): void {
-    const hemi = new THREE.HemisphereLight('#dce8ff', '#1f1f1f', 0.35);
+    const hemi = new THREE.HemisphereLight('#f5fcff', '#789095', .85);
     this.scene.add(hemi);
 
     // 暖白主光：模拟厂房高侧窗，投影方向稳定、边缘柔和
-    const dir = new THREE.DirectionalLight('#fff4e6', 1.4);
+    const dir = new THREE.DirectionalLight('#fff5e4', 2.6);
     this.keyLight = dir;
-    dir.position.set(10, 14, 8);
+    dir.position.set(-12, 24, 14);
     dir.castShadow = true;
     dir.shadow.mapSize.width = 2048;
     dir.shadow.mapSize.height = 2048;
@@ -131,12 +137,12 @@ export class Viewport {
     dir.shadow.camera.top = 14;
     dir.shadow.camera.bottom = -14;
     dir.shadow.bias = -0.0002;
-    dir.shadow.normalBias = 0.02;
+    dir.shadow.normalBias = 0.003;
     this.scene.add(dir);
 
     // 冷色逆光：把物体轮廓从暗背景里剌出来
-    const rim = new THREE.DirectionalLight('#a8c4ff', 0.6);
-    rim.position.set(-8, 6, -10);
+    const rim = new THREE.DirectionalLight('#b7d5ee', 1.0);
+    rim.position.set(15, 13, -10);
     this.scene.add(rim);
   }
 
@@ -144,7 +150,7 @@ export class Viewport {
   private setupGround(): void {
     this.floorGeometry = new THREE.PlaneGeometry(200, 200);
     this.floorMaterial = new THREE.MeshStandardMaterial({
-      color: '#2b3037',
+      color: '#e0e7e9',
       roughness: 0.92,
       metalness: 0.0,
       envMapIntensity: 0.4,
@@ -155,7 +161,8 @@ export class Viewport {
     floor.name = '__floor';
     this.scene.add(floor);
 
-    const grid = new THREE.GridHelper(60, 60, '#5a6672', '#414a55');
+    const grid = new THREE.GridHelper(60, 60, '#a2b3ba', '#bdc9ce');
+    grid.name='__grid';grid.visible=false;
     (grid.material as THREE.Material).transparent = true;
     (grid.material as THREE.Material).opacity = 0.55;
     grid.position.y = 0.002; // 抬高 2mm 避免 Z-fighting
@@ -251,7 +258,7 @@ export class Viewport {
   // 自动取景：场景变化后计算包围盒，把整个模型框进视野中心
   // - 相机目标点 = 包围盒中心；半径按最长边与视野张角反推
   // - 阴影相机范围随场景缩放，大模型不会丢阴影
-  private frameScene(): void {
+  private frameScene(selected?: Set<string>): void {
     if (this.nodeMap.size === 0) {
       // 空场景：相机回到默认观察机位（撤销到空场景时画面与初始空场景一致）
       this.orbitTarget.set(0, 0.5, 0);
@@ -263,10 +270,12 @@ export class Viewport {
     }
     const box = new THREE.Box3();
     for (const [, res] of this.nodeMap) {
+      if(selected?.size && !selected.has(res.mesh.userData.nodeId))continue;
       res.mesh.updateWorldMatrix(true, false);
       box.expandByObject(res.mesh);
     }
     if (box.isEmpty()) return;
+    if(!selected?.size){const floor=this.scene.getObjectByName('__floor');if(floor)floor.position.y=box.min.y-.02;}
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z, 0.4);
@@ -274,11 +283,12 @@ export class Viewport {
 
     const fov = (this.camera.fov * Math.PI) / 180;
     // 让最长边约占视野 55%，留出周边呼吸空间
-    const radius = maxDim / 2 / Math.tan(fov / 2) / 0.55;
-    this.orbitRadius = Math.min(Math.max(radius, 0.8), 300);
+    const aspect=Math.max(this.host.clientWidth,1)/Math.max(this.host.clientHeight,1);
+    const radius = fitDistance(size.toArray() as [number,number,number],this.orbitTheta,this.orbitPhi,fov,aspect);
+    this.orbitRadius = Math.min(Math.max(radius, 0.8), 1000);
 
     // 仰角太低（贴地看）时抬到默认观察角
-    if (this.orbitPhi < 0.5) this.orbitPhi = 1.1;
+    // Preserve explicit overhead or user-selected angles during fitting.
     this.updateOrbitCamera();
 
     // 阴影相机随包络缩放
@@ -290,6 +300,8 @@ export class Viewport {
       cam.top = s;
       cam.bottom = -s;
       cam.far = Math.max(s * 4 + 20, 60);
+      this.keyLight.position.copy(center).add(new THREE.Vector3(-12,24,14));
+      this.keyLight.target.position.copy(center);this.keyLight.target.updateMatrixWorld();
       cam.updateProjectionMatrix();
     }
   }
@@ -297,7 +309,9 @@ export class Viewport {
   // 同步：DSL 文档 → Three.js 对象（reconciler，方案第 2 节）
   // 简单可靠的销毁-重建策略；后续按需细化 diff（InstancedMesh 等留到优化阶段）
   sync(doc: SceneDocument): void {
-    // 清理旧资源
+    if(doc===this.lastSyncedDoc)return;this.lastSyncedDoc=doc;
+    // 仅首次加载自动取景；编辑参数时保留用户相机。
+    const firstContent = this.nodeMap.size === 0;
     this.disposeAllNodes();
 
     for (const node of doc.nodes) {
@@ -307,15 +321,15 @@ export class Viewport {
     }
 
     // 生成内容变化后重新取景（撤销/重做也走这里，保持模型始终在画面中心）
-    this.frameScene();
+    if (firstContent) this.frameScene();
     this.markDirty();
   }
 
   private createNodeMesh(node: SceneNode, doc: SceneDocument): void {
     const geometry = this.buildGeometry(node.geometry!);
-    const material = this.buildMaterial(node.materialId, doc);
+    const material = this.buildMaterial(node.materialId, doc, node.label);
     const mesh = new THREE.Mesh(geometry, material);
-    mesh.castShadow = true;
+    mesh.castShadow = material.opacity >= 0.95 && !node.label;
     mesh.receiveShadow = true;
     mesh.userData.nodeId = node.id; // 视口只映射稳定 ID，不用数组下标或临时数字 ID
     mesh.name = node.name;
@@ -334,116 +348,92 @@ export class Viewport {
 
   // 几何构建：几何默认以局部原点为中心（方案第 4 节）
   private buildGeometry(g: Geometry): THREE.BufferGeometry {
-    // 渲染端平滑度下限：DSL 允许低细分，但渲染一律提到工业展示级
-    const smooth = this.smoothGeometry(g);
-    const key = JSON.stringify(smooth);
+    const key = JSON.stringify(g);
     const cached = this.sharedGeometryCache.get(key);
     if (cached) return cached;
-
-    let geo: THREE.BufferGeometry;
-    switch (smooth.type) {
-      case 'box': {
-        const p = smooth.params;
-        // 倒角半径：最短边的 12%，夹在 2mm~5cm 之间——边缘亮面，不再「积木」
-        const minDim = Math.min(p.width, p.height, p.depth);
-        const bevel = Math.min(Math.max(minDim * 0.12, 0.002), 0.05);
-        geo = new RoundedBoxGeometry(p.width, p.height, p.depth, 6, bevel);
-        break;
-      }
-      case 'sphere': {
-        const p = smooth.params;
-        geo = new THREE.SphereGeometry(p.radius, p.widthSegments, p.heightSegments);
-        break;
-      }
-      case 'cylinder': {
-        const p = smooth.params;
-        geo = new THREE.CylinderGeometry(p.radiusTop, p.radiusBottom, p.height, p.radialSegments);
-        break;
-      }
-      case 'cone': {
-        const p = smooth.params;
-        geo = new THREE.ConeGeometry(p.radius, p.height, p.radialSegments);
-        break;
-      }
-      case 'plane': {
-        const p = smooth.params;
-        geo = new THREE.PlaneGeometry(p.width, p.depth, p.widthSegments, p.depthSegments);
-        break;
-      }
-      default: {
-        // 类型白名单外的走不到这里（validate 已拒绝）；兜底立方体防止渲染崩溃
-        geo = new THREE.BoxGeometry(0.1, 0.1, 0.1);
-      }
-    }
-    this.sharedGeometryCache.set(key, geo);
-    return geo;
+    const geometry = buildPrimitiveGeometry(g);
+    this.sharedGeometryCache.set(key, geometry);
+    return geometry;
   }
 
-  // 曲面段数下限：球 48×24、柱/锥 48 段。直线体（box/plane）不变
-  private smoothGeometry(g: Geometry): Geometry {
-    switch (g.type) {
-      case 'sphere':
-        return {
-          ...g,
-          params: {
-            ...g.params,
-            widthSegments: Math.max(g.params.widthSegments, 48),
-            heightSegments: Math.max(g.params.heightSegments, 24),
-          },
-        };
-      case 'cylinder':
-        return { ...g, params: { ...g.params, radialSegments: Math.max(g.params.radialSegments, 48) } };
-      case 'cone':
-        return { ...g, params: { ...g.params, radialSegments: Math.max(g.params.radialSegments, 48) } };
-      default:
-        return g;
-    }
-  }
-
-  private buildMaterial(materialId: string | undefined, doc: SceneDocument): THREE.MeshStandardMaterial {
+  private buildMaterial(materialId: string | undefined, doc: SceneDocument, label?:string): THREE.MeshStandardMaterial {
     if (!materialId) return this.defaultMaterial;
     const found = doc.materials.find((m) => m.id === materialId);
     if (!found) return this.defaultMaterial;
-    return this.getOrCreateMaterial(found);
+    return this.getOrCreateMaterial(found,label);
   }
 
-  private getOrCreateMaterial(m: Material): THREE.MeshStandardMaterial {
-    const key = JSON.stringify(m);
+  private getOrCreateMaterial(m: Material,label?:string): THREE.MeshStandardMaterial {
+    const key = JSON.stringify(m)+(label??'');
     const cached = this.materialCache.get(key);
     if (cached) return cached;
-    const mat = new THREE.MeshStandardMaterial({
-      color: m.baseColor,
-      roughness: m.roughness,
-      metalness: m.metalness,
-      transparent: m.opacity !== undefined && m.opacity < 1,
-      opacity: m.opacity ?? 1,
-    });
+    const mat = createSceneMaterial(m,label);
     this.materialCache.set(key, mat);
     return mat;
   }
 
   // 选择高亮：视口选中状态是从文档派生的运行时状态，不写入项目主文档
   setSelection(selectedIds: Set<string>): void {
-    for (const [id, res] of this.nodeMap) {
-      const selected = selectedIds.has(id);
-      const emap = res.mesh.userData;
-      emap.selected = selected;
-      // 用材质 emissive 做选中描边（简单可靠）；不切换材质实例以免污染缓存
-      const baseMat = res.material;
-      baseMat.emissive.set(selected ? '#2b6cb0' : '#000000');
-      baseMat.emissiveIntensity = selected ? 0.45 : 0;
+    this.clearSelectionHelpers();
+    for (const id of selectedIds) {
+      const node = this.nodeMap.get(id);
+      if (!node) continue;
+      const helper = new THREE.BoxHelper(node.mesh, '#65a8ff');
+      this.scene.add(helper); this.selectionHelpers.push(helper);
     }
     this.markDirty();
   }
 
+  private clearSelectionHelpers(): void {
+    for (const helper of this.selectionHelpers) {
+      this.scene.remove(helper); helper.geometry.dispose(); helper.material.dispose();
+    }
+    this.selectionHelpers = [];
+  }
+
+  captureDocument(doc: SceneDocument, view: 'perspective' | 'front' | 'side' | 'top', targetIds?:string[]): string {
+    if(this.renderer.getContext().isContextLost())throw new Error('WebGL 上下文丢失，无法截图');
+    if(this.host.clientWidth<=0 || this.host.clientHeight<=0)throw new Error('视口不可见，无法截图');
+    this.sync(doc);
+    const saved = {target:this.orbitTarget.clone(),radius:this.orbitRadius,theta:this.orbitTheta,phi:this.orbitPhi};
+    const helpers = [...this.scene.children].filter(o => o.type === 'BoxHelper');
+    try {
+      helpers.forEach(h=>h.visible=false);
+      const angles = {perspective:[0.7,1.05],front:[0,Math.PI/2],side:[Math.PI/2,Math.PI/2],top:[0,0.01]};
+      [this.orbitTheta,this.orbitPhi] = angles[view];
+      this.frameScene(targetIds?.length?new Set(targetIds):undefined);
+      this.updateOrbitCamera(); this.markDirty(); this.render();
+      const source=this.renderer.domElement;
+      const scale=Math.min(1,1024/Math.max(source.width,source.height));
+      const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(source.width*scale));canvas.height=Math.max(1,Math.round(source.height*scale));
+      const context=canvas.getContext('2d');if(!context)throw new Error('无法读取视口截图');
+      context.drawImage(source,0,0,canvas.width,canvas.height);
+      const data=canvas.toDataURL('image/jpeg',0.85);
+      if(!data.startsWith('data:image/jpeg;base64,')) throw new Error('截图无效');
+      return data;
+    } finally {
+      helpers.forEach(h=>h.visible=true);
+      this.orbitTarget.copy(saved.target);this.orbitRadius=saved.radius;this.orbitTheta=saved.theta;this.orbitPhi=saved.phi;
+      this.updateOrbitCamera();this.markDirty();
+    }
+  }
+
+  setGridVisible(visible:boolean):void {const grid=this.scene.getObjectByName('__grid');if(grid)grid.visible=visible;this.markDirty();}
+  topView():void {this.orbitPhi=.02;this.orbitTheta=0;this.frameScene();this.updateOrbitCamera();this.markDirty();}
+  presentationView():void {this.orbitTheta=.733;this.orbitPhi=1.012;this.frameScene();this.markDirty();}
+  fitToSelection(ids: string[]): void {if(ids.length){this.frameScene(new Set(ids));this.markDirty();}}
+
+  fitToScene(): void { this.frameScene(); this.markDirty(); }
+
   private disposeAllNodes(): void {
+    this.clearSelectionHelpers();
     for (const [, res] of this.nodeMap) {
       this.scene.remove(res.mesh);
     }
     this.nodeMap.clear();
     // 共享 geometry/material 缓解跨节点复用；文档级重建时一并清理
     for (const [, geo] of this.sharedGeometryCache) geo.dispose();
-    for (const [, mat] of this.materialCache) mat.dispose();
+    for (const [, mat] of this.materialCache) {mat.map?.dispose();mat.dispose();}
     this.sharedGeometryCache.clear();
     this.materialCache.clear();
   }

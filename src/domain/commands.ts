@@ -2,6 +2,9 @@
 // - 每个命令有固定参数 schema、目标类型限制、影响集计算、成本估计与逆操作
 // - 一次 AI 批量修改 = 一条历史记录；命令串行提交，原子生效
 // - 批量生成的 ID 由应用分配，不能相信模型生成的 ID
+import {buildAssembly,type AssemblyDefinition} from './assembly';
+import { buildWorkshopNodes } from '../workshop/adapter';
+import { buildEquipment } from './equipment';
 import { makeId } from '../util/ids';
 import {
   Geometry,
@@ -12,6 +15,7 @@ import {
   Transform,
   Vec3,
   validateDocument,
+  validateMaterial,
 } from './types';
 
 // 单位修饰：世界空间修改需要父矩阵可逆；MVP 一层分组，直接按世界处理。
@@ -20,7 +24,10 @@ export type TransformMode = 'set' | 'delta'; // set=移动到，delta=移动了�
 
 // 命令白名单（方案第一版开放集合的 P0 子集）
 export type CommandOp =
+  | 'createAssembly'
+  | 'duplicateAssembly'
   | 'createPrimitive'
+  | 'translateAssembly'
   | 'createTemplate'
   | 'instantiateAsset'
   | 'updateParameters'
@@ -28,6 +35,7 @@ export type CommandOp =
   | 'translate'
   | 'rotate'
   | 'scale'
+  | 'setAppearance'
   | 'setMaterial'
   | 'rename'
   | 'setVisibility'
@@ -47,6 +55,8 @@ export interface CreatePrimitiveCommand {
 export interface CreateTemplateCommand {
   op: 'createTemplate';
   tempId?: string;
+  name?: string;
+  yaw?: number;
   templateId: string; // 如 'workbench'，确定性模板
   parameters: Record<string, number>;
   parentId?: string | null;
@@ -69,7 +79,7 @@ export interface UpdateParametersCommand {
 export interface SetTransformCommand {
   op: 'setTransform';
   targetId: string;
-  transform: Transform;
+  transform: Partial<Transform>; // 未指定的分量保持不变
 }
 export interface TranslateCommand {
   op: 'translate';
@@ -125,9 +135,14 @@ export interface DeleteCommand {
   targetId: string;
 }
 
+export type AppearancePatch=Partial<Pick<Material,'baseColor'|'roughness'|'metalness'|'opacity'>>;
 export type Command =
+  | ({op:'setAppearance';targetId:string;scope?:'assembly';sourceMaterialIds?:string[];materialId?:string}&AppearancePatch)
+  | ({op:'createAssembly';tempId?:string}&AssemblyDefinition)
+  | {op:'duplicateAssembly';targetId:string;offset:Vec3;name?:string;tempId?:string}
   | CreatePrimitiveCommand
   | CreateTemplateCommand
+  | {op:'translateAssembly';targetId:string;value:Vec3}
   | InstantiateAssetCommand
   | UpdateParametersCommand
   | SetTransformCommand
@@ -147,6 +162,9 @@ export interface CommandBatch {
   projectId: string;
   baseRevision: number;
   selectedIds: string[];
+  editScope?:{nodeIds?:string[];lockPlacement?:boolean};
+  incomplete?: boolean; // 恢复的阶段草稿，未完成提交复核
+  continuation?: string; // 继续阶段时填入输入框，不自动发送
   summary: string; // 模型给出的简短说明
   operations: Command[];
 }
@@ -154,10 +172,17 @@ export interface CommandBatch {
 // ============ 影响 / 成本 ============
 export function affectedNodeIds(op: Command, doc: SceneDocument): string[] {
   switch (op.op) {
+    case 'createAssembly':
+    case 'duplicateAssembly':
     case 'createPrimitive':
     case 'createTemplate':
     case 'instantiateAsset':
       return [];
+    case 'setAppearance': {
+      const root=doc.nodes.find(n=>n.id===op.targetId);const candidates=op.scope==='assembly'&&root?.assemblyId?doc.nodes.filter(n=>n.assemblyId===root.assemblyId):doc.nodes.filter(n=>n.id===op.targetId);
+      return candidates.filter(n=>!op.sourceMaterialIds||op.sourceMaterialIds.includes(n.materialId??'')).map(n=>n.id);
+    }
+    case 'translateAssembly': { const assembly=doc.nodes.find(n=>n.id===op.targetId)?.assemblyId;return assembly?doc.nodes.filter(n=>n.assemblyId===assembly).map(n=>n.id):[op.targetId]; }
     case 'duplicate':
     case 'delete': {
       const ids = new Set<string>([op.targetId]);
@@ -183,13 +208,15 @@ interface Budget {
   maxCommands: number;
   maxNewNodes: number;
 }
-const DEFAULT_BUDGET: Budget = { maxCommands: 200, maxNewNodes: 1000 }; // 方案 11 节初始预算
+const DEFAULT_BUDGET: Budget = { maxCommands: 200, maxNewNodes: 3000 }; // 方案 11 节初始预算
 
 export function estimateCost(ops: Command[]): { commands: number; newNodes: number } {
   let newNodes = 0;
   for (const op of ops) {
+    if(op.op==='createAssembly')newNodes+=Array.isArray(op.parts)?op.parts.reduce((n,p)=>n+(p.repeat?.count??1),0):2001;
+    if(op.op==='duplicateAssembly')newNodes+=2000;
     if (op.op === 'createPrimitive' || op.op === 'instantiateAsset') newNodes += 1;
-    if (op.op === 'createTemplate') newNodes += 8; // 模板上限粗估，实际由模板构建器精确计算
+    if (op.op === 'createTemplate') newNodes += op.templateId==='smt_workshop'?2000:200; // 模板上限粗估，实际由模板构建器精确计算
     if (op.op === 'duplicate') newNodes += 8;
   }
   return { commands: ops.length, newNodes };
@@ -265,12 +292,32 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     return { doc, error: new Error(`父节点 ${parentId} 不存在`) };
   }
 
+  if(op.op==='createTemplate'&&op.templateId==='smt_workshop'&&doc.nodes.length)return {doc,error:new Error('完整车间组件请在空会话创建，避免覆盖或重叠；已有场景请直接修改其中设备')};
   const nodes = doc.nodes.map(cloneNode);
+  let materials=doc.materials;
   const beforeSnapshot = 'targetId' in op ? snapshotAffected(doc, op) : { nodes: [], materialIds: [] };
 
   let createdIds: string[] | undefined;
 
   switch (op.op) {
+    case 'createAssembly': {
+      try{const parts=buildAssembly(op);createdIds=parts.map(n=>n.id);if(op.tempId)tempIdMap.set(op.tempId,parts[0].id);nodes.push(...parts);}catch(e){return {doc,error:e instanceof Error?e:new Error('组合创建失败')};}break;
+    }
+    case 'duplicateAssembly': {
+      const anchor=findNode(doc,op.targetId)!;const members=anchor.assemblyId?doc.nodes.filter(n=>n.assemblyId===anchor.assemblyId):[anchor];
+      if(members.length>2000||!Array.isArray(op.offset)||op.offset.length!==3||!op.offset.every(Number.isFinite))return {doc,error:new Error('复制数量或偏移无效')};
+      const assemblyId=makeId();const name=op.name?.trim()||`${anchor.assemblyName??anchor.name} 副本`;const copies=members.map((n,i)=>({...cloneNode(n),id:i?makeId():assemblyId,assemblyId,assemblyName:name,name:`${name} · ${n.name.split(' · ').slice(1).join(' · ')||n.name}`,transform:{...structuredClone(n.transform),position:n.transform.position.map((v,k)=>v+op.offset[k]) as Vec3}}));
+      createdIds=copies.map(n=>n.id);if(op.tempId)tempIdMap.set(op.tempId,copies[0].id);nodes.push(...copies);break;
+    }
+    case 'createTemplate': {
+      if(op.parentId)return {doc,error:new Error('设备组件暂不支持层级父节点')};
+      try { const parts=op.templateId==='smt_workshop'?buildWorkshopNodes(op.parameters,op.position,op.yaw):buildEquipment(op.templateId,op.parameters,op.position,op.yaw,op.name);createdIds=parts.map(n=>n.id);if(op.tempId)tempIdMap.set(op.tempId,parts[0].id);nodes.push(...parts); }
+      catch(e){return {doc,error:e instanceof Error?e:new Error('设备参数无效')};}
+      break;
+    }
+    case 'translateAssembly': {
+      const ids=new Set(affectedNodeIds(op,doc));for(const n of nodes)if(ids.has(n.id))n.transform.position=n.transform.position.map((v,i)=>v+op.value[i]) as Vec3;break;
+    }
     case 'createPrimitive': {
       const id = makeId();
       if (op.tempId) tempIdMap.set(op.tempId, id);
@@ -302,9 +349,9 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
       const n = findNodeInList(nodes, op.targetId);
       if (!n) return { doc, error: new Error(`目标不存在: ${op.targetId}`) };
       n.transform = {
-        position: [...op.transform.position] as Vec3,
-        rotationQuaternion: [...op.transform.rotationQuaternion] as Quaternion,
-        scale: [...op.transform.scale] as Vec3,
+        position: [...(op.transform.position ?? n.transform.position)] as Vec3,
+        rotationQuaternion: [...(op.transform.rotationQuaternion ?? n.transform.rotationQuaternion)] as Quaternion,
+        scale: [...(op.transform.scale ?? n.transform.scale)] as Vec3,
       };
       break;
     }
@@ -332,6 +379,23 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
       n.visible = op.visible;
       break;
     }
+    case 'setAppearance': {
+      if(op.scope!==undefined&&op.scope!=='assembly')return {doc,error:new Error('外观修改范围无效')};
+      if(op.sourceMaterialIds!==undefined&&(!Array.isArray(op.sourceMaterialIds)||!op.sourceMaterialIds.length||!op.sourceMaterialIds.every(id=>typeof id==='string')))return {doc,error:new Error('原材质筛选无效')};
+      const ids=new Set(affectedNodeIds(op,doc));if(!ids.size)return {doc,error:new Error('没有匹配的选中零件')};
+      if(op.materialId&&!materials.some(m=>m.id===op.materialId))return {doc,error:new Error('目标材质不存在')};
+      const patch:AppearancePatch={};for(const key of ['baseColor','roughness','metalness','opacity'] as const)if(op[key]!==undefined)(patch as Record<string,unknown>)[key]=op[key];
+      if(!op.materialId&&!Object.keys(patch).length)return {doc,error:new Error('请指定颜色或材质属性')};
+      for(const n of nodes)if(ids.has(n.id)){
+        const source=materials.find(m=>m.id===(op.materialId??n.materialId))??materials[0];if(!source)return {doc,error:new Error('当前材质不存在')};
+        if(!Object.keys(patch).length){n.materialId=source.id;continue;}
+        const candidate={...source,...patch};const errors=validateMaterial(candidate);if(errors.length)return {doc,error:new Error(errors.map(e=>e.message).join('；'))};
+        const {id:ignored,...properties}=candidate;
+        const existing=materials.find(m=>{const {id,...rest}=m;return JSON.stringify(rest)===JSON.stringify(properties)});
+        if(existing)n.materialId=existing.id;else{const next={id:makeId(),...properties};materials=[...materials,next];n.materialId=next.id;}
+      }
+      break;
+    }
     case 'setMaterial': {
       const n = findNodeInList(nodes, op.targetId);
       if (!n) return { doc, error: new Error(`目标不存在: ${op.targetId}`) };
@@ -344,9 +408,11 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
       return { doc, error: new Error(`命令 ${op.op} 尚未实现（P0 主干不含）`) };
   }
 
+  if(nodes.length>10000)return {doc,error:new Error('场景对象数量超过10000上限')};
   const newDoc: SceneDocument = {
     ...doc,
     nodes,
+    materials,
     revision: doc.revision + 1,
   };
   const errs = validateDocument(newDoc);

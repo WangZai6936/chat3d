@@ -2,13 +2,22 @@
 // React 只画壳子与列表类 UI；Three.js 视口保持命令式（决策 #1）
 // 对话区放右侧整高：消息上下文完整可见（早期版本放底部，只能看到一两行）
 // 工具栏「模型配置」打开 SettingsDialog：baseURL/apiKey/model 存本机，对话生成走真实 API
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ChatPanel } from './ui/ChatPanel';
-import { ObjectTree } from './ui/ObjectTree';
-import { PropertiesPanel } from './ui/PropertiesPanel';
 import { SettingsDialog } from './ui/SettingsDialog';
-import { ViewportPanel } from './ui/ViewportPanel';
+import {modelingModule} from './modules/modeling';
+const ViewportPanel=modelingModule.Viewport;
+const ObjectTree=modelingModule.Objects;
+const PropertiesPanel=modelingModule.Properties;
 import { useEditorStore, useDisplayDoc } from './store';
+import { exportGlb } from './scene/export';
+import {Theme,Button,IconButton,Tooltip,Badge,DropdownMenu,Tabs,Spinner} from '@radix-ui/themes';
+import {HamburgerMenuIcon,ChevronRightIcon,ChevronDownIcon,GearIcon,CubeIcon,UploadIcon,DownloadIcon,Cross1Icon,CounterClockwiseClockIcon,ReloadIcon,MixerHorizontalIcon,ChatBubbleIcon} from '@radix-ui/react-icons';
+import '@radix-ui/themes/styles.css';
+import './workspace.css';
+import {SessionSidebar} from './ui/SessionSidebar';
+import {initializeWorkspace,useWorkspaceStore,createSession} from './workspace';
+import { MAX_PROJECT_BYTES, parseProject, serializeProject } from './domain/project';
 
 export default function App() {
   const undo = useEditorStore((s) => s.undo);
@@ -18,93 +27,88 @@ export default function App() {
   const dirty = useEditorStore((s) => s.dirty);
   const aiConfig = useEditorStore((s) => s.aiConfig);
   const nodeCount = useDisplayDoc().nodes.length;
-  const previewing = useEditorStore((s) => s.aiStatus === 'previewing');
+  const aiStatus = useEditorStore((s) => s.aiStatus);
+  const previewing = aiStatus === 'previewing';
+  const locked = ['capturing', 'context', 'generating', 'validating', 'previewing', 'applying'].includes(aiStatus);
+  const autosaveError = useEditorStore((s) => s.autosaveError);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [projectNotice, setProjectNotice] = useState('');
+  const [exporting, setExporting] = useState(false);
+  const downloadGlb = async () => {
+    setExporting(true);
+    try {
+      const data = await exportGlb(structuredClone(useEditorStore.getState().doc));
+      const url = URL.createObjectURL(new Blob([data], { type: 'model/gltf-binary' }));
+      const a = document.createElement('a'); a.href = url; a.download = 'chat3d-model.glb';
+      document.body.appendChild(a); a.click(); a.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setProjectNotice('已发起 GLB 下载：包含可见模型及材质，不包含背景、灯光和选中框。编辑工程请另行下载项目。');
+    } catch (e) { setProjectNotice(`GLB 导出失败：${e instanceof Error ? e.message : String(e)}`); }
+    finally { setExporting(false); }
+  };
+  const saveProject = () => {
+    try {
+      const doc = useEditorStore.getState().doc;
+      const url = URL.createObjectURL(new Blob([serializeProject(doc)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url; link.download = `chat3d-${doc.projectId.slice(0, 8)}.chat3d.json`;
+      document.body.appendChild(link); link.click(); link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      useEditorStore.getState().markSaved();
+      setProjectNotice('已发起项目下载，请确认文件已保存在电脑上；模型密钥不会写入项目。');
+    } catch (e) { setProjectNotice(`项目下载失败：${e instanceof Error ? e.message : String(e)}`); }
+  };
+  const openProject = async (file: File) => {
+    try {
+      if (file.size > MAX_PROJECT_BYTES) throw new Error('项目文件超过 20 MB');
+      const doc = parseProject(await file.text());
+      if (!createSession(doc)) throw new Error('请先完成当前操作，或检查会话存储状态');
+      setProjectNotice(`已导入新会话，共 ${doc.nodes.length} 个对象`);
+    } catch (e) { setProjectNotice(`打开失败：${e instanceof Error ? e.message : String(e)}`); }
+  };
+  useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (useWorkspaceStore.getState().saving || !!useWorkspaceStore.getState().error || ['capturing','context','generating','validating','previewing'].includes(useEditorStore.getState().aiStatus)) { e.preventDefault(); e.returnValue = ''; }
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, []);
 
   const [showSettings, setShowSettings] = useState(false);
 
-  // 模式角标：演示模式 / 已配置模型名 / 未配置
-  const modeBadge = aiConfig
-    ? aiConfig.useMock
-      ? { text: '演示模式（模拟回包）', cls: 'text-amber-400' }
-      : { text: `模型：${aiConfig.model}`, cls: 'text-emerald-400' }
-    : { text: '未配置模型', cls: 'text-red-400' };
-
-  return (
-    <div className="h-screen w-screen flex flex-col bg-[#1b1e23] text-gray-100 overflow-hidden">
-      {/* 顶部工具栏 */}
-      <header className="flex items-center gap-1 px-3 h-11 bg-[#252A31] border-b border-black/40 select-none shrink-0">
-        <div className="font-bold tracking-wide mr-3">
-          chat3d <span className="text-xs font-normal text-gray-400 ml-1">对话式三维建模</span>
-        </div>
-
-        {/* 项目管理/导出：P1 实现，此处占位禁用 */}
-        <ToolButton label="新建" disabled title="P1：项目管理" />
-        <ToolButton label="打开" disabled title="P1：项目管理" />
-        <ToolButton label="保存" disabled title="P1：项目管理" />
-        <ToolButton label="导出 GLB" disabled title="P1：导出" />
-
-        <div className="w-px h-5 bg-white/10 mx-1" />
-
-        <ToolButton label="↺ 撤销" onClick={undo} disabled={!canUndo || previewing} title="撤销上一条事务" />
-        <ToolButton label="↻ 重做" onClick={redo} disabled={!canRedo || previewing} title="重做" />
-
-        <div className="flex-1" />
-
-        {/* 模型状态角标 */}
-        <span className={`text-xs mr-1 ${modeBadge.cls}`}>{modeBadge.text}</span>
-        <ToolButton label="模型配置" onClick={() => setShowSettings(true)} title="配置模型 API（OpenAI 兼容）" />
-
-        <div className="w-px h-5 bg-white/10 mx-1" />
-
-        {/* 状态角标 */}
-        {previewing && (
-          <span className="text-xs text-emerald-400 mr-2">预览待确认</span>
-        )}
-        <span className="text-xs text-gray-500">
-          {dirty ? '未保存 · ' : ''}
-          {nodeCount} 个对象
-        </span>
-      </header>
-
-      {/* 主区：左 对象树/属性 · 中 视口 · 右 对话 */}
-      <div className="flex-1 flex min-h-0">
-        <aside className="w-72 shrink-0 border-r border-black/40 flex flex-col">
-          <div className="flex-1 min-h-0">
-            <ObjectTree />
-          </div>
-          <div className="h-80 shrink-0 border-t border-black/40 overflow-auto">
-            <PropertiesPanel />
-          </div>
-        </aside>
-        <main className="flex-1 min-w-0 flex">
-          <ViewportPanel />
-        </main>
-        <aside className="w-[420px] shrink-0 border-l border-black/40">
-          <ChatPanel />
-        </aside>
-      </div>
-
-      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+  const workspace=useWorkspaceStore();
+  const active=workspace.sessions.find(s=>s.id===workspace.activeId);
+  const [sidebarOpen,setSidebarOpen]=useState(false);
+  const [inspectorOpen,setInspectorOpen]=useState(false);
+  useEffect(()=>{void initializeWorkspace();},[]);
+  return <Theme appearance="dark" accentColor="blue" grayColor="slate" radius="large">
+    <div className="studio">
+      <aside className={`session-sidebar ${sidebarOpen?'is-open':''}`}><SessionSidebar locked={locked} onClose={()=>setSidebarOpen(false)}/></aside>
+      {sidebarOpen&&<button className="sidebar-scrim" aria-label="关闭侧栏" onClick={()=>setSidebarOpen(false)}/>}
+      <section className="studio-main">
+        <header className="studio-header">
+          <IconButton variant="ghost" color="gray" className="sidebar-toggle" aria-label="显示会话列表" onClick={()=>setSidebarOpen(true)}><HamburgerMenuIcon/></IconButton>
+          <div className="project-heading"><span>工作空间 <ChevronRightIcon/></span><strong>{active?.title??'正在恢复工作台…'}</strong></div>
+          <Badge color={workspace.error?'red':workspace.saving?'amber':'gray'} variant="soft" className="save-badge">{workspace.error?'保存异常':workspace.saving?'正在保存':'本地已保存'}</Badge>
+          <div className="header-spacer"/>
+          <Button variant="soft" color="gray" onClick={()=>setShowSettings(true)}><GearIcon/><span className="config-label">模型配置</span></Button>
+          <DropdownMenu.Root><DropdownMenu.Trigger><Button variant="solid" disabled={locked||!workspace.ready}>项目 <ChevronDownIcon/></Button></DropdownMenu.Trigger><DropdownMenu.Content>
+            <DropdownMenu.Item onSelect={()=>fileRef.current?.click()}><UploadIcon/>导入项目到新会话</DropdownMenu.Item>
+            <DropdownMenu.Item onSelect={saveProject}><DownloadIcon/>下载项目 JSON</DropdownMenu.Item>
+            <DropdownMenu.Item disabled={exporting||nodeCount===0} onSelect={()=>void downloadGlb()}><CubeIcon/>{exporting?'导出中…':'导出模型 GLB'}</DropdownMenu.Item>
+          </DropdownMenu.Content></DropdownMenu.Root>
+          <input ref={fileRef} type="file" accept=".json,.chat3d.json" className="hidden" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void openProject(file);}}/>
+        </header>
+        {(workspace.error||autosaveError||projectNotice)&&<div role="status" className={`workspace-notice ${workspace.error||autosaveError?'is-error':''}`}><span>{workspace.error||autosaveError||projectNotice}</span>{!workspace.error&&!autosaveError&&<IconButton size="1" variant="ghost" color="gray" aria-label="关闭通知" onClick={()=>setProjectNotice('')}><Cross1Icon/></IconButton>}</div>}
+        {!workspace.ready?<div className="workspace-loading"><Spinner size="3"/><p>正在恢复会话与项目…</p></div>:<div className="studio-content">
+          <main className="scene-region">
+            <div className="scene-toolbar"><div className="scene-title"><CubeIcon/><strong>三维场景</strong><Badge variant="soft" color="gray">{nodeCount} 个对象</Badge>{previewing&&<Badge color="green">待确认预览</Badge>}</div><div className="scene-actions"><Tooltip content="撤销"><IconButton variant="ghost" color="gray" disabled={!canUndo||locked} onClick={undo} aria-label="撤销"><CounterClockwiseClockIcon/></IconButton></Tooltip><Tooltip content="重做"><IconButton variant="ghost" color="gray" disabled={!canRedo||locked} onClick={redo} aria-label="重做"><ReloadIcon/></IconButton></Tooltip><span className="toolbar-separator"/><Button variant={inspectorOpen?'soft':'ghost'} color="gray" onClick={()=>setInspectorOpen(!inspectorOpen)}><MixerHorizontalIcon/>对象与属性</Button></div></div>
+            <div className="scene-stage"><ViewportPanel/>{inspectorOpen&&<aside className="inspector-panel"><Tabs.Root defaultValue="objects"><Tabs.List><Tabs.Trigger value="objects">对象列表</Tabs.Trigger><Tabs.Trigger value="properties">选中属性</Tabs.Trigger></Tabs.List><Tabs.Content value="objects"><ObjectTree/></Tabs.Content><Tabs.Content value="properties"><PropertiesPanel/></Tabs.Content></Tabs.Root><IconButton className="inspector-close" size="1" variant="ghost" color="gray" aria-label="关闭属性面板" onClick={()=>setInspectorOpen(false)}><Cross1Icon/></IconButton></aside>}</div>
+            <footer className="scene-footer"><span><span className="status-dot"/>{previewing?'预览尚未提交':locked?'正在处理草稿':'可编辑场景'}</span><span>单位 m · Y 轴向上</span><span>{dirty?'项目有修改':'项目已就绪'}</span></footer>
+          </main>
+          <aside className="conversation-region"><div className="conversation-heading"><div><ChatBubbleIcon/><strong>建模助手</strong></div><Badge color={aiConfig?.useMock?'amber':'blue'} variant="soft">{aiConfig?.useMock?'演示':aiConfig?.agentMode==='single'?'单次生成':'Pi Agent'}</Badge></div><ChatPanel key={workspace.activeId}/></aside>
+        </div>}
+      </section>
+      {showSettings&&<SettingsDialog onClose={()=>setShowSettings(false)}/>}
     </div>
-  );
-}
-
-interface ToolButtonProps {
-  label: string;
-  onClick?: () => void;
-  disabled?: boolean;
-  title?: string;
-}
-
-function ToolButton({ label, onClick, disabled, title }: ToolButtonProps) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      title={title}
-      className="px-2.5 py-1 text-sm rounded text-gray-200 hover:bg-white/10 disabled:text-gray-600 disabled:hover:bg-transparent disabled:cursor-not-allowed"
-    >
-      {label}
-    </button>
-  );
+  </Theme>;
 }

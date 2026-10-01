@@ -139,7 +139,7 @@ const out = await page.evaluate(async (baseUrl) => {
   // 11. 非法 materialId → 降级 mat_gray
   t('非法材质名：降级 mat_gray', () => {
     const r = parse(
-      '{"summary":"s","operations":[{"op":"createPrimitive","tempId":"t1","name":"盒","parentId":null,"geometry":{"type":"box","params":{"width":1,"height":1,"depth":1}},"materialId":"mat_red"}]}',
+      '{"summary":"s","operations":[{"op":"createPrimitive","tempId":"t1","name":"盒","parentId":null,"geometry":{"type":"box","params":{"width":1,"height":1,"depth":1}},"materialId":"mat_nonexistent"}]}',
     );
     eq(r.operations[0].materialId, 'mat_gray');
   });

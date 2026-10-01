@@ -2,10 +2,13 @@
 // - SceneDocument 是唯一可信来源；UI 状态（选择/面板）与项目状态（几何/层级/材质）分开
 // - 一次 AI 批量修改 = 一条历史记录；拖动手柄松开时提交一条
 // - 历史条数与字节数双限制（方案第 6 节）
+import { EXTRA_MATERIALS } from './domain/materials';
+import type { AgentActivity } from './ai/modelingAgent';
 import { create } from 'zustand';
 import { applyBatch, cloneGeometry, Command, CommandBatch, CommandWithInverse, ExecutionResult } from './domain/commands';
 import { Material, Quaternion, SceneDocument, SceneNode, SCHEMA_VERSION, Vec3 } from './domain/types';
 import { makeId } from './util/ids';
+import { AUTOSAVE_KEY, loadAutosave, serializeProject } from './domain/project';
 
 // 方案第 7 节托管项目目录的默认材质：工业设备常见外观（喷漆、裸钢、橡胶、警示色）
 const MAT_GRAY: Material = { id: 'mat_gray', baseColor: '#A5ABB4', roughness: 0.5, metalness: 0.35 }; // 喷漆铝灰
@@ -23,7 +26,7 @@ const MAX_HISTORY_BYTES = 64 * 1024 * 1024; // 64MB
 export function createInitialDoc(): SceneDocument {
   return {
     schemaVersion: SCHEMA_VERSION,
-    materials: [MAT_GRAY, MAT_BLUE, MAT_DARK, MAT_METAL, MAT_WHITE, MAT_RUBBER, MAT_YELLOW],
+    materials: [MAT_GRAY, MAT_BLUE, MAT_DARK, MAT_METAL, MAT_WHITE, MAT_RUBBER, MAT_YELLOW, ...EXTRA_MATERIALS],
     projectId: makeId(),
     revision: 0,
     unit: 'm',
@@ -50,23 +53,34 @@ export interface ChatMessage {
   text: string;
   batch?: CommandBatch; // assistant 附带的命令批（预览态）
   error?: string;
+  images?: string[];
+  outcome?: 'applied' | 'discarded';
   createdAt: number;
 }
 
-interface HistoryEntry {
+export interface HistoryEntry {
   summary: string;
   applied: CommandWithInverse[]; // before/after 快照
   docAfter: SceneDocument;
   bytes: number;
 }
 
-interface EditorState {
+export interface EditorState {
   // 项目状态（进入核心命令历史）
   doc: SceneDocument;
   past: HistoryEntry[];
   future: HistoryEntry[];
-  dirty: boolean; // 未保存标记
+  dirty: boolean; // 尚未下载项目文件
+  autosaveError: string | null;
+  replaceProject: (doc: SceneDocument) => boolean;
+  markSaved: () => void;
 
+  composerText: string;
+  composerImages: string[];
+  lastRun: AgentActivity | null;
+  setComposerText: (text:string)=>void;
+  setComposerImages: (images:string[])=>void;
+  setLastRun: (activity:AgentActivity|null)=>void;
   // 会话状态（不进项目历史）
   selection: string[];
   messages: ChatMessage[];
@@ -88,7 +102,7 @@ interface EditorState {
   undo: () => void;
   redo: () => void;
   select: (ids: string[] | null) => void;
-  addUserMessage: (text: string) => void;
+  addUserMessage: (text: string, images?: string[]) => void;
   addAssistantMessage: (text: string, batch?: CommandBatch, error?: string) => void;
   setAiStatus: (s: AiTaskStatus) => void;
   setPendingBatch: (batch: CommandBatch | null) => void;
@@ -123,17 +137,29 @@ function loadConfig(): ModelConfig | null {
     if (!s) return null;
     const c = JSON.parse(s) as Partial<ModelConfig>;
     if (typeof c.baseURL !== 'string' || typeof c.apiKey !== 'string' || typeof c.model !== 'string') return null;
-    return { baseURL: c.baseURL, apiKey: c.apiKey, model: c.model, useMock: c.useMock === true };
+    return { baseURL: c.baseURL, apiKey: c.apiKey, model: c.model, agentMode: c.agentMode === 'single' ? 'single' : 'pi', stream: c.stream !== false, useMock: c.useMock === true };
   } catch {
     return null;
   }
 }
 
+const restoredProject = loadAutosave();
+const EDIT_LOCKED = new Set<AiTaskStatus>(['capturing', 'context', 'generating', 'validating', 'previewing', 'applying']);
+
 export const useEditorStore = create<EditorState>((set, get) => ({
-  doc: createInitialDoc(),
+  composerText:'',composerImages:[],lastRun:null,
+  setComposerText:(composerText)=>set({composerText}),setComposerImages:(composerImages)=>set({composerImages}),setLastRun:(lastRun)=>set({lastRun}),
+  doc: restoredProject.doc ?? createInitialDoc(),
   past: [],
   future: [],
-  dirty: false,
+  dirty: !!restoredProject.doc,
+  autosaveError: restoredProject.error,
+  replaceProject: (doc) => {
+    if (EDIT_LOCKED.has(get().aiStatus)) return false;
+    set({doc: structuredClone(doc), past: [], future: [], dirty: false, selection: [], messages: [], composerText:'',composerImages:[],lastRun:null, pendingBatch: null, pendingResult: null, previewDoc: null, aiStatus: 'idle', aiError: null});
+    return true;
+  },
+  markSaved: () => set({ dirty: false }),
   selection: [],
   messages: [],
   aiStatus: 'idle',
@@ -158,8 +184,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   // 预览期间冻结：AI 事务未确认前不能动手改基线
   applyCommandBatch: (ops: Command[], summary: string) => {
     const state = get();
-    if (state.aiStatus === 'applying') return { ok: false, error: '已有提交进行中' };
-    if (state.aiStatus === 'previewing') return { ok: false, error: '预览待确认：请先确认或放弃当前预览' };
+    if (EDIT_LOCKED.has(state.aiStatus)) return { ok: false, error: '请先完成、取消或放弃当前 AI 操作' };
     const result = applyBatch(state.doc, { operations: ops });
     if (result.errors.length > 0) {
       return { ok: false, error: result.errors.map((e) => e.message).join('; ') };
@@ -204,6 +229,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       bytes: entryBytes(pendingResult.applied),
     };
     set((s) => ({
+      messages: s.messages.map(m => m.batch?.requestId === pendingBatch.requestId ? {...m, outcome: 'applied' as const} : m),
       doc: pendingResult.doc,
       past: pushHistory(s.past, entry),
       future: [],
@@ -217,12 +243,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   discardPending: () => {
-    set({ pendingBatch: null, pendingResult: null, previewDoc: null, aiStatus: 'idle', aiError: null });
+    set(s => ({ messages: s.messages.map(m => m.batch?.requestId === s.pendingBatch?.requestId && m.batch ? {...m, outcome: 'discarded' as const} : m), pendingBatch: null, pendingResult: null, previewDoc: null, aiStatus: 'idle', aiError: null }));
   },
 
   undo: () => {
     const { past, future, doc, aiStatus } = get();
-    if (aiStatus === 'previewing') return; // 预览期间冻结历史，避免基线漂移
+    if (EDIT_LOCKED.has(aiStatus)) return; // 预览期间冻结历史，避免基线漂移
     if (past.length === 0) return;
     const entry = past[past.length - 1];
     const restored = restoreFromBefore(doc, entry);
@@ -235,12 +261,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   redo: () => {
-    const { past, future, aiStatus } = get();
-    if (aiStatus === 'previewing') return;
+    const { past, future, doc, aiStatus } = get();
+    if (EDIT_LOCKED.has(aiStatus)) return;
     if (future.length === 0) return;
     const entry = future[future.length - 1];
     set({
-      doc: entry.docAfter,
+      doc: { ...structuredClone(entry.docAfter), revision: doc.revision + 1 },
       past: [...past, entry],
       future: future.slice(0, -1),
       dirty: true,
@@ -249,8 +275,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   select: (ids) => set({ selection: ids ?? [] }),
 
-  addUserMessage: (text) => {
-    const msg: ChatMessage = { id: makeId(), role: 'user', text, createdAt: Date.now() };
+  addUserMessage: (text, images) => {
+    const msg: ChatMessage = { id: makeId(), role: 'user', text, images, createdAt: Date.now() };
     set((s) => ({ messages: [...s.messages, msg] }));
   },
 
@@ -277,26 +303,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 // - before 里有快照的节点：回写旧值（保留原 ID、父子、参数、材料）
 // - after 里有但 before 里没有的节点：删除（即撤销创建）
 function restoreFromBefore(doc: SceneDocument, entry: HistoryEntry): SceneDocument {
-  const beforeNodes = new Map<string, SceneNode>();
-  for (const item of entry.applied) {
-    for (const n of item.before.nodes) beforeNodes.set(n.id, n);
+  let nodes = doc.nodes.map(cloneSnapshot);
+  // 逐条反向还原，避免同一节点多次编辑覆盖批次最初状态。
+  // 创建后再编辑的节点先还原编辑，再由创建操作的逆操作删除。
+  for (const item of [...entry.applied].reverse()) {
+    const before = new Map(item.before.nodes.map((n) => [n.id, n]));
+    const afterIds = new Set(item.after.nodes.map((n) => n.id));
+    nodes = nodes.filter((n) => !afterIds.has(n.id) || before.has(n.id));
+    const existing = new Set(nodes.map((n) => n.id));
+    nodes = nodes.map((n) => before.has(n.id) ? cloneSnapshot(before.get(n.id)!) : n);
+    for (const n of item.before.nodes) {
+      if (!existing.has(n.id)) nodes.push(cloneSnapshot(n));
+    }
   }
-  const afterIds = new Set<string>();
-  for (const item of entry.applied) {
-    for (const n of item.after.nodes) afterIds.add(n.id);
-  }
-
-  const nodes = [...doc.nodes];
-  for (let i = nodes.length - 1; i >= 0; i--) {
-    if (!afterIds.has(nodes[i].id)) continue;
-    if (!beforeNodes.has(nodes[i].id)) nodes.splice(i, 1);
-  }
-  const restored = nodes.map((n) => {
-    const snap = beforeNodes.get(n.id);
-    return snap ? cloneSnapshot(snap) : n;
-  });
-
-  return { ...doc, nodes: restored, revision: doc.revision + 1 };
+  return { ...doc, nodes, revision: doc.revision + 1 };
 }
 
 function cloneSnapshot(n: SceneNode): SceneNode {
@@ -315,3 +335,14 @@ function cloneSnapshot(n: SceneNode): SceneNode {
 export function useDisplayDoc() {
   return useEditorStore((s) => s.previewDoc ?? s.doc);
 }
+
+// 只保存已提交场景；预览、密钥、聊天内容不会进入恢复副本。
+useEditorStore.subscribe((state, previous) => {
+  if (state.doc === previous.doc || typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(AUTOSAVE_KEY, serializeProject(state.doc));
+    if (state.autosaveError) useEditorStore.setState({ autosaveError: null });
+  } catch {
+    useEditorStore.setState({ autosaveError: '自动恢复副本保存失败（空间不足或存储被禁用），请下载项目文件备份。' });
+  }
+});

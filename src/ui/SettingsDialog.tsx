@@ -1,196 +1,104 @@
+import {Dialog} from '@radix-ui/themes';
 import { useEffect, useRef, useState } from 'react';
 import { ModelConfig, fetchModels, testConnection } from '../ai/provider';
 import { useEditorStore } from '../store';
 
-// 模型配置对话框：OpenAI 兼容协议
-// - baseURL / apiKey / model 保存在本机 localStorage（store.setAiConfig 负责持久化）
-// - 填好地址和 Key 后自动调 /models 拉取模型列表（可输可选）；不支持该接口的服务可手动输入
-// - 「测试连接」发一次最小请求验证配置可用
-// - 「离线演示模式」走模拟回包，不联网（供无网环境体验链路；默认关）
 export function SettingsDialog({ onClose }: { onClose: () => void }) {
-  const aiConfig = useEditorStore((s) => s.aiConfig);
-  const setAiConfig = useEditorStore((s) => s.setAiConfig);
-
-  const [baseURL, setBaseURL] = useState(aiConfig?.baseURL ?? 'https://api.openai.com/v1');
-  const [apiKey, setApiKey] = useState(aiConfig?.apiKey ?? '');
-  const [model, setModel] = useState(aiConfig?.model ?? '');
-  const [useMock, setUseMock] = useState(aiConfig?.useMock ?? false);
-  const [testing, setTesting] = useState(false);
-  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  // null = 还没获取过；数组 = 已获取（可能为空，此时给手动输入的降级提示）
-  const [modelList, setModelList] = useState<string[] | null>(null);
-  const [fetchMsg, setFetchMsg] = useState<string | null>(null);
+  const config = useEditorStore((s) => s.aiConfig);
+  const [baseURL, setBaseURL] = useState(config?.baseURL ?? 'https://api.openai.com/v1');
+  const [apiKey, setApiKey] = useState(config?.apiKey ?? '');
+  const [model, setModel] = useState(config?.model ?? '');
+  const [agentMode, setAgentMode] = useState<'pi'|'single'>(config?.agentMode ?? 'pi');
+  const [stream, setStream] = useState(config?.agentMode === 'single' ? config.stream !== false : true);
+  const [useMock, setUseMock] = useState(config?.useMock ?? false);
+  const [models, setModels] = useState<string[] | null>(null);
+  const [query, setQuery] = useState('');
+  const [manual, setManual] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [error, setError] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ok:boolean;text:string}|null>(null);
+  const sequence = useRef(0);
+  const controller = useRef<AbortController | null>(null);
+  const lastCredentials = useRef('');
+  const inputClass = 'w-full bg-black/30 border border-white/15 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-400';
+  const ready = !!baseURL.trim() && !!apiKey.trim() && !useMock;
+  const valid = useMock || (ready && !!model.trim() && (manual || !!models?.includes(model)));
 
-  const refreshModels = async () => {
-    if (useMock || fetching) return;
-    setFetching(true);
-    setFetchMsg(null);
+  useEffect(() => () => { sequence.current++; controller.current?.abort(); }, []);
+  const invalidate = () => {
+    sequence.current++; controller.current?.abort(); setFetching(false); setTesting(false);
+    setModels(null); setModel(''); setError(''); setResult(null); setManual(false); setQuery('');
+    lastCredentials.current = '';
+  };
+  const load = async (force = true) => {
+    if (!ready) return;
+    const credentialId = `${baseURL.trim()}\n${apiKey.trim()}`;
+    if (!force && lastCredentials.current === credentialId) return;
+    lastCredentials.current = credentialId;
+    const id = ++sequence.current;
+    controller.current?.abort(); const c = new AbortController(); controller.current = c;
+    setFetching(true); setError(''); setResult(null); setModels(null); setManual(false);
+    const timeout = window.setTimeout(() => c.abort(), 20000);
     try {
-      const r = await fetchModels({ baseURL: baseURL.trim(), apiKey: apiKey.trim(), model: '', useMock: false });
-      setModelList(r.models);
-      setFetchMsg(r.error ? `模型列表获取失败：${r.error}（可直接手动输入模型名）` : `已获取 ${r.models.length} 个模型，可从列表选择或手动输入`);
-    } finally {
-      setFetching(false);
-    }
+      const r = await fetchModels({baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:'',useMock:false}, c.signal);
+      if (id !== sequence.current) return;
+      setModels(r.models);
+      if (r.error) { setError(c.signal.aborted ? '获取模型超时，请检查接口或稍后重试' : r.error); setModel(''); }
+      else { setModel((previous) => r.models.includes(previous) ? previous : (r.models.length === 1 ? r.models[0] : '')); }
+    } catch (e) { if (id === sequence.current) setError(e instanceof Error ? e.message : '获取模型失败'); }
+    finally { window.clearTimeout(timeout); if (id === sequence.current) setFetching(false); }
   };
-
-  // 对话框打开时若已填好地址和 Key，自动拉一次模型列表
-  const autoFetchedRef = useRef(false);
-  useEffect(() => {
-    if (autoFetchedRef.current || useMock) return;
-    if (!baseURL.trim() || !apiKey.trim()) return;
-    autoFetchedRef.current = true;
-    void refreshModels();
-    // 仅挂载时自动一次；之后改了地址/Key 可点「↻ 刷新」
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const save = () => {
-    const cfg: ModelConfig = { baseURL: baseURL.trim(), apiKey: apiKey.trim(), model: model.trim(), useMock };
-    setAiConfig(cfg);
-    onClose();
-  };
-
+  useEffect(() => { if (ready) void load(true); }, []);
   const test = async () => {
-    setTesting(true);
-    setTestMsg(null);
+    if (!valid || useMock) return;
+    const id = ++sequence.current;
+    controller.current?.abort(); const c = new AbortController(); controller.current = c;
+    const timeout = window.setTimeout(() => c.abort(), 20000);
+    setTesting(true); setResult(null);
     try {
-      const cfg: ModelConfig = { baseURL: baseURL.trim(), apiKey: apiKey.trim(), model: model.trim(), useMock: false };
-      // 只验证网络连通与 key/模型名有效；不要求模型按 DSL 格式作答
-      const r = await testConnection(cfg);
-      setTestMsg({ ok: r.ok, text: r.text });
-    } catch (e) {
-      setTestMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setTesting(false);
-    }
+      const r = await testConnection({baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false}, c.signal);
+      if (id === sequence.current) setResult(c.signal.aborted ? {ok:false,text:'连接测试超时，请检查服务响应后重试'} : r);
+    } finally { window.clearTimeout(timeout); if (id === sequence.current) setTesting(false); }
   };
-
-  // 输入框失焦时若两样都填了且还没拉到列表，顺手拉一次（地址/Key 改了想看新列表请点刷新）
-  const onBlurTryFetch = () => {
-    if (useMock || fetching) return;
-    if (!baseURL.trim() || !apiKey.trim()) return;
-    if (modelList && modelList.length > 0) return;
-    void refreshModels();
+  const save = () => {
+    if (!valid) return;
+    const cfg: ModelConfig = {baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock,stream,agentMode};
+    useEditorStore.getState().setAiConfig(cfg); onClose();
   };
-
-  const fetchOk = modelList !== null && modelList.length > 0;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={onClose}>
-      <div
-        className="w-[480px] bg-[#252A31] text-gray-200 rounded-lg shadow-2xl border border-white/10"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between px-5 py-3 border-b border-black/40">
-          <span className="font-bold tracking-wide">模型配置</span>
-          <button onClick={onClose} className="text-gray-400 hover:text-white px-2">✕</button>
-        </div>
-
-        <div className="p-5 space-y-4 text-sm">
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">API 地址（OpenAI 兼容）</label>
-            <input
-              type="text"
-              value={baseURL}
-              onChange={(e) => setBaseURL(e.target.value)}
-              onBlur={onBlurTryFetch}
-              placeholder="https://api.openai.com/v1"
-              className="w-full bg-black/30 border border-white/10 rounded px-3 py-2 focus:outline-none focus:border-blue-400"
-            />
-            <div className="text-xs text-gray-500 mt-1">兼容 OpenAI 协议的服务都可填，如 OpenAI / DeepSeek / 公司内部网关，填到 /v1 这一级。</div>
-          </div>
-
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">API Key</label>
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              onBlur={onBlurTryFetch}
-              placeholder="sk-..."
-              className="w-full bg-black/30 border border-white/10 rounded px-3 py-2 focus:outline-none focus:border-blue-400"
-            />
-            <div className="text-xs text-gray-500 mt-1">只保存在本机，请求时作为 Bearer 头发出。</div>
-          </div>
-
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">模型名</label>
-            <div className="flex gap-2">
-              <input
-                list="chat3d-model-options"
-                type="text"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                placeholder="gpt-4o-mini"
-                className="flex-1 bg-black/30 border border-white/10 rounded px-3 py-2 focus:outline-none focus:border-blue-400"
-              />
-              <button
-                onClick={() => void refreshModels()}
-                disabled={fetching || useMock}
-                title="重新从服务端拉取模型列表"
-                className="px-3 py-1.5 text-xs rounded bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
-              >
-                {fetching ? '获取中…' : '↻ 刷新'}
-              </button>
-            </div>
-            <datalist id="chat3d-model-options">
-              {(modelList ?? []).map((id) => (
-                <option key={id} value={id} />
-              ))}
-            </datalist>
-            {fetchMsg ? (
-              <div className={`text-xs mt-1 ${fetchOk ? 'text-emerald-400' : 'text-gray-500'}`}>{fetchMsg}</div>
-            ) : (
-              <div className="text-xs text-gray-500 mt-1">填好地址和 Key 后自动获取列表；也可直接手动输入。</div>
-            )}
-          </div>
-
-          <label className="flex items-start gap-2 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={useMock}
-              onChange={(e) => setUseMock(e.target.checked)}
-              className="mt-0.5"
-            />
-            <span>
-              <span className="text-gray-200">离线演示模式（模拟回包）</span>
-              <div className="text-xs text-gray-500 mt-0.5">不联网、不调用 API，用内置关键词解析。仅用于体验流程，生成质量有限。</div>
-            </span>
-          </label>
-
-          {testMsg && (
-            <div data-testid="test-result" className={`text-xs rounded px-3 py-2 ${testMsg.ok ? 'bg-emerald-900/40 text-emerald-300 border border-emerald-700/40' : 'bg-red-900/40 text-red-300 border border-red-700/40'}`}>
-              {testMsg.text}
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between px-5 py-3 border-t border-black/40">
-          <button
-            onClick={() => void test()}
-            disabled={testing || useMock}
-            className="px-4 py-1.5 text-sm rounded bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {testing ? '测试中…' : '测试连接'}
-          </button>
-          <div className="flex gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-1.5 text-sm rounded bg-white/10 hover:bg-white/20"
-            >
-              取消
-            </button>
-            <button
-              onClick={save}
-              className="px-4 py-1.5 text-sm rounded bg-blue-600 hover:bg-blue-500 text-white"
-            >
-              保存
-            </button>
-          </div>
-        </div>
+  const shown = (models ?? []).filter((id) => id.toLowerCase().includes(query.toLowerCase()));
+  const originBlocked = error.includes('origin not allowed');
+  return <Dialog.Root open onOpenChange={open=>{if(!open)onClose();}}>
+    <Dialog.Content aria-describedby={undefined} maxWidth="580px" style={{padding:0,maxHeight:'92vh',overflowY:'auto',background:'#19212c'}} onInteractOutside={e=>e.preventDefault()}>
+      <header className="flex items-center justify-between px-5 py-4 border-b border-black/40">
+        <Dialog.Title id="model-settings-title" className="font-bold text-lg" style={{margin:0}}>连接模型服务</Dialog.Title>
+        <button aria-label="关闭模型配置" onClick={onClose} className="px-2 py-1">✕</button>
+      </header>
+      <div className="p-5 space-y-4">
+        <p className="text-sm text-gray-400">1. 填写接口和密钥　2. 获取并选择模型　3. 测试后保存</p>
+        <label className="block text-sm space-y-1"><span>API 根地址</span><input className={inputClass} type="url" value={baseURL} disabled={useMock} onChange={(e)=>{invalidate();setBaseURL(e.target.value)}} onBlur={()=>void load(false)} placeholder="https://你的服务/v1" /><span className="block text-xs text-gray-400">填写到 /v1 或服务提供的 API 根路径，不要包含 /models 或 /chat/completions</span></label>
+        <label className="block text-sm space-y-1"><span>API Key</span><input className={inputClass} type="password" autoComplete="off" value={apiKey} disabled={useMock} onChange={(e)=>{invalidate();setApiKey(e.target.value)}} onBlur={()=>void load(false)} placeholder="填写服务提供的密钥" /></label>
+        <p className="text-xs text-amber-200">密钥保存在当前浏览器的本地存储中。请使用专用低额度密钥。网页接口需要支持 HTTPS，并允许当前网页来源。</p>
+        {!useMock && <div className="space-y-3">
+          <button onClick={()=>void load()} disabled={!ready || fetching} className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded text-sm">{fetching ? '正在获取模型列表…' : models?.length ? '重新获取模型列表' : '获取可用模型'}</button>
+          {error && <div role="alert" className="text-sm p-3 bg-red-950/50 text-red-200 rounded break-words">{error}</div>}
+          {!!models?.length && !manual && <>
+            <label className="block text-sm space-y-1"><span>筛选模型（共 {models.length} 个）</span><input className={inputClass} value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="输入名称筛选" /></label>
+            <label className="block text-sm space-y-1"><span>选择模型</span><select className={inputClass} value={model} onChange={(e)=>{sequence.current++;controller.current?.abort();setTesting(false);setModel(e.target.value);setResult(null)}}><option value="">请选择一个模型</option>{model && !shown.includes(model) && <option value={model}>{model}（当前选择）</option>}{shown.map((id)=><option key={id} value={id}>{id}</option>)}</select></label>
+            {shown.length === 0 && <p className="text-sm text-gray-400">没有匹配的模型，请修改筛选词</p>}
+          </>}
+          {!fetching && models !== null && !models.length && !originBlocked && !manual && <button className="text-sm text-blue-300 underline" onClick={()=>setManual(true)}>服务不提供列表？手动填写模型名</button>}
+          {manual && <label className="block text-sm space-y-1"><span>手动模型名（请以服务文档为准）</span><input className={inputClass} value={model} onChange={(e)=>{sequence.current++;controller.current?.abort();setTesting(false);setResult(null);setModel(e.target.value)}} placeholder="服务实际支持的模型 ID" /></label>}
+        </div>}
+        {!useMock && <label className="block text-sm space-y-1"><span>建模执行方式</span><select aria-label="建模执行方式" className={inputClass} value={agentMode} onChange={e=>{setAgentMode(e.target.value as 'pi'|'single');if(e.target.value==='pi')setStream(true);}}><option value="pi">Pi 分步建模（实验）</option><option value="single">单次生成（兼容模式）</option></select><span className="block text-xs text-gray-400">Pi 需要模型支持图片、工具调用与流式输出；最多6轮、18次工具调用、每轮最多4096输出Token、总计5分钟。会将场景截图发送至你配置的同一接口，实际费用以网关为准。</span></label>}
+        {!useMock && <label className="flex gap-2 text-sm"><input type="checkbox" disabled={agentMode==='pi'} checked={stream} onChange={e=>setStream(e.target.checked)}/><span>实时接收模型输出<span className="block text-xs text-gray-400">显示实际接收进度；服务不支持流式时可关闭，仍保留计时和超时保护</span></span></label>}
+        <label className="flex gap-2 text-sm"><input type="checkbox" checked={useMock} onChange={(e)=>{invalidate();setUseMock(e.target.checked)}} /><span>离线演示模式<span className="block text-xs text-gray-400">模拟回包，不是真实 AI；用于无密钥体验编辑流程</span></span></label>
+        {result && <p role="status" data-testid="test-result" className={`text-sm rounded p-3 ${result.ok?'bg-emerald-950 text-emerald-200':'bg-red-950 text-red-200'}`}>{result.text}</p>}
       </div>
-    </div>
-  );
+      <footer className="flex items-center justify-between p-4 border-t border-black/40">
+        <button onClick={()=>void test()} disabled={!valid || testing || useMock || fetching} className="px-3 py-2 bg-white/10 rounded disabled:opacity-40">{testing?'测试中…':'测试连接'}</button>
+        <div className="flex gap-2"><button onClick={onClose} className="px-3 py-2 bg-white/10 rounded">取消</button><button onClick={save} disabled={!valid || fetching} className="px-4 py-2 rounded bg-blue-600 disabled:opacity-40">保存配置</button></div>
+      </footer>
+    </Dialog.Content>
+  </Dialog.Root>;
 }

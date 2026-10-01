@@ -18,9 +18,10 @@ export interface Transform {
 }
 
 // 类型白名单（方案 MVP：box、sphere、cylinder、cone、plane）
-export type GeometryType = 'box' | 'sphere' | 'cylinder' | 'cone' | 'plane';
+export type GeometryType = 'box' | 'sphere' | 'cylinder' | 'cone' | 'plane' | 'roundedPlate' | 'capsule' | 'frame' | 'tube' | 'trapezoid';
 
 export interface BoxParams {
+  bevelRadius?: number;
   width: number;
   height: number;
   depth: number;
@@ -49,6 +50,11 @@ export interface PlaneParams {
 }
 
 export type Geometry =
+  | {type:'capsule';params:{radius:number;length:number}}
+  | {type:'frame';params:{width:number;height:number;depth:number;thickness:number}}
+  | {type:'tube';params:{outerRadius:number;innerRadius:number;height:number}}
+  | {type:'trapezoid';params:{widthTop:number;widthBottom:number;height:number;depth:number}}
+  | { type: 'roundedPlate'; params: {width:number; height:number; depth:number; cornerRadius:number; holeRadius?:number} }
   | { type: 'box'; params: BoxParams }
   | { type: 'sphere'; params: SphereParams }
   | { type: 'cylinder'; params: CylinderParams }
@@ -61,6 +67,8 @@ export interface Material {
   baseColor: string; // hex, e.g. #9099A4
   roughness: number; // [0,1]
   metalness: number; // [0,1]
+  emissive?: string;
+  emissiveIntensity?: number;
   opacity?: number; // [0,1]，默认 1
 }
 
@@ -81,6 +89,10 @@ export type SceneNodeKind = 'primitive' | 'asset' | 'group';
 export interface SceneNode {
   id: string; // 全项目唯一且稳定；名称不承担身份
   parentId: string | null;
+  assemblyName?: string;
+  zone?: string;
+  label?: string;
+  assemblyId?: string; // Flat editable equipment assembly, no transform hierarchy
   name: string;
   kind: SceneNodeKind;
   geometry?: Geometry; // kind === 'primitive'
@@ -143,6 +155,27 @@ export function validateQuaternion(q: Quaternion, field: string): Error[] {
 // 几何参数校验：有限、非负、超预算细分拒绝
 export function validateGeometry(g: Geometry): Error[] {
   const errs: Error[] = [];
+  const required: Record<GeometryType, string[]> = {
+    capsule:['radius','length'],frame:['width','height','depth','thickness'],tube:['outerRadius','innerRadius','height'],trapezoid:['widthTop','widthBottom','height','depth'],
+    roundedPlate: ['width','height','depth','cornerRadius'], box: ['width', 'height', 'depth'], sphere: ['radius'],
+    cylinder: ['radiusTop', 'radiusBottom', 'height'], cone: ['radius', 'height'], plane: ['width', 'depth'],
+  };
+  if (!g || !required[g.type] || !g.params || typeof g.params !== 'object') return [new Error('几何类型或参数结构无效')];
+  const parameters = g.params as unknown as Record<string, number>;
+  for (const key of required[g.type]) {
+    if (!isFiniteNumber(parameters[key])) errs.push(new Error(`几何 ${g.type} 缺少有效参数 ${key}`));
+    else if (parameters[key] <= 0 && key !== 'radiusTop' && key !== 'radiusBottom') errs.push(new Error(`几何参数 ${key} 必须大于 0`));
+  }
+  if (g.type === 'cylinder' && g.params.radiusTop === 0 && g.params.radiusBottom === 0) errs.push(new Error('圆柱上下半径不能同时为 0'));
+
+  if(g.type==='frame' && g.params.thickness>=Math.min(g.params.width,g.params.height)/2)errs.push(new Error('边框厚度必须小于宽高的一半，保留真实开口'));
+  if(g.type==='tube' && g.params.innerRadius>=g.params.outerRadius)errs.push(new Error('管内半径必须小于外半径'));
+  if(g.type==='box' && g.params.bevelRadius!==undefined && g.params.bevelRadius>Math.min(g.params.width,g.params.height,g.params.depth)/2)errs.push(new Error('倒角半径不能超过最短边一半'));
+  if(g.type === 'roundedPlate') {
+    const {width,depth,cornerRadius,holeRadius=0} = g.params;
+    if(cornerRadius > Math.min(width,depth)/2) errs.push(new Error('圆角半径不能超过短边一半'));
+    if(holeRadius >= Math.min(width,depth)/2) errs.push(new Error('开孔必须小于短边一半，不能切穿外轮廓'));
+  }
   const p = g.params as unknown as Record<string, number>;
   const segLimits: Record<string, number> = {
     widthSegments: 256,
@@ -152,7 +185,7 @@ export function validateGeometry(g: Geometry): Error[] {
   };
   for (const [k, v] of Object.entries(p)) {
     if (!isFiniteNumber(v)) errs.push(new Error(`几何参数 ${k} 不是有限数字`));
-    else if (v <= 0 && k !== 'radiusTop' && k !== 'radiusBottom' && k !== 'radius') {
+    else if (v <= 0 && k !== 'radiusTop' && k !== 'radiusBottom' && k !== 'radius' && k !== 'holeRadius' && k !== 'bevelRadius') {
       // 半径允许趋近 0（锥尖），但仍需 >= 0
       errs.push(new Error(`几何参数 ${k} 必须为正数（收到 ${v}）`));
     } else if (v < 0) errs.push(new Error(`几何参数 ${k} 不能为负数（收到 ${v}）`));
@@ -169,6 +202,8 @@ export function validateMaterial(m: Material): Error[] {
   if (!HEX_COLOR.test(m.baseColor ?? '')) errs.push(new Error(`材质 ${m.id ?? '?'} baseColor 不是合法 hex 颜色`));
   if (!isFiniteNumber(m.roughness) || m.roughness < 0 || m.roughness > 1) errs.push(new Error(`材质 ${m.id} roughness 超出 [0,1]`));
   if (!isFiniteNumber(m.metalness) || m.metalness < 0 || m.metalness > 1) errs.push(new Error(`材质 ${m.id} metalness 超出 [0,1]`));
+  if(m.emissive!==undefined&&!/^#[0-9a-f]{6}$/i.test(m.emissive))errs.push(new Error('发光颜色无效'));
+  if(m.emissiveIntensity!==undefined&&(!isFiniteNumber(m.emissiveIntensity)||m.emissiveIntensity<0||m.emissiveIntensity>2))errs.push(new Error('发光强度需为0–2'));
   if (m.opacity !== undefined && (!isFiniteNumber(m.opacity) || m.opacity < 0 || m.opacity > 1)) {
     errs.push(new Error(`材质 ${m.id} opacity 超出 [0,1]`));
   }
@@ -180,6 +215,8 @@ export function validateNode(node: SceneNode): Error[] {
   if (!node || !isValidId(node.id)) {
     errs.push(new Error(`节点 id 非法：${node?.id ?? '?'}`));
   }
+  for(const key of ['assemblyName','zone','label'] as const)if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key]!.length>200))errs.push(new Error('场景标注或分组名称无效'));
+  if(node.assemblyId!==undefined&&!isValidId(node.assemblyId))errs.push(new Error('设备组件标识无效'));
   if (typeof node.name !== 'string') errs.push(new Error(`节点 ${node?.id} name 不是字符串`));
   errs.push(...validateVec3(node.transform.position, `节点 ${node.id} position`));
   errs.push(...validateQuaternion(node.transform.rotationQuaternion, `节点 ${node.id} rotationQuaternion`));
