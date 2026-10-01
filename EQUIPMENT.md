@@ -61,3 +61,9 @@ The selected-scope option can permit new parts within fully selected components.
 The renderer reconciles meshes by stable ID and reuses geometry/material resources for unchanged objects, disposing resources after their last visible user disappears. Agent context summarizes fully selected assemblies and expands details on demand. These are implementation improvements, not measured browser FPS or live-token savings.
 
 Real-model generation, visual acceptance and elapsed-time/token comparisons are assigned to the user. Automated checks remain development safeguards and must not be presented as that acceptance.
+
+### Workbench presentation (MonoCode-inspired)
+
+The editor uses compact neutral-dark panes with a central 3D scene, a session rail and chat/task tabs. Session pinning is browser-local metadata, and the existing storage format remains compatible. Date grouping and draft/review filters summarize actual saved state. The task view shows the latest recorded execution and the conversation's existing batch outcomes; it does not add background execution, task scheduling or multi-agent orchestration.
+
+Switching between chat and task tabs, or entering scene-focus mode, keeps the chat component mounted. Drafts and active generation are preserved. Keyboard tab navigation and Escape-to-exit focus mode are supported. Wide screens dock the inspector beside the scene; narrower screens retain an overlay. CSS changes do not alter scene geometry or model materials. Developer interaction checks use jsdom and a fixture viewport, not browser visual verification.

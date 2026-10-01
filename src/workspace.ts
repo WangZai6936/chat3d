@@ -7,7 +7,7 @@ import { makeId } from './util/ids';
 type Snapshot=Pick<EditorState,'doc'|'messages'|'selection'|'dirty'|'past'|'future'|'composerText'|'composerImages'|'lastRun'> & {
   pendingBatch:EditorState['pendingBatch'];pendingResult:EditorState['pendingResult'];wasRunning:boolean;
 };
-export interface WorkspaceSession {id:string;title:string;autoTitle:boolean;createdAt:number;updatedAt:number;deletedAt:number|null;snapshot:Snapshot}
+export interface WorkspaceSession {id:string;title:string;autoTitle:boolean;pinned?:boolean;createdAt:number;updatedAt:number;deletedAt:number|null;snapshot:Snapshot}
 interface WorkspaceState {ready:boolean;saving:boolean;error:string|null;activeId:string;sessions:WorkspaceSession[]}
 export const useWorkspaceStore=create<WorkspaceState>(()=>({ready:false,saving:false,error:null,activeId:'',sessions:[]}));
 const busy=()=>['capturing','context','generating','validating','previewing','applying'].includes(useEditorStore.getState().aiStatus);
@@ -80,6 +80,10 @@ export function switchSession(id:string):boolean{
 export function renameSession(id:string,title:string):boolean{
   if(blocked||!title.trim())return false;
   useWorkspaceStore.setState(w=>({sessions:w.sessions.map(s=>s.id===id?{...s,title:title.trim().slice(0,80),autoTitle:false}:s)}));schedule();return true;
+}
+export function toggleSessionPinned(id:string):boolean{
+ if(blocked||busy())return false;const target=useWorkspaceStore.getState().sessions.find(s=>s.id===id&&!s.deletedAt);if(!target)return false;
+ useWorkspaceStore.setState(w=>({sessions:w.sessions.map(s=>s.id===id?{...s,pinned:!s.pinned}:s)}));schedule();return true;
 }
 export function trashSession(id:string):boolean{
   if(busy()||blocked)return false;capture();const w=useWorkspaceStore.getState();
