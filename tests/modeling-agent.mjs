@@ -6,6 +6,7 @@ let passed=0;let forceTransportError=false;
 const test=async(name,fn)=>{await fn();passed++;console.log('PASS',name)};
 try{
  const {runModelingAgent,compactAgentContext}=await server.ssrLoadModule('/src/ai/modelingAgent.ts');
+ const {normalizeModelingRequestText,normalizeModelingRequestMessages}=await server.ssrLoadModule('/src/ai/modelingRequest.ts');
  const {createInitialDoc,useEditorStore:store}=await server.ssrLoadModule('/src/store.ts');
  const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');
  const cfg={baseURL:'https://mock.invalid/v1',apiKey:'mock-only',model:'mock-vision-tools',useMock:false};
@@ -69,7 +70,30 @@ try{
  await test('cancellation during capture prevents completion and later draft callbacks',async()=>{const f=fake([[plan,edit,capture],[review,submit]]);const ctrl=new AbortController();let release;const o=opts(f);o.signal=ctrl.signal;o.capture=()=>new Promise(r=>release=r);const promise=runModelingAgent(o);while(!release)await new Promise(r=>setTimeout(r,1));ctrl.abort();release(picture);await assert.rejects(()=>promise,/停止/);assert.equal(o.document.nodes.length,0);assert.equal(f.calls,1)});
  await test('production Pi OpenAI adapter sends native tool schema and returns screenshot for the next request',async()=>{
    let wire=[];globalThis.fetch=async(url,init)=>{if(forceTransportError)throw new Error('本站模型代理响应异常（HTTP 403）。访问会话已失效');const body=JSON.parse(init.body);wire.push(body);const actions=wire.length===1?[plan,edit,capture]:[review,submit];const tc=actions.map((a,i)=>({index:i,id:`wire_${wire.length}_${i}`,type:'function',function:{name:a.name,arguments:JSON.stringify(a.args)}}));const raw='data: '+JSON.stringify({id:'test',object:'chat.completion.chunk',choices:[{index:0,delta:{role:'assistant',tool_calls:tc},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({id:'test',object:'chat.completion.chunk',choices:[{index:0,delta:{},finish_reason:'tool_calls'}],usage:{prompt_tokens:30,completion_tokens:20,total_tokens:50}})+'\n\ndata: [DONE]\n\n';return new Response(raw,{headers:{'content-type':'text/event-stream'}})};
-   const o=opts(fake([]));delete o.streamFn;const r=await runModelingAgent(o);assert.equal(wire.length,2);assert.ok(wire[0].tools.some(t=>t.function.name==='edit_scene'));assert.equal(wire[0].stream,true);assert.equal(wire[0].max_tokens,8192);assert.ok(JSON.stringify(wire[1].messages).includes('data:image/jpeg;base64,YWJj'));assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.outputTokens,40);
+   const o=opts(fake([]));delete o.streamFn;const r=await runModelingAgent(o);assert.equal(wire.length,2);assert.ok(wire[0].tools.some(t=>t.function.name==='edit_scene'));assert.ok(wire.every(body=>body.tools.every(tool=>tool.type==='function')));assert.equal(wire[0].stream,true);assert.equal(wire[0].max_tokens,8192);assert.ok(JSON.stringify(wire[1].messages).includes('data:image/jpeg;base64,YWJj'));assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.outputTokens,40);
+ });
+ await test('draw-workshop wording is normalized only for outbound modeling messages',async()=>{
+   const f=fake(['请确认车间的实际宽度']);const fn=f.fn;let seen=0;
+   f.fn=async(model,context,options)=>{const users=JSON.stringify(context.messages.filter(m=>m.role==='user'));assert.match(users,/帮我构建一个金刚石选型车间的沙盘/);assert.doesNotMatch(users,/画一/);seen++;return fn(model,context,options);};
+   const o=opts(f);o.text='帮我画一个金刚石选型车间的沙盘，车间内有20台金刚石选型器';const original=o.text;
+   const r=await runModelingAgent(o);assert.equal(seen,1);assert.equal(o.text,original);assert.equal(r.result.doc.nodes.length,0);assert.equal(r.batch.summary,'请确认车间的实际宽度');
+ });
+ await test('modeling wording normalization preserves requirements, explicit raster intent and non-user data',()=>{
+   const original='帮我画一个三维车间沙盘，20台设备，红色机器人，高度8米';
+   const expected='帮我构建一个三维车间沙盘，20台设备，红色机器人，高度8米';
+   assert.equal(normalizeModelingRequestText(original),expected);assert.equal(normalizeModelingRequestText(expected),expected);
+   assert.equal(normalizeModelingRequestText('Draw a 3D workshop scene with 20 machines'),'build a 3D workshop scene with 20 machines');
+   for(const text of ['画一张车间图片','draw an image of a workshop','帮我画一个小猫','把20台设备改成蓝色'])assert.equal(normalizeModelingRequestText(text),text);
+   const image={type:'image',data:'original-image-data',mimeType:'image/jpeg'};
+   const messages=[{role:'user',content:[{type:'text',text:original},image],timestamp:1},{role:'user',content:original,timestamp:2},{role:'assistant',content:[{type:'text',text:original}],timestamp:3}];
+   const before=JSON.stringify(messages);const normalized=normalizeModelingRequestMessages(messages);
+   assert.equal(JSON.stringify(messages),before);assert.equal(normalized[0].content[0].text,expected);assert.equal(normalized[0].content[1],image);assert.equal(normalized[1].content,expected);assert.equal(normalized[2],messages[2]);
+ });
+ await test('real SDK serializes the normalized scene instruction, preserving reference images and original input',async()=>{
+   const {stream}=await import('@earendil-works/pi-ai/api/openai-completions');const wire=[];
+   const fetch=async(url,init)=>{wire.push(JSON.parse(init.body));const raw='data: '+JSON.stringify({id:'normalized',object:'chat.completion.chunk',choices:[{index:0,delta:{role:'assistant',content:'请确认车间实际宽度'},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({id:'normalized',object:'chat.completion.chunk',choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n';return new Response(raw,{headers:{'content-type':'text/event-stream'}});};
+   const o=opts(fake([]));o.streamFn=(model,context,options)=>stream(model,context,{...options,apiKey:cfg.apiKey,fetch,maxTokens:8192});o.text='帮我画一个金刚石选型车间的沙盘，车间内有20台金刚石选型器';const original=o.text;await runModelingAgent(o);
+   assert.equal(wire.length,1);const users=wire[0].messages.filter(m=>m.role==='user');assert.match(JSON.stringify(users),/帮我构建一个金刚石选型车间的沙盘/);assert.doesNotMatch(JSON.stringify(users),/画一/);assert.match(JSON.stringify(users),/20台金刚石选型器/);assert.match(JSON.stringify(users),/data:image\/jpeg;base64,YWJj/);assert.ok(wire[0].tools.some(t=>t.function.name==='edit_scene'));assert.equal(o.text,original);
  });
  await test('Pi preserves actionable transport error instead of generic SDK connection error',async()=>{
    forceTransportError=true;

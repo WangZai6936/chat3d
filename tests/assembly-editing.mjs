@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';import {createServer} from 'vite';
 const server=await createServer({server:{middlewareMode:true},appType:'custom'});let passed=0;const test=async(n,f)=>{await f();passed++;console.log('PASS',n)};
 try{
 const {createInitialDoc,useEditorStore:store}=await server.ssrLoadModule('/src/store.ts');const {parseModelResponse}=await server.ssrLoadModule('/src/ai/provider.ts');const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');const {checkEditScope}=await server.ssrLoadModule('/src/domain/editScope.ts');const {serializeProject,parseProject}=await server.ssrLoadModule('/src/domain/project.ts');
+const {validateAnimation,createAnimationEvaluator}=await server.ssrLoadModule('/src/domain/animation.ts');
 const part=(name,x=0)=>({name,geometry:{type:'box',params:{width:1,height:1,depth:1}},transform:{position:[x,.5,0]},materialId:'mat_paint'});
 const parse=operations=>parseModelResponse(JSON.stringify({summary:'编辑检查',operations}));
 const fixture=()=>applyBatch(createInitialDoc(),parse([{op:'createAssembly',name:'设备A',sceneRole:'equipment',planKey:'设备A',parts:[part('左',-1),part('右',1)]},{op:'createAssembly',name:'设备B',parts:[part('外部',6)]}])).doc;
@@ -14,5 +15,44 @@ await test('cross-component replacement and unsafe transforms reject atomically'
 await test('subsequent local edits can target newly appended parts without expanding original scope',()=>{const d=fixture(),scope={nodeIds:d.nodes.slice(0,2).map(n=>n.id),allowAssemblyAdditions:true};const first=applyBatch(d,parse([{op:'appendAssemblyParts',targetId:d.nodes[0].id,parts:[part('追加')]}])).doc;const second=applyBatch(first,{operations:[{op:'setAppearance',targetId:first.nodes.at(-1).id,baseColor:'#123456'}]}).doc;assert.equal(checkEditScope(d,second,scope).length,0);const outside=structuredClone(second);outside.nodes.find(n=>n.id===d.nodes[2].id).assemblyId=d.nodes[0].assemblyId;assert.ok(checkEditScope(d,outside,scope).length)});
 await test('batch copying uses actual part count instead of charging every small assembly as 2000 nodes',()=>{const d=fixture();const r=applyBatch(d,{operations:[1,2,3,4].map(i=>({op:'duplicateAssembly',targetId:d.nodes[0].id,offset:[i*3,0,0]}))});assert.equal(r.errors.length,0);assert.equal(r.doc.nodes.length,d.nodes.length+8)});
 await test('actual allocation budget still rejects oversized copy batches atomically',()=>{const parts=Array.from({length:10},(_,i)=>({...part('part'+i),repeat:{count:100,step:[.01,0,0]}}));const d=applyBatch(createInitialDoc(),parse([{op:'createAssembly',name:'large',parts}])).doc;assert.equal(d.nodes.length,1000);const r=applyBatch(d,{operations:[1,2,3,4].map(i=>({op:'duplicateAssembly',targetId:d.nodes[0].id,offset:[i*3,0,0]}))});assert.match(r.errors[0].message,/实际新增/);assert.deepEqual(r.doc,d);assert.equal(r.applied.length,0)});
+const animate=(doc,tracks)=>applyBatch(doc,{operations:[{op:'setAnimation',animation:{version:1,name:'机器人取放',duration:6,loop:true,tracks}}]}).doc;
+const motion=targetIds=>({id:'robot-move',name:'背载料桶取料往返',targetIds,channel:'position',keyframes:[{time:0,value:[0,0,0]},{time:3,value:[3,0,0]},{time:6,value:[0,0,0]}]});
+await test('replacing animated robot parts transfers shared movement, preserves neighbors and supports undo redo',()=>{
+ const base=fixture(),robot=base.nodes.slice(0,2).map(n=>n.id),neighbor=base.nodes[2].id;
+ const other={...motion([neighbor]),id:'neighbor-move',name:'其他设备运动'};const d=animate(base,[motion(robot),other]);const before=JSON.stringify(d);reset(d);
+ const op={op:'replaceAssemblyParts',targetId:robot[0],partIds:[robot[1]],parts:['立柱','横移导轨','升降臂','腕部','开口取料杯'].map((name,i)=>part(name,i))};
+ assert.equal(store.getState().applyCommandBatch(parse([op]).operations,'替换取料机构').ok,true);
+ const after=store.getState().doc,newParts=after.nodes.filter(n=>n.assemblyId===base.nodes[0].assemblyId&&n.id!==robot[0]);
+ assert.equal(newParts.length,5);assert.equal(validateAnimation(after.animation,after.nodes).length,0);assert.deepEqual(new Set(after.animation.tracks[0].targetIds),new Set([robot[0],...newParts.map(n=>n.id)]));assert.deepEqual(after.animation.tracks[1],other);
+ const poses=createAnimationEvaluator(after)(1);for(const n of newParts)assert.equal(poses.get(n.id).transform.position[0],n.transform.position[0]+1);
+ assert.equal(JSON.stringify(d),before);assert.deepEqual(store.getState().past[0].applied[0].before.animation,d.animation);
+ store.getState().undo();assert.deepEqual(store.getState().doc.nodes,d.nodes);assert.deepEqual(store.getState().doc.animation,d.animation);
+ store.getState().redo();assert.deepEqual(store.getState().doc.nodes,after.nodes);assert.deepEqual(store.getState().doc.animation,after.animation);assert.deepEqual(parseProject(serializeProject(after)).animation,after.animation);
+});
+await test('replacing an animated anchor keeps its ID and adds new geometry to the motion exactly once',()=>{
+ const base=fixture(),ids=base.nodes.slice(0,2).map(n=>n.id),d=animate(base,[motion(ids)]);
+ const r=applyBatch(d,parse([{op:'replaceAssemblyParts',targetId:ids[0],partIds:[ids[0]],parts:[part('新锚点'),part('新增机构')]}]));assert.equal(r.errors.length,0);
+ const members=r.doc.nodes.filter(n=>n.assemblyId===base.nodes[0].assemblyId);assert.ok(members.some(n=>n.id===ids[0]));assert.deepEqual(new Set(r.doc.animation.tracks[0].targetIds),new Set(members.map(n=>n.id)));assert.equal(r.doc.animation.tracks[0].targetIds.length,3);
+});
+await test('replacing a single follow source keeps the carried bucket bound to a real moving replacement',()=>{
+ const base=fixture(),source=base.nodes[1].id,bucket=base.nodes[2].id;
+ const follow={id:'bucket-follow',name:'料桶跟随',targetIds:[bucket],channel:'follow',sourceId:source,start:0,end:3};const d=animate(base,[motion([source]),follow]);
+ const r=applyBatch(d,parse([{op:'replaceAssemblyParts',targetId:base.nodes[0].id,partIds:[source],parts:[part('取料臂',2),part('取料杯',3)]}]));assert.equal(r.errors.length,0);
+ const replacement=r.doc.animation.tracks[1].sourceId;assert.notEqual(replacement,source);assert.ok(r.doc.nodes.some(n=>n.id===replacement));assert.ok(r.doc.animation.tracks[0].targetIds.includes(replacement));assert.equal(createAnimationEvaluator(r.doc)(1).get(bucket).transform.position[0],base.nodes[2].transform.position[0]+1);
+});
+await test('equal-size replacement preserves distinct per-part animation channels',()=>{
+ const base=applyBatch(createInitialDoc(),parse([{op:'createAssembly',name:'机器人',parts:[part('锚点'),part('升降臂'),part('腕部')]}])).doc;const [anchor,arm,wrist]=base.nodes.map(n=>n.id);
+ const rotation={id:'wrist-rotate',name:'腕部转动',targetIds:[wrist],channel:'rotation',axis:[0,1,0],pivot:[0,0,0],keyframes:[{time:0,value:0},{time:6,value:90}]};const d=animate(base,[motion([arm]),rotation]);
+ const r=applyBatch(d,parse([{op:'replaceAssemblyParts',targetId:anchor,partIds:[arm,wrist],parts:[part('新升降臂'),part('新腕部')]}]));assert.equal(r.errors.length,0);
+ const replacements=r.doc.nodes.filter(n=>n.id!==anchor);assert.deepEqual(r.doc.animation.tracks[0].targetIds,[replacements[0].id]);assert.deepEqual(r.doc.animation.tracks[1].targetIds,[replacements[1].id]);assert.equal(validateAnimation(r.doc.animation,r.doc.nodes).length,0);
+});
+await test('ambiguous partial motion mapping rejects atomically rather than discarding or guessing motion',()=>{
+ const base=applyBatch(createInitialDoc(),parse([{op:'createAssembly',name:'机器人',parts:[part('锚点'),part('升降臂'),part('腕部')]}])).doc;const [anchor,arm,wrist]=base.nodes.map(n=>n.id);const d=animate(base,[motion([arm])]);
+ const r=applyBatch(d,parse([{op:'rename',targetId:anchor,name:'不应生效'},{op:'replaceAssemblyParts',targetId:anchor,partIds:[arm,wrist],parts:[part('机构A'),part('机构B'),part('机构C')]}]));assert.match(r.errors[0].message,/不同动画.*无法明确对应/);assert.equal(r.doc,d);assert.equal(r.applied.length,0);
+});
+await test('a later failing command rolls back both replacement geometry and remapped animation',()=>{
+ const base=fixture(),d=animate(base,[motion(base.nodes.slice(0,2).map(n=>n.id))]),before=JSON.stringify(d);
+ const r=applyBatch(d,{operations:[{op:'replaceAssemblyParts',targetId:base.nodes[0].id,partIds:[base.nodes[1].id],parts:[part('替换A'),part('替换B')]},{op:'rename',targetId:'missing',name:'失败'}]});assert.ok(r.errors.length);assert.equal(r.doc,d);assert.equal(JSON.stringify(d),before);assert.equal(r.applied.length,0);
+});
 console.log(`${passed} assembly editing checks passed`);
 }finally{await server.close()}

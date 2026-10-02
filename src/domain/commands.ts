@@ -1,4 +1,4 @@
-import {validateAnimation,type AnimationProgram} from './animation';
+import {validateAnimation,remapAnimationForReplacement,type AnimationProgram} from './animation';
 // 命令系统（方案第 6 节）
 // - 每个命令有固定参数 schema、目标类型限制、影响集计算、成本估计与逆操作
 // - 一次 AI 批量修改 = 一条历史记录；命令串行提交，原子生效
@@ -361,6 +361,10 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
         if(ids.size-removed.size+parts.length>2000)return {doc,error:new Error('单个组件不能超过2000个零件')};
         // Keep the assembly anchor addressable when its old geometry is replaced.
         if(removed.has(assemblyId))parts[0].id=assemblyId;
+        if(op.op==='replaceAssemblyParts'){
+          const remapped=remapAnimationForReplacement(animation,[...removed],parts.map(n=>n.id));
+          if(remapped!==animation){beforeSnapshot.animation=structuredClone(doc.animation??null);animation=remapped;}
+        }
         for(let i=nodes.length-1;i>=0;i--)if(removed.has(nodes[i].id))nodes.splice(i,1);
         for(const n of nodes)if(ids.has(n.id)){n.assemblyId=assemblyId;n.assemblyName=name;}
         nodes.push(...parts);createdIds=parts.map(n=>n.id);

@@ -39,6 +39,35 @@ export function validateAnimation(raw:unknown,nodes:SceneDocument['nodes']):Erro
  for(const id of follow.keys()){const seen=new Set<string>();let next:string|undefined=id;while(next&&follow.has(next)){if(seen.has(next)){fail('动画绑定不能自引用或形成循环');break;}seen.add(next);if(seen.size>16){fail('动画绑定层级不得超过16层');break;}next=follow.get(next);}}
  return errors.slice(0,12);
 }
+
+/** Keep motion references valid when editable assembly geometry is replaced. */
+export function remapAnimationForReplacement(program:AnimationProgram|undefined,removedIds:string[],replacementIds:string[]):AnimationProgram|undefined {
+ if(!program)return program;
+ const removed=new Set(removedIds),replacements=[...new Set(replacementIds)],retained=new Set(replacements);
+ const deleted=removedIds.filter(id=>!retained.has(id)),newIds=replacements.filter(id=>!removed.has(id));
+ const positional=new Map(deleted.length===newIds.length?deleted.map((id,i)=>[id,newIds[i]]):[]);
+ let changed=false;
+ const tracks=program.tracks.map(track=>{
+  let targetIds=track.targetIds,sourceId=track.sourceId;
+  if(targetIds.some(id=>removed.has(id))){
+   if(removedIds.every(id=>targetIds.includes(id))){
+    // A shared motion belongs to the replaced group, including all of its new geometry.
+    targetIds=[...new Set(targetIds.flatMap(id=>removed.has(id)?replacements:[id]))];
+   }else if(targetIds.some(id=>deleted.includes(id))){
+    if(deleted.length!==1&&positional.size!==deleted.length)throw Error(`轨道 ${track.name} 的替换零件有不同动画，无法明确对应新零件；请先调整动画绑定再替换`);
+    targetIds=[...new Set(targetIds.flatMap(id=>!deleted.includes(id)?[id]:deleted.length===1?newIds:[positional.get(id)!]))];
+   }
+  }
+  if(sourceId&&deleted.includes(sourceId)){
+   const mapped=positional.get(sourceId)??(deleted.length===1?newIds[0]:undefined);
+   if(!mapped)throw Error(`轨道 ${track.name} 的跟随源 ${sourceId} 无法明确对应新零件；请先调整动画绑定再替换`);
+   sourceId=mapped;
+  }
+  if(sourceId===track.sourceId&&targetIds.length===track.targetIds.length&&targetIds.every((id,i)=>id===track.targetIds[i]))return track;
+  changed=true;return {...track,targetIds,...(sourceId!==track.sourceId?{sourceId}:{})};
+ });
+ return changed?{...program,tracks}:program;
+}
 function sample(tr:AnimationTrack,time:number):MotionValue{
  if(tr.expression!==undefined)return Array.isArray(tr.expression)?tr.expression.map(x=>evaluateExpression(x,time)) as Vec3:evaluateExpression(tr.expression,time);
  const keys=tr.keyframes!;if(time<=keys[0].time)return keys[0].value;

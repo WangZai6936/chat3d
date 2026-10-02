@@ -15,6 +15,7 @@ import {checkEditScope,type EditScope} from '../domain/editScope';
 import { makeId } from '../util/ids';
 
 import { AGENT_LIMITS } from './agentPolicy';
+import { normalizeModelingRequestMessages } from './modelingRequest';
 export { AGENT_LIMITS } from './agentPolicy';
 export interface ActivityTiming { id:string; kind:'model'|'tool'; label:string; startedAt:number; firstDataAt?:number; endedAt?:number; failed?:boolean; detail?:string; inputTokens?:number; outputTokens?:number }
 export interface DesignBrief {flow:string[];layout:string;equipment:{name:string;count:number;features:string[]}[];checks:string[];composition?:CompositionPlan}
@@ -289,6 +290,7 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
       const animationNext=wantsAnimation?(!activity.plan.length?'本轮用户要求实际动画：先plan_model，然后configure_animation。':JSON.stringify(draft.animation)===JSON.stringify(base.animation)?'本轮动画尚未创建或修改：下一步应configure_animation，不要只反复read_scene/capture_view。':animationCheckedRevision!==draft.revision?'动画已配置：下一步preview_animation。':reviewedWholeRevision!==draft.revision?'动态样本已返回：下一轮review_model。':'动态复核已完成：若需求已满足，下一步submit_preview。'):'';
       const budgetNote=`\n${continuation?'本轮继续此前用户需求：'+resolvedIntent.slice(0,500)+'。':''}当前第${calls}轮，连续${stagnantTurns}轮没有有效进展。继续完成计划与细节，不因轮数增加提前收尾。当前输入${activity.inputTokens}、输出${activity.outputTokens} Token；避免无效重复。${animationNext}${recoveryNote}`;
       context={...context,messages:context.messages.map((message,index)=>index===0 && message.role==='system'?{...message,content:typeof message.content==='string'?message.content+budgetNote:[...message.content,{type:'text' as const,text:budgetNote}]}:message)};
+      context={...context,messages:normalizeModelingRequestMessages(context.messages)};
       if(options.streamFn)return options.streamFn(m,context,streamOptions);
       return stream(model,context,{...streamOptions,apiKey:cfg.apiKey.trim(),fetch:f,maxTokens:AGENT_LIMITS.outputPerTurn,maxRetries:0,timeoutMs:AGENT_LIMITS.idleTimeoutMs,
         onProviderStreamEvent:()=>{firstData();emit(activity.title);},onResponse:()=>emit(`第 ${calls} 轮：服务已响应，正在接收`) });
