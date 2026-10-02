@@ -16,6 +16,17 @@ const vite=await createServer({server:{middlewareMode:true},appType:'custom'});
 try{
  const {createBrowserProxyFetch}=await vite.ssrLoadModule('/src/ai/transport.ts');
  await test('web models and generation are always same-origin, preserving abort and body',async()=>{const calls=[];const proxy=createBrowserProxyFetch(async(...a)=>{calls.push(a);return new Response('{}',{headers:{'x-chat3d-proxy':'1'}})});const signal=new AbortController().signal;await proxy(root+'/models',{headers:{Authorization:'Bearer test-only'},signal});await proxy(root+'/chat/completions',{method:'POST',headers:{Authorization:'Bearer test-only','Content-Type':'application/json'},body:'{}',signal});assert.deepEqual(calls.map(c=>c[0]),['/api/model/models','/api/model/chat/completions']);assert.equal(calls[1][1].body,'{}');assert.equal(calls[1][1].signal,signal);assert.equal(calls[0][1].headers.get('X-Chat3d-Upstream'),root);});
+ await test('browser network failures explain the failing hop and never retry or bypass proxy',async()=>{
+   let calls=0;const proxy=createBrowserProxyFetch(async()=>{calls++;throw new TypeError('Failed to fetch')});await assert.rejects(()=>proxy(root+'/models'),/浏览器未能取得本站模型代理响应/);assert.equal(calls,1);
+ });
+ await test('successive tasks resolve the current host fetch rather than a stale authenticated wrapper',async()=>{
+   const original=globalThis.fetch,previousWindow=globalThis.window;let oldCalls=0,newCalls=0;globalThis.window={};const {getFetch}=await vite.ssrLoadModule('/src/ai/provider.ts');
+   try{globalThis.fetch=async()=>{oldCalls++;return new Response('{}',{headers:{'x-chat3d-proxy':'1'}})};const proxy=await getFetch();await proxy(root+'/models');globalThis.fetch=async()=>{newCalls++;return new Response('{}',{headers:{'x-chat3d-proxy':'1'}})};await proxy(root+'/chat/completions',{method:'POST',body:'{}'});assert.equal(oldCalls,1);assert.equal(newCalls,1);}finally{globalThis.fetch=original;if(previousWindow===undefined)delete globalThis.window;else globalThis.window=previousWindow;}
+ });
+ await test('private Site access 401 is distinct from upstream model-key 401 and is never retried',async()=>{
+   let calls=0;const site=createBrowserProxyFetch(async()=>{calls++;return new Response('<html>sign in</html>',{status:401,headers:{'content-type':'text/html'}})});await assert.rejects(()=>site(root+'/models'),/体验页访问验证未通过.*HTTP 401/);assert.equal(calls,1);
+   const upstream=createBrowserProxyFetch(async()=>new Response('{"error":"invalid key"}',{status:401,headers:{'x-chat3d-proxy':'1','content-type':'application/json'}}));const response=await upstream(root+'/models');assert.equal(response.status,401);assert.match(await response.text(),/invalid key/);
+ });
  await test('static-only deployment and disallowed upstream return actionable errors without direct fallback',async()=>{let n=0;const proxy=createBrowserProxyFetch(async()=>{n++;return new Response('<html>')});await assert.rejects(()=>proxy(root+'/models'),/未接入模型代理/);assert.equal(n,1);const denied=createBrowserProxyFetch(async()=>new Response(JSON.stringify({error:{code:'PROXY_UPSTREAM_DENIED',message:'部署管理员配置一次'}}),{status:403,headers:{'x-chat3d-proxy':'1'}}));await assert.rejects(()=>denied(root+'/models'),/配置一次/);});
 }finally{await vite.close();}
 console.log(`${passed} model proxy checks passed with mock upstream and real local HTTP`);

@@ -10,7 +10,7 @@ type Snapshot=Pick<EditorState,'doc'|'messages'|'selection'|'dirty'|'past'|'futu
 export interface WorkspaceSession {id:string;title:string;autoTitle:boolean;pinned?:boolean;createdAt:number;updatedAt:number;deletedAt:number|null;snapshot:Snapshot}
 interface WorkspaceState {ready:boolean;saving:boolean;error:string|null;activeId:string;sessions:WorkspaceSession[]}
 export const useWorkspaceStore=create<WorkspaceState>(()=>({ready:false,saving:false,error:null,activeId:'',sessions:[]}));
-const busy=()=>['capturing','context','generating','validating','previewing','applying'].includes(useEditorStore.getState().aiStatus);
+const busy=()=>['capturing','context','generating','validating','applying'].includes(useEditorStore.getState().aiStatus);
 const snapshot=():Snapshot=>{const s=useEditorStore.getState();return {doc:s.doc,messages:s.messages,selection:s.selection,dirty:s.dirty,past:s.past,future:s.future,composerText:s.composerText,composerImages:s.composerImages,lastRun:s.lastRun,pendingBatch:s.pendingBatch,pendingResult:s.pendingResult,wasRunning:['capturing','context','generating','validating','applying'].includes(s.aiStatus)}};
 const fresh=():Snapshot=>({doc:createInitialDoc(),messages:[],selection:[],dirty:false,past:[],future:[],composerText:'',composerImages:[],lastRun:null,pendingBatch:null,pendingResult:null,wasRunning:false});
 const record=(snap:Snapshot,title='新建会话'):WorkspaceSession=>({id:makeId(),title,autoTitle:title==='新建会话',createdAt:Date.now(),updatedAt:Date.now(),deletedAt:null,snapshot:snap});
@@ -20,7 +20,8 @@ let initialized:Promise<void>|null=null;
 let waiters:(()=>void)[]=[];
 function restore(session:WorkspaceSession){
   const s=session.snapshot;
-  const messages=s.wasRunning?[...s.messages,{id:makeId(),role:'assistant' as const,text:s.pendingBatch?'上次生成中断，已恢复最近保存的阶段草稿（未完成复核），原场景未修改。':'上次生成因页面关闭或刷新中断，尚无可恢复的阶段草稿；已恢复原场景和聊天。',createdAt:Date.now()}]:s.messages;
+  const recoveredMessages=s.messages.map(m=>m.steering?.status==='queued'?{...m,steering:{...m.steering,status:'interrupted' as const}}:m).map(m=>m.run?.status==='running'?{...m,run:{...m.run,status:'stopped' as const,endedAt:m.run.activity?.lastEventAt??m.createdAt}}:m);
+  const messages=s.wasRunning?[...recoveredMessages,{id:makeId(),role:'assistant' as const,text:s.pendingBatch?'上次生成中断，已恢复最近保存的阶段草稿（未完成复核），原场景未修改。':'上次生成因页面关闭或刷新中断，尚无可恢复的阶段草稿；已恢复原场景和聊天。',createdAt:Date.now()}]:recoveredMessages;
   hydrating=true;
   useEditorStore.setState({...s,messages,aiStatus:s.pendingBatch&&s.pendingResult?'previewing':'idle',previewDoc:s.pendingResult?.doc??null,aiError:null});
   hydrating=false;

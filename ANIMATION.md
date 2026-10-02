@@ -4,7 +4,7 @@ Animation is a program attached to the editable scene, not a preset workshop. As
 
 ## Interaction
 
-1. Describe the motion, route, dwell times and relationships. For whole-line motion, select the whole intended set or turn off selected-only scope; the agent cannot silently widen scope.
+1. Describe the motion, route, dwell times and relationships. Conversation editing defaults to the entire scene. Highlighted objects are references, not a scope restriction. Explicit local-only instructions remain authoritative; unambiguous selected-object requests retain hard transaction guards.
 2. The agent identifies actual part IDs and creates animation tracks, then samples and visually reviews the result. Ambiguous object/route intent may still require clarification.
 3. Play the pending preview with play/pause, reset,0.25–4× speed and timeline scrub. Confirm to save it as one undoable edit, or discard it.
 4. Continue conversationally: slower, longer station dwell, reverse direction, change sequence, or remove motion. No manual action-library setup is required.
@@ -32,3 +32,13 @@ This supports generated circles, spirals, oscillation and conditional timing wit
 The AI `preview_animation` tool evaluates distinct timeline samples and captures up to three rendered frames. It requires a subsequent visual review before an animation-changing preview is submitted. This is sampled checking, not proof that every intermediate frame is collision-free or visually correct. Repeated-frame false no-progress behavior remains guarded by the revised scope/view-aware review accounting.
 
 Automated tests cover deterministic paths/holds, rotations, scale/visibility, expression bounds, follow/release, invalid references/cycles, scope including dependent followers, project roundtrip, undo/redo, CPU mesh updates/reset, UI controls and mocked agent preview/submit flow. Browser visual QA, live-provider generation quality and native-binary validation are separate and are not represented by these tests.
+
+## Direct animation tool and generation diagnostics
+
+The agent now exposes `configure_animation` as a native structured tool rather than relying only on discovering setAnimation inside generic edit commands. It uses the same validated transaction and scope guards. Per-turn instructions identify whether to plan, configure, preview, review or submit. Historical assistant statements that the app is static-only are explicitly marked obsolete. When a task stalls, the error and task history include the actual recent tool names and whether an animation program exists. The four-turn no-progress guard remains; no arbitrary motion is silently applied as a fallback.
+
+## Multi-object reads and requirement priority
+
+Current-revision component/node detail snapshots are retained separately (up to24 scopes), instead of replacing earlier component IDs whenever another component is read. Repeated reads of the same version/scope return a reuse hint; genuinely new detailed scopes count as bounded preparation progress. Tool traces show the requested component/node names. `read_scene` accepts assemblyId or nodeIds and rejects unknown arguments instead of silently returning an unrelated overview.
+
+Short confirmations such as “开始吧” resolve against the latest substantive user request. Explicit user motion instructions can temporarily override an older placement-lock toggle for that request, with a visible notice; negative instructions and unambiguous local-only targets retain their protection. This is conservative language matching plus model interpretation, not a claim of perfect natural-language understanding. Latest user requirements outrank defaults and prior assistant assumptions, but validity, safe execution and resource bounds remain. Large goals should be completed in batches rather than rejected due to single-call capacity.

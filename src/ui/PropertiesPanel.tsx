@@ -1,9 +1,15 @@
+import {focusSceneObjects} from '../scene/focus';
 import {useMemo,useState} from 'react';
 import { Geometry, type SceneDocument, type SceneNode } from '../domain/types';
 import {assemblyBounds,transformedAssembly} from '../domain/assemblyEditing';
 import {Vector3} from 'three';
 import type {AppearancePatch, Command} from '../domain/commands';
 import { useDisplayDoc, useEditorStore } from '../store';
+
+const geometryNames:Record<string,string>={box:'长方体',sphere:'球体',cylinder:'圆柱体',cone:'圆锥体',plane:'平面',roundedPlate:'圆角板',capsule:'胶囊体',frame:'框架',tube:'空心管',trapezoid:'梯形体'};
+const parameterNames:Record<string,string>={width:'宽度',height:'高度',depth:'深度',length:'长度',radius:'半径',radiusTop:'顶部半径',radiusBottom:'底部半径',outerRadius:'外半径',innerRadius:'内半径',widthTop:'顶部宽度',widthBottom:'底部宽度',thickness:'厚度',bevelRadius:'倒角半径',cornerRadius:'圆角半径',holeRadius:'孔半径',widthSegments:'横向分段数',heightSegments:'纵向分段数',depthSegments:'深度分段数',radialSegments:'圆周分段数'};
+const parameterLabel=(key:string)=>(parameterNames[key]??key)+(key.endsWith('Segments')?'':'（米）');
+function FocusObject({doc,node}:{doc:SceneDocument;node:SceneNode}){return <button type="button" className="m-3 rounded bg-blue-500/15 px-3 py-2 text-xs text-blue-200" onClick={()=>focusSceneObjects(node.assemblyId?doc.nodes.filter(n=>n.assemblyId===node.assemblyId).map(n=>n.id):[node.id])}>{node.assemblyId?'聚焦当前设备':'聚焦选中对象'}</button>;}
 
 // 属性面板：精确尺寸、位置。空值/非法输入不能提交（方案第 8 节）
 export function PropertiesPanel() {
@@ -20,7 +26,7 @@ export function PropertiesPanel() {
     return (
       <div className="flex flex-col h-full bg-[#252A31] text-gray-200">
         <div className="px-3 py-2 text-xs font-bold text-gray-400 border-b border-black/30 tracking-wider">属性</div>
-        <div className="px-3 py-6 text-xs text-gray-500 text-center">未选中对象</div>
+        <div className="px-3 py-6 text-xs text-gray-500 text-center">点击场景或对象列表中的零件，即可修改颜色、尺寸与位置</div>
       </div>
     );
   }
@@ -28,7 +34,7 @@ export function PropertiesPanel() {
   if(selection.length>1){
     const ids=new Set(selection);const members=doc.nodes.filter(n=>ids.has(n.id));const assembly=node.assemblyId;
     const same=!!assembly&&members.every(n=>n.assemblyId===assembly)&&members.length===doc.nodes.filter(n=>n.assemblyId===assembly).length;
-    return <div className="p-4 bg-[#252A31] text-gray-200 text-sm h-full overflow-auto"><h3>{same?node.assemblyName??'组件':'多选对象'}</h3>{lockNotice}<p className="text-xs text-gray-400 my-3">已选 {members.length} 个零件。外观修改只影响所选范围，可撤销。</p>
+    return <div className="p-4 bg-[#252A31] text-gray-200 text-sm h-full overflow-auto"><h3>{same?node.assemblyName??'组件':'多选对象'}</h3>{lockNotice}<FocusObject doc={doc} node={node}/><p className="text-xs text-gray-400 my-3">已选 {members.length} 个零件。外观修改只影响所选范围，可撤销。</p>
       <fieldset disabled={locked} className="disabled:opacity-50">{same&&<div className="grid grid-cols-2 gap-2">{([['左移 1m',[-1,0,0]],['右移 1m',[1,0,0]],['前移 1m',[0,0,1]],['后移 1m',[0,0,-1]]] as const).map(([title,value])=><button key={title} className="rounded bg-white/10 p-2 text-xs" onClick={()=>{const r=applyCommandBatch([{op:'translateAssembly',targetId:node.id,value:[...value]}],title);if(!r.ok)window.alert(r.error);}}>{title}</button>)}</div>}
       {same&&<AssemblyTransformEditor nodes={members} wholeAssembly/>}
       <AppearanceEditor key={members.map(n=>n.id+':'+n.materialId).join('|')} doc={doc} nodes={members} wholeAssembly={same}/></fieldset>
@@ -51,12 +57,13 @@ export function PropertiesPanel() {
     <div className="flex flex-col h-full bg-[#252A31] text-gray-200">
       <div className="px-3 py-2 text-xs font-bold text-gray-400 border-b border-black/30 tracking-wider">属性</div>
       {lockNotice}
+      <FocusObject doc={doc} node={node}/>
       <fieldset disabled={locked} className="flex-1 overflow-auto p-3 space-y-4 text-sm disabled:opacity-50">
         {/* 名称 */}
         <div>
           <label className="block text-xs text-gray-400 mb-1">名称</label>
           <input
-            type="text"
+            type="text" aria-label="对象名称"
             key={`${node.id}:${node.name}`}
             defaultValue={node.name}
             onBlur={(e) => {
@@ -77,7 +84,7 @@ export function PropertiesPanel() {
             {node.transform.position.map((v, i) => (
               <input
                 key={`${node.id}:${i}:${v}`}
-                type="number"
+                type="number" aria-label={`位置 ${['X','Y','Z'][i]}（米）`}
                 step="0.05"
                 defaultValue={v.toFixed(3)}
                 onBlur={(e) => {
@@ -96,12 +103,12 @@ export function PropertiesPanel() {
         {/* 几何参数 */}
         {isPrimitive && g && (
           <div>
-            <label className="block text-xs text-gray-400 mb-1">几何参数（{g.type}）</label>
+            <label className="block text-xs text-gray-400 mb-1">尺寸参数（{geometryNames[g.type]??g.type}）</label>
             <div className="space-y-1">
               {Object.entries(g.params).map(([k, v]) => (
                 <div key={k} className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 w-28">{k}</span>
-                  <input aria-label={`几何参数 ${k}`} type="number" step="any" key={`${node.id}:${k}:${v}`} defaultValue={v} className="min-w-0 w-full bg-black/30 border border-white/10 rounded px-2 py-1" onBlur={e=>{const value=Number(e.target.value);if(!e.target.value.trim()||!Number.isFinite(value)){e.target.value=String(v);return;}if(value===v)return;const geometry={...g,params:{...g.params,[k]:value}} as Geometry;const r=applyCommandBatch([{op:'updateParameters',targetId:node.id,geometry}],`修改 ${node.name} ${k}`);if(!r.ok){window.alert(r.error);e.target.value=String(v);}}} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();}}/>
+                  <span className="text-xs text-gray-400 w-28">{parameterLabel(k)}</span>
+                  <input aria-label={parameterLabel(k)} type="number" step="any" key={`${node.id}:${k}:${v}`} defaultValue={v} className="min-w-0 w-full bg-black/30 border border-white/10 rounded px-2 py-1" onBlur={e=>{const value=Number(e.target.value);if(!e.target.value.trim()||!Number.isFinite(value)){e.target.value=String(v);return;}if(value===v)return;const geometry={...g,params:{...g.params,[k]:value}} as Geometry;const r=applyCommandBatch([{op:'updateParameters',targetId:node.id,geometry}],`修改 ${node.name} ${k}`);if(!r.ok){window.alert(r.error);e.target.value=String(v);}}} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();}}/>
                 </div>
               ))}
             </div>

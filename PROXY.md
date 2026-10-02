@@ -1,14 +1,14 @@
 # Model network transport
 
-The web application never directly fetches a model provider. `getFetch()` routes `/models` and `/chat/completions` (including connection tests and Pi SSE) to `/api/model/...` on the page's own origin. The original API root is a request header, not a URL containing a key. The server forwards only the caller's Bearer token, content type and Accept header to an explicitly approved API root. Desktop Tauri builds continue to use their native HTTP plugin and fail clearly if it is unavailable instead of silently falling back to browser fetch.
+The web application never directly fetches a model provider. `getFetch()` routes `/models` and `/chat/completions` (including connection tests and Pi SSE) to `/api/model/...` on the page's own origin. The original API root is a request header, not a URL containing a key. The server forwards only the caller's Bearer token, content type and Accept header to the public HTTPS API root entered by the user, subject to URL and transport safety checks. Desktop Tauri builds continue to use their native HTTP plugin and fail clearly if it is unavailable instead of silently falling back to browser fetch.
 
 ## Development and local preview
 
 - `npm ci`, then `npm run dev` (default localhost:1420)
 - `npm run build`, then `npm run preview` also installs the same proxy middleware
 - Restart the development server after pulling this change; hot reload alone cannot install new server middleware
-- The reported provider `https://discovery-api.intern-ai.org.cn/v1` and `https://api.openai.com/v1` work with the built-in allowlist. Users enter their own keys in model settings. No project developer key is included
-- Other trusted public HTTPS providers: set comma-separated API roots in `CHAT3D_ALLOWED_UPSTREAMS` in `.env.local` or the server's environment. This replaces the defaults. Configure once per deployment, not per client computer. Do not put secrets in `VITE_*` settings
+- Enter any supported public HTTPS API root and its corresponding key in model settings. No per-provider source edit or server allowlist registration is required by default. Changing the destination clears the unsaved key to prevent accidentally forwarding an old provider key
+- `CHAT3D_ALLOWED_UPSTREAMS` is now an optional organization restriction, not a default. If an administrator previously set it, it remains enforced; remove it explicitly to adopt default custom-API mode. Do not put secrets in `VITE_*` settings
 
 ## Production Node / Docker
 
@@ -18,7 +18,7 @@ Behind an HTTPS reverse proxy set `CHAT3D_PUBLIC_ORIGIN` to the exact external p
 
 ## Hosted Worker
 
-The build also emits a self-contained Cloudflare-compatible `dist/server/index.js`, serving client assets and the same proxy. Runtime `CHAT3D_ALLOWED_UPSTREAMS` optionally replaces its built-in allowlist. The owner-private Sites manifest selects the Worker rather than static-only hosting. It does not require a shared provider key or database. Embedded assets are generated build output, never hand-maintained source.
+The build also emits a self-contained Cloudflare-compatible `dist/server/index.js`, serving client assets and the same proxy. Runtime `CHAT3D_ALLOWED_UPSTREAMS` optionally enables an organization restriction. The default permits validated public HTTPS domain targets. The owner-private Sites manifest selects the Worker rather than static-only hosting. It does not require a shared provider key or database. Embedded assets are generated build output, never hand-maintained source.
 
 ## Deployment boundaries
 
@@ -26,11 +26,13 @@ Uploading only `dist/index.html` and assets to a static-only server is insuffici
 
 ## Safety and operation
 
-- Exact server-side HTTPS API-root allowlist; no wildcard or arbitrary target proxy
+- HTTPS domain roots only; reject credentials/query/fragments, literal IPs, local/reserved names, self-targets and path traversal
+- Node resolves all DNS answers, rejects non-public IPv4/IPv6 (including mapped forms), and pins the TLS connection to the validated answers while verifying the original hostname. No second DNS lookup or certificate bypass
+- The standalone Worker uses Cloudflare public-Internet global fetch, never private service/VPC bindings. This safety assumption does not hold for an arbitrary reverse-proxy Worker with privileged origin access; do not attach such a transport. See https://blog.cloudflare.com/workers-environment-live-object-bindings/ and https://developers.cloudflare.com/workers/platform/known-issues/
 - Only GET models and POST chat completions. No administrative endpoints, arbitrary paths, URL credentials, query forwarding or redirects
 - Caller Origin must match the application origin when present; cross-site browser requests rejected. No permissive CORS headers and no browser security disablement
 - Request body capped at8 MiB; 3-minute idle timeout resets on stream data; cancellation propagates upstream
 - Upstream status preserved, cookies removed, no API response caching, no key/body logging
-- This is not a shared-key authentication service. Public hosting still needs application-level user access control and normal provider rate limits. Never configure untrusted/rebinding domains or infrastructure/metadata addresses as upstreams
+- This is not a shared-key authentication service. Public hosting still needs application-level user access control and normal provider rate limits. A server-side transport must enforce these destination protections; URL checks alone are not DNS-rebinding protection
 
 Verification: automated shared-handler, actual loopback Node HTTP, browser transport and built Worker checks use dummy keys and mocked upstream responses. Live provider success still depends on the user's valid credentials and deployment network; no real paid model calls are made by these checks.

@@ -1,3 +1,5 @@
+import {SiteAccessRecovery} from './SiteAccessRecovery';
+import {AGENT_LIMITS} from '../ai/agentPolicy';
 import {Dialog} from '@radix-ui/themes';
 import { useEffect, useRef, useState } from 'react';
 import { ModelConfig, fetchModels, testConnection } from '../ai/provider';
@@ -75,12 +77,13 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         <button aria-label="关闭模型配置" onClick={onClose} className="px-2 py-1">✕</button>
       </header>
       <div className="p-5 space-y-4">
-        <p className="text-sm text-gray-400">1. 填写接口和密钥　2. 获取并选择模型　3. 测试后保存</p>
-        <label className="block text-sm space-y-1"><span>API 根地址</span><input className={inputClass} type="url" value={baseURL} disabled={useMock} onChange={(e)=>{invalidate();setBaseURL(e.target.value)}} onBlur={()=>void load(false)} placeholder="https://你的服务/v1" /><span className="block text-xs text-gray-400">填写到 /v1 或服务提供的 API 根路径，不要包含 /models 或 /chat/completions</span></label>
+        <p className="text-sm text-gray-400">1. 填写接口和密钥　2. 获取并选择模型　3. 保存配置（可先测试连接）</p>
+        <label className="block text-sm space-y-1"><span>API 根地址</span><input className={inputClass} type="url" value={baseURL} disabled={useMock} onChange={(e)=>{invalidate();setBaseURL(e.target.value);setApiKey('')}} onBlur={()=>void load(false)} placeholder="https://你的服务/v1" /><span className="block text-xs text-gray-400">填写到 /v1 或服务提供的 API 根路径，不要包含 /models 或 /chat/completions。更换地址后请重新输入对应密钥，避免将旧密钥发送给新服务</span></label>
         <label className="block text-sm space-y-1"><span>API Key</span><input className={inputClass} type="password" autoComplete="off" value={apiKey} disabled={useMock} onChange={(e)=>{invalidate();setApiKey(e.target.value)}} onBlur={()=>void load(false)} placeholder="填写服务提供的密钥" /></label>
-        <p className="text-xs text-amber-200">密钥保存在当前浏览器的本地存储中。请使用专用低额度密钥。网页版通过本站代理，桌面版通过原生网络请求；API 地址需由部署管理员统一允许。</p>
+        <p className="text-xs text-amber-200">密钥以明文保存在当前浏览器，请使用专用低额度密钥。支持自定义公网 HTTPS API。</p>
         {!useMock && <div className="space-y-3">
           <button onClick={()=>void load()} disabled={!ready || fetching} className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded text-sm">{fetching ? '正在获取模型列表…' : models?.length ? '重新获取模型列表' : '获取可用模型'}</button>
+          <SiteAccessRecovery error={error}/>
           {error && <div role="alert" className="text-sm p-3 bg-red-950/50 text-red-200 rounded break-words">{error}</div>}
           {!!models?.length && !manual && <>
             <label className="block text-sm space-y-1"><span>筛选模型（共 {models.length} 个）</span><input className={inputClass} value={query} onChange={(e)=>setQuery(e.target.value)} placeholder="输入名称筛选" /></label>
@@ -90,8 +93,9 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           {!fetching && models !== null && !models.length && !originBlocked && !manual && <button className="text-sm text-blue-300 underline" onClick={()=>setManual(true)}>服务不提供列表？手动填写模型名</button>}
           {manual && <label className="block text-sm space-y-1"><span>手动模型名（请以服务文档为准）</span><input className={inputClass} value={model} onChange={(e)=>{sequence.current++;controller.current?.abort();setTesting(false);setResult(null);setModel(e.target.value)}} placeholder="服务实际支持的模型 ID" /></label>}
         </div>}
-        {!useMock && <label className="block text-sm space-y-1"><span>建模执行方式</span><select aria-label="建模执行方式" className={inputClass} value={agentMode} onChange={e=>{setAgentMode(e.target.value as 'pi'|'single');if(e.target.value==='pi')setStream(true);}}><option value="pi">Pi 分步建模（实验）</option><option value="single">单次生成（兼容模式）</option></select><span className="block text-xs text-gray-400">Pi 需要模型支持图片、工具调用与流式输出；最多6轮、18次工具调用、每轮最多4096输出Token、总计5分钟。会将场景截图发送至你配置的同一接口，实际费用以网关为准。</span></label>}
+        <details className="rounded border border-white/10 p-3 text-sm"><summary className="cursor-pointer">高级设置 · 执行方式与流式输出</summary><div className="mt-3 space-y-3">        {!useMock && <label className="block text-sm space-y-1"><span>建模执行方式</span><select aria-label="建模执行方式" className={inputClass} value={agentMode} onChange={e=>{setAgentMode(e.target.value as 'pi'|'single');if(e.target.value==='pi')setStream(true);}}><option value="pi">连续建模（推荐）</option><option value="single">单次生成（兼容模式）</option></select><span className="block text-xs text-gray-400">连续建模需要模型支持图片、工具调用与流式输出；有有效进展就继续，不固定总轮数或总时长。连续 {AGENT_LIMITS.noProgressTurns} 轮无进展或 {AGENT_LIMITS.consecutiveErrorTurns} 轮工具失败且无进展会暂停；连续 {AGENT_LIMITS.idleTimeoutMs/60000} 分钟无活动会停止。每轮最多 {AGENT_LIMITS.outputPerTurn} 输出 Token。会将场景截图发送至你配置的同一接口，实际费用以网关为准。</span></label>}
         {!useMock && <label className="flex gap-2 text-sm"><input type="checkbox" disabled={agentMode==='pi'} checked={stream} onChange={e=>setStream(e.target.checked)}/><span>实时接收模型输出<span className="block text-xs text-gray-400">显示实际接收进度；服务不支持流式时可关闭，仍保留计时和超时保护</span></span></label>}
+</div></details>
         <label className="flex gap-2 text-sm"><input type="checkbox" checked={useMock} onChange={(e)=>{invalidate();setUseMock(e.target.checked)}} /><span>离线演示模式<span className="block text-xs text-gray-400">模拟回包，不是真实 AI；用于无密钥体验编辑流程</span></span></label>
         {result && <p role="status" data-testid="test-result" className={`text-sm rounded p-3 ${result.ok?'bg-emerald-950 text-emerald-200':'bg-red-950 text-red-200'}`}>{result.text}</p>}
       </div>

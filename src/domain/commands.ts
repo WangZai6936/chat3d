@@ -508,10 +508,7 @@ export function applyBatch(doc: SceneDocument, batch: { operations: Command[] })
     errors.push(new Error(`命令数 ${cost.commands} 超出预算 ${DEFAULT_BUDGET.maxCommands}`));
     return { doc, applied, errors };
   }
-  if (cost.newNodes > DEFAULT_BUDGET.maxNewNodes) {
-    errors.push(new Error(`新增节点估计 ${cost.newNodes} 超出预算 ${DEFAULT_BUDGET.maxNewNodes}`));
-    return { doc, applied, errors };
-  }
+  let actualNewNodes=0;
   let current = doc;
   const tempIdMap = new Map<string, string>(); // 同批次内 tempId → 真实 ID
   for (const op of batch.operations) {
@@ -520,6 +517,8 @@ export function applyBatch(doc: SceneDocument, batch: { operations: Command[] })
       errors.push(new Error(`操作 ${op.op} 失败: ${r.error.message}`));
       break; // 整批拒绝，current 不写回，正式场景与撤销栈都不变化
     }
+    actualNewNodes+=r.createdIds?.length??0;
+    if(actualNewNodes>DEFAULT_BUDGET.maxNewNodes){errors.push(new Error(`本批实际新增 ${actualNewNodes} 个节点超过 ${DEFAULT_BUDGET.maxNewNodes}，请分批执行；本批未应用`));break;}
     current = r.doc;
     if (r.inverse) {
       // create 类命令没有「受影响」节点：创建结果用新节点 id 快照，撤销时才删得掉

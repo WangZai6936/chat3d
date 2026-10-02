@@ -47,6 +47,9 @@ export type AiTaskStatus =
   | 'error'
   | 'cancelled';
 
+export interface MessageRun {
+  mode?:'demo'|'single'|'pi'; startedAt:number; endedAt?:number; status:'running'|'preview'|'completed'|'failed'|'stopped'; activity?:AgentActivity;
+}
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -54,7 +57,10 @@ export interface ChatMessage {
   batch?: CommandBatch; // assistant 附带的命令批（预览态）
   error?: string;
   images?: string[];
-  outcome?: 'applied' | 'discarded';
+  outcome?: 'applied' | 'discarded' | 'superseded';
+  run?: MessageRun;
+  queuedTask?: {status:'waiting'|'prepared'};
+  steering?: {runId:string;status:'queued'|'received'|'interrupted'};
   createdAt: number;
 }
 
@@ -102,7 +108,8 @@ export interface EditorState {
   undo: () => void;
   redo: () => void;
   select: (ids: string[] | null) => void;
-  addUserMessage: (text: string, images?: string[]) => void;
+  addUserMessage: (text: string, images?: string[]) => string;
+  updateMessageRun: (id:string,patch:Partial<MessageRun>)=>void;
   addAssistantMessage: (text: string, batch?: CommandBatch, error?: string) => void;
   setAiStatus: (s: AiTaskStatus) => void;
   setPendingBatch: (batch: CommandBatch | null) => void;
@@ -278,7 +285,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   addUserMessage: (text, images) => {
     const msg: ChatMessage = { id: makeId(), role: 'user', text, images, createdAt: Date.now() };
     set((s) => ({ messages: [...s.messages, msg] }));
+    return msg.id;
   },
+  updateMessageRun:(id,patch)=>set(s=>({messages:s.messages.map(m=>m.id===id?{...m,run:{startedAt:m.createdAt,status:'running',...m.run,...patch}}:m)})),
 
   addAssistantMessage: (text, batch, error) => {
     const msg: ChatMessage = {

@@ -1,3 +1,4 @@
+import type {EditScope} from '../domain/editScope';
 import type {AnimationProgram} from '../domain/animation';
 import {createBrowserProxyFetch} from './transport';
 // 真实模型适配器（方案 P2，提前到本轮实现）
@@ -22,6 +23,7 @@ export interface ModelConfig {
 }
 
 export interface SceneContext {
+  editingScope?:{mode:'all-scene'|'explicit-selection';lockPlacement:boolean};
   animation?:AnimationProgram;
   nodes: { id: string; name: string; desc: string; position: [number, number, number]; rotationQuaternion?: Transform['rotationQuaternion']; scale?: Transform['scale']; materialId?: string; visible?: boolean; parentId?: string | null }[];
   selection: string[];
@@ -67,8 +69,14 @@ export function buildSystemPrompt(ctx: SceneContext): string {
   const nodeLines = ctx.nodes.length
     ? ctx.nodes.map((n) => `  - id:${n.id} name:${n.name} (${n.desc}) pos:[${n.position.join(',')}] rotation:${JSON.stringify(n.rotationQuaternion)} scale:${JSON.stringify(n.scale)} material:${n.materialId} visible:${n.visible} parent:${n.parentId}`).join('\n')
     : '  （空场景，还没有任何对象）';
-  const sel = ctx.selectedAssemblies?.length ? `选中的完整组件 id：${ctx.selectedAssemblies.join(', ')}，包含各组件全部零件。其他单独选中节点：${ctx.selection.join(', ')||'无'}。` : ctx.selection.length ? `选中的节点 id：${ctx.selection.join(', ')}` : '当前没有选中对象。';
+  const sel = ctx.selectedAssemblies?.length ? `当前高亮的完整组件 id：${ctx.selectedAssemblies.join(', ')}，包含各组件全部零件。其他高亮节点：${ctx.selection.join(', ')||'无'}。` : ctx.selection.length ? `当前高亮的节点 id：${ctx.selection.join(', ')}` : '当前没有高亮对象。';
   return `你是 chat3d 的三维建模助手，专门搭建工业设备 / 仓储设备场景。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
+
+# 需求优先级
+用户最新明确需求优先于默认展示设置、历史方案和模型假设。分批执行以满足完整需求，不因单次命令容量而擅自删减目标；仍需遵守真实安全边界与有效数据要求，不支持的能力应明确说明。
+
+# 当前有效编辑范围
+${ctx.editingScope?.mode==='explicit-selection'?'用户明确要求局部修改，请遵守本次范围约束。':'允许编辑整个场景。当前selection仅表示高亮/指代参考，不是权限限制；即使高亮地面，也可以按用户要求修改人物或其他设备。不要要求用户取消已移除的范围勾选项。用户在指令中明确要求只修改某对象时仍须遵守，目标不明确才澄清。'}
 
 # 对话生成动态
 当前动画配置：${JSON.stringify(ctx.animation??null)}
@@ -480,7 +488,7 @@ export async function getFetch(): Promise<typeof fetch> {
       throw new Error('桌面原生网络插件无法加载，请重新安装完整桌面客户端；不会退回浏览器直连');
     }
   }
-  resolvedFetch = typeof window!=='undefined'?createBrowserProxyFetch(globalThis.fetch):globalThis.fetch;
+  resolvedFetch = typeof window!=='undefined'?createBrowserProxyFetch():globalThis.fetch;
   return resolvedFetch;
 }
 
@@ -662,8 +670,9 @@ export async function fetchModels(cfg: ModelConfig, signal?: AbortSignal): Promi
 }
 
 // 构造场景上下文（ChatPanel 调用）
-export function buildSceneContext(doc: Pick<SceneDocument, 'nodes'|'animation'>, selection: string[]): SceneContext {
+export function buildSceneContext(doc: Pick<SceneDocument, 'nodes'|'animation'>, selection: string[],editScope?:EditScope): SceneContext {
   return {
+    editingScope:{mode:editScope?.nodeIds?'explicit-selection':'all-scene',lockPlacement:!!editScope?.lockPlacement},
     animation:doc.animation,
     nodes: doc.nodes.map((n) => {
       const g = n.geometry;

@@ -53,7 +53,7 @@ function cylinder(
   };
 }
 
-export function parseInput(text: string): ParsedIntent {
+export function parseInput(text: string, selection=useEditorStore.getState().selection): ParsedIntent {
   const t = text.trim();
 
   // 数字提取：如 "2米" "0.8米" "50厘米"
@@ -71,6 +71,68 @@ export function parseInput(text: string): ParsedIntent {
     return m;
   };
 
+  // Offline demo only recognizes a small explicit grammar. Never fall through
+  // an unsupported modification/animation request into a matching creation keyword.
+  if(/不要|不需要|禁止|无需|别/.test(t))return {summary:'离线演示不能可靠处理带排除条件的复杂指令，当前场景保持不变。请使用明确的演示示例，或连接真实模型。',operations:[]};
+  const editRequested=/重命名|改|移动|挪|旋转|缩放|调整|变成|删除|删掉|去掉|复制|拷贝|再来一个|隐藏|藏起来|显示|加粗|叫/.test(t);
+  if(/动画|动起来|运动|转动|循环|转一圈|摆动|动作/.test(t))return {summary:'离线演示不支持生成动画，当前场景保持不变。请连接支持工具调用的真实模型后描述运动要求。',operations:[]};
+  if(editRequested&&(/不要|不需要|禁止|别/.test(t)||selection.length!==1))return {summary:'离线演示仅支持修改一个明确选中的零件。请先选中一个零件，再试“改成红色”“向左移动 1 米”或“隐藏”；复杂指令请连接真实模型。当前场景保持不变。',operations:[]};
+  // ===== 选中对象的修改（局部修改：只改相关参数，不重新生成整场景）=====
+
+  const hasTarget = selection.length > 0;
+  if (hasTarget && editRequested) {
+    const targetId = selection[0];
+    // 离线演示不执行删除或复制，避免猜测范围
+    if (/删除|删掉|去掉/.test(t)) {
+      return { summary: '离线演示不支持对话删除，请连接真实模型；可用工具栏撤销刚才的修改。', operations: [] };
+    }
+    if (/复制|拷贝|再来一个/.test(t)) {
+      return { summary: '离线演示不支持对话复制，请连接真实模型，或明确创建一个新对象。', operations: [] };
+    }
+    // "向左/右/前/后移动 X 米"（含歧义的方向：世界轴，不猜视角）
+    const moveMatch = t.match(/(向左|向右|向前|向后|往上|往下|向上|向下)\s*移动?\s*([0-9.]+)?\s*(米|厘米)?/);
+    if (moveMatch) {
+      const dist = moveMatch[2] ? parseFloat(moveMatch[2]) : 0.5;
+      const unit = moveMatch[3] ?? '米';
+      const meters = unit === '厘米' ? dist / 100 : dist;
+      const dir = moveMatch[1];
+      const vec: [number, number, number] =
+        dir === '向左' ? [-meters, 0, 0]
+        : dir === '向右' ? [meters, 0, 0]
+        : dir === '向前' ? [0, 0, -meters]
+        : dir === '向后' ? [0, 0, meters]
+        : dir === '往上' || dir === '向上' ? [0, meters, 0]
+        : [0, -meters, 0];
+      return {
+        summary: `将选中对象${dir}移动 ${meters}m（世界坐标）`,
+        operations: [{ op: 'translate', targetId, space: 'world', mode: 'delta', value: vec }],
+      };
+    }
+    // "改成红色/蓝色"
+    if (/红色|红/.test(t)) {
+      return { summary: '将选中对象改为红色', operations: [{ op: 'setAppearance', targetId, baseColor: '#ef4444' }] };
+    }
+    if (/灰色|灰/.test(t)) {
+      return { summary: '将选中对象改为灰色材质', operations: [{ op: 'setMaterial', targetId, materialId: 'mat_gray' }] };
+    }
+    if (/蓝色|蓝/.test(t)) return {summary:'将选中对象改为蓝色',operations:[{op:'setAppearance',targetId,baseColor:'#3b82f6'}]};
+    // 重命名
+    const renameMatch = t.match(/(改名|重命名|叫)\s*(?:为)?\s*["“]?([^"”]+)["”]?/);
+    if (renameMatch) {
+      const name = renameMatch[2].trim();
+      return { summary: `将选中对象重命名为「${name}」`, operations: [{ op: 'rename', targetId, name }] };
+    }
+    // 隐藏/显示
+    if (/隐藏|藏起来/.test(t)) {
+      return { summary: '隐藏选中对象', operations: [{ op: 'setVisibility', targetId, visible: false }] };
+    }
+    if (/显示|出来/.test(t)) {
+      return { summary: '显示选中对象', operations: [{ op: 'setVisibility', targetId, visible: true }] };
+    }
+  }
+
+  if(editRequested)return {summary:'离线演示暂不支持这条调整指令，当前场景保持不变。可选中一个零件后试“改成红色”“向左移动 1 米”“重命名为立柱”或“隐藏”，也可以连接真实模型。',operations:[]};
+
   // ===== 闲聊 / 说明（不产生命令）=====
   if (/^(你好|您好|在吗|嗨|hi|hello)/i.test(t) && t.length < 16) {
     return { summary: '你好！我是建模助手。用自然语言告诉我你想创建或修改什么，例如「创建一个工作台」。', operations: [] };
@@ -81,18 +143,20 @@ export function parseInput(text: string): ParsedIntent {
   if (/你是谁|你能做什么|可以做什么|帮助|help|怎么用|用法/.test(t)) {
     return {
       summary:
-        '我可以帮你搭工业/仓库场景。试试这些：\n创建类：「创建一个工作台」「创建 3 层货架」「创建油桶」「创建 0.5 米立方体」「创建围墙」「创建地面」\n修改类（先在左侧对象树点选对象）：「向左移动 1 米」「把它加粗到 6 厘米」「改成灰色」「重命名为 A 柱」「隐藏」\n其他：删除 / 复制 / 清空下一版支持（可先用工具栏撤销回退）',
+        '我可以帮你搭工业/仓库场景。试试这些：\n创建类：「创建一个工作台」「创建 3 层货架」「创建油桶」「创建 0.5 米立方体」「创建围墙」「创建地面」\n修改类（先在左侧对象树点选对象）：「向左移动 1 米」「改成灰色」「重命名为 A 柱」「隐藏」\n演示边界：不支持动画及复杂修改；请连接真实模型使用这些能力',
       operations: [],
     };
   }
 
-  // ===== 清空场景：delete 命令尚未实现，先文本告知 =====
+  // ===== 清空场景：演示模式不执行批量删除 =====
   if (/清空|全部删除|删掉全部|删除所有/.test(t)) {
     return {
-      summary: '删除与清空功能下一版支持。临时办法：用工具栏「↺ 撤销」逐步回退到空场景。',
+      summary: '离线演示不支持对话清空。请使用工具栏撤销，或新建一个空会话。',
       operations: [],
     };
   }
+
+  if(!/创建|新建|生成|搭建|建造|添加|新增|做一个|建一个/.test(t))return {summary:'离线演示只执行明确的创建或选中零件修改指令。请试“创建一个工作台”，或选中零件后说“改成红色”。当前场景保持不变。',operations:[]};
 
   // ===== 工作台模板（方案示例任务：创建一个工作台）=====
   // ===== 工作台模板（与真实模型提示词范例同构：15 个零件、材质混搭）=====
@@ -318,77 +382,10 @@ export function parseInput(text: string): ParsedIntent {
     };
   }
 
-  // ===== 选中对象的修改（局部修改：只改相关参数，不重新生成整场景）=====
-  const selection = useEditorStore.getState().selection;
-  const hasTarget = selection.length > 0;
-  if (hasTarget) {
-    const targetId = selection[0];
-    // 删除 / 复制：delete、duplicate 命令尚未实现，先文本告知（避免产出非法命令批）
-    if (/删除|删掉|去掉/.test(t)) {
-      return { summary: '删除功能下一版支持。临时办法：用工具栏「↺ 撤销」回退创建该对象的那一步。', operations: [] };
-    }
-    if (/复制|拷贝|再来一个/.test(t)) {
-      return { summary: '复制功能下一版支持。临时办法：直接告诉我「创建一个 XXX」，我来新建。', operations: [] };
-    }
-    // "把它加粗到 6 厘米" / "改粗到 X"
-    if (/加粗|改粗|粗/.test(t)) {
-      const r = (dim('到') ?? 0.03) / 2;
-      return {
-        summary: `将选中对象加粗至半径 ${r}m`,
-        operations: [
-          {
-            op: 'updateParameters',
-            targetId,
-            geometry: { type: 'cylinder', params: { radiusTop: r, radiusBottom: r, height: 0.75, radialSegments: 16 } },
-          },
-        ],
-      };
-    }
-    // "向左/右/前/后移动 X 米"（含歧义的方向：世界轴，不猜视角）
-    const moveMatch = t.match(/(向左|向右|向前|向后|往上|往下|向上|向下)\s*移动?\s*([0-9.]+)?\s*(米|厘米)?/);
-    if (moveMatch) {
-      const dist = moveMatch[2] ? parseFloat(moveMatch[2]) : 0.5;
-      const unit = moveMatch[3] ?? '米';
-      const meters = unit === '厘米' ? dist / 100 : dist;
-      const dir = moveMatch[1];
-      const vec: [number, number, number] =
-        dir === '向左' ? [-meters, 0, 0]
-        : dir === '向右' ? [meters, 0, 0]
-        : dir === '向前' ? [0, 0, -meters]
-        : dir === '向后' ? [0, 0, meters]
-        : dir === '往上' || dir === '向上' ? [0, meters, 0]
-        : [0, -meters, 0];
-      return {
-        summary: `将选中对象${dir}移动 ${meters}m（世界坐标）`,
-        operations: [{ op: 'translate', targetId, space: 'world', mode: 'delta', value: vec }],
-      };
-    }
-    // "改成红色/蓝色"
-    if (/红色|红/.test(t)) {
-      return { summary: '将选中对象改为蓝色材质', operations: [{ op: 'setMaterial', targetId, materialId: 'mat_blue' }] };
-    }
-    if (/灰色|灰/.test(t)) {
-      return { summary: '将选中对象改为灰色材质', operations: [{ op: 'setMaterial', targetId, materialId: 'mat_gray' }] };
-    }
-    // 重命名
-    const renameMatch = t.match(/(改名|重命名|叫)\s*["“]?([^"”]+)["”]?/);
-    if (renameMatch) {
-      const name = renameMatch[2].trim();
-      return { summary: `将选中对象重命名为「${name}」`, operations: [{ op: 'rename', targetId, name }] };
-    }
-    // 隐藏/显示
-    if (/隐藏|藏起来/.test(t)) {
-      return { summary: '隐藏选中对象', operations: [{ op: 'setVisibility', targetId, visible: false }] };
-    }
-    if (/显示|出来/.test(t)) {
-      return { summary: '显示选中对象', operations: [{ op: 'setVisibility', targetId, visible: true }] };
-    }
-  }
-
   // 未识别：不猜测、不执行（方案第 3 节：不从任意自然语言中猜命令）
   return {
     summary:
-      '这句话我还没学会（模拟模型只认关键词；配置真实模型后由大模型理解任意说法）。可以试试：\n创建：「创建一个工作台」「创建 3 层货架」「创建油桶」「创建围墙」「创建地面」\n修改（先在左侧对象树点选对象）：「向左移动 1 米」「改成灰色」「重命名为 A」「隐藏」\n输入「帮助」查看完整清单。',
+      '这句话我还没学会（模拟模型只认关键词；配置真实模型后使用真实模型理解自然语言需求）。可以试试：\n创建：「创建一个工作台」「创建 3 层货架」「创建油桶」「创建围墙」「创建地面」\n修改（先在左侧对象树点选对象）：「向左移动 1 米」「改成灰色」「重命名为 A」「隐藏」\n输入「帮助」查看完整清单。',
     operations: [],
   };
 }

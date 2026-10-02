@@ -1,3 +1,4 @@
+import {registerSceneFocus} from '../scene/focus';
 import type {PlaybackState} from '../scene/animationPlayback';
 import { useEffect, useRef, useState } from 'react';
 import { registerSceneCapture } from '../scene/capture';
@@ -30,9 +31,10 @@ export function ViewportPanel() {
     setViewportError('');
     viewportRef.current = vp;
     vp.setPlaybackListener(setPlayback);vp.start();
+    const unregisterFocus=registerSceneFocus(ids=>vp.fitToSelection(ids));
     const unregister = registerSceneCapture(async (document, view, targetIds,time) => vp.captureDocument(document, view, targetIds,time));
     return () => {
-      unregister();
+      unregister();unregisterFocus();
       vp.setPlaybackListener(null);vp.dispose();
       viewportRef.current = null;
     };

@@ -1,9 +1,11 @@
 import {handleModelProxy} from './model-proxy.mjs';
 // Build replaces this module with a generated, immutable map of public client files.
 import {assets} from 'chat3d-built-assets';
+// Standalone Worker: global fetch reaches the public Internet, not private service bindings.
+// Do not attach an origin-bypass/VPC transport to this user-configurable proxy.
 export default {async fetch(request,env){
  const url=new URL(request.url);
- if(url.pathname.startsWith('/api/model/'))return handleModelProxy(request,{allowed:env.CHAT3D_ALLOWED_UPSTREAMS});
+ if(url.pathname.startsWith('/api/model/'))return handleModelProxy(request,{allowed:env.CHAT3D_ALLOWED_UPSTREAMS,fetchImpl:(url,init)=>fetch(url,init)});
  if(url.pathname.startsWith('/api/'))return new Response('Not found',{status:404});
  if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405});
  const path=url.pathname==='/'?'/index.html':url.pathname;
