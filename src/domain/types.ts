@@ -1,3 +1,5 @@
+import {validateTextureMaps,validateSurface,type TextureMaps,type SurfaceDetail} from './textures';
+import type {Connection} from './connections';
 import {validateAnimation,type AnimationProgram} from './animation';
 // Scene DSL — 可编辑场景文档是唯一可信来源（方案第 4 节）
 // 右手坐标系、Y 轴向上；内部长度统一为米；宽度沿 X、高度沿 Y、深度沿 Z
@@ -19,7 +21,7 @@ export interface Transform {
 }
 
 // 类型白名单（方案 MVP：box、sphere、cylinder、cone、plane）
-export type GeometryType = 'box' | 'sphere' | 'cylinder' | 'cone' | 'plane' | 'roundedPlate' | 'capsule' | 'frame' | 'tube' | 'trapezoid';
+export type GeometryType = 'loft' | 'sweepTube' | 'mesh' | 'lathe' | 'profile' | 'box' | 'sphere' | 'cylinder' | 'cone' | 'plane' | 'roundedPlate' | 'capsule' | 'frame' | 'tube' | 'trapezoid';
 
 export interface BoxParams {
   bevelRadius?: number;
@@ -51,6 +53,11 @@ export interface PlaneParams {
 }
 
 export type Geometry =
+  | {type:'loft';params:{rings:{center:Vec3;radiusX:number;radiusZ:number}[];segments:number}}
+  | {type:'sweepTube';params:{points:Vec3[];radius:number;segments:number;radialSegments:number}}
+  | {type:'mesh';params:{positions:number[];indices:number[];normals?:number[];uvs?:number[]}}
+  | {type:'lathe';params:{points:[number,number][];segments:number}}
+  | {type:'profile';params:{points:[number,number][];depth:number}}
   | {type:'capsule';params:{radius:number;length:number}}
   | {type:'frame';params:{width:number;height:number;depth:number;thickness:number}}
   | {type:'tube';params:{outerRadius:number;innerRadius:number;height:number}}
@@ -64,6 +71,12 @@ export type Geometry =
 
 // 材质：MVP 限定标准 PBR 子集
 export interface Material {
+  maps?:TextureMaps;
+  alphaTest?:number;
+  transparent?:boolean;
+  doubleSided?:boolean;
+  surface?:SurfaceDetail;
+  normalScale?:number;
   id: string;
   baseColor: string; // hex, e.g. #9099A4
   roughness: number; // [0,1]
@@ -90,6 +103,7 @@ export type SceneRole=typeof SCENE_ROLES[number];
 export type SceneNodeKind = 'primitive' | 'asset' | 'group';
 
 export interface SceneNode {
+  connection?:Connection;
   id: string; // 全项目唯一且稳定；名称不承担身份
   parentId: string | null;
   assemblyName?: string;
@@ -161,8 +175,36 @@ export function validateQuaternion(q: Quaternion, field: string): Error[] {
 // 几何参数校验：有限、非负、超预算细分拒绝
 export function validateGeometry(g: Geometry): Error[] {
   const errs: Error[] = [];
+  if(g?.type==='loft'){
+    const p=g.params;if(!p||!Array.isArray(p.rings)||p.rings.length<2||p.rings.length>32||!Number.isInteger(p.segments)||p.segments<8||p.segments>64)return [new Error('放样需要2–32个截面及8–64环向分段')];
+    if(p.rings.some((r,i)=>!r||validateVec3(r.center,'截面中心').length||r.center.some(v=>Math.abs(v)>100)||!Number.isFinite(r.radiusX)||!Number.isFinite(r.radiusZ)||r.radiusX<=0||r.radiusZ<=0||r.radiusX>100||r.radiusZ>100||i>0&&r.center[1]<=p.rings[i-1].center[1]))return [new Error('截面中心需有限米制坐标，Y严格递增，半径0–100米')];return [];
+  }
+  if(g?.type==='sweepTube'){
+    const p=g.params;if(!p||!Array.isArray(p.points)||p.points.length<2||p.points.length>32||p.points.some((v,i)=>validateVec3(v,'管线控制点').length||v.some(x=>Math.abs(x)>100)||i>0&&v.every((x,j)=>Math.abs(x-p.points[i-1][j])<1e-6))||!Number.isFinite(p.radius)||p.radius<=0||p.radius>10||!Number.isInteger(p.segments)||p.segments<8||p.segments>128||!Number.isInteger(p.radialSegments)||p.radialSegments<8||p.radialSegments>32)return [new Error('曲线管需2–32个不同相邻控制点、半径0–10米、路径8–128分段和环向8–32分段')];return [];
+  }
+  if(g?.type==='mesh'){
+    const p=g.params;if(!p||!Array.isArray(p.positions)||p.positions.length<9||p.positions.length>600000||p.positions.length%3||p.positions.some(v=>typeof v!=='number'||!Number.isFinite(v)||Math.abs(v)>10000))return [new Error('网格坐标无效或超过20万顶点预算')];
+    if(!Array.isArray(p.indices)||!p.indices.length||p.indices.length%3||p.indices.length>600000||p.indices.some(i=>!Number.isInteger(i)||i<0||i>=p.positions.length/3))return [new Error('网格三角索引无效或超过20万三角形预算')];
+    if(p.uvs!==undefined&&(!Array.isArray(p.uvs)||p.uvs.length!==p.positions.length/3*2||p.uvs.some(v=>!Number.isFinite(v)||Math.abs(v)>10000)))return [new Error('网格UV坐标无效')];
+    if(p.normals!==undefined&&(!Array.isArray(p.normals)||p.normals.length!==p.positions.length||p.normals.some(v=>typeof v!=='number'||!Number.isFinite(v)||Math.abs(v)>1.001)))return [new Error('网格法线无效')];
+    return [];
+  }
+  if(g?.type==='lathe'||g?.type==='profile'){
+    const p=g.params?.points;
+    if(!Array.isArray(p)||p.length<(g.type==='lathe'?2:3)||p.length>32||p.some(v=>!Array.isArray(v)||v.length!==2||v.some(n=>typeof n!=='number'||!Number.isFinite(n)||Math.abs(n)>100)))return [new Error('轮廓需2–32个有限米制二维坐标，绝对值不超过100')];
+    if(g.type==='lathe'){
+      if(p.some(v=>v[0]<0)||!p.some(v=>v[0]>0)||p.some((v,i)=>i>0&&v[1]<=p[i-1][1])||!Number.isInteger(g.params.segments)||g.params.segments<8||g.params.segments>64)errs.push(new Error('旋转轮廓半径非负、高度严格递增，分段8–64'));
+    }else{
+      if(!Number.isFinite(g.params.depth)||g.params.depth<=0||g.params.depth>100)errs.push(new Error('轮廓挤出深度需0–100米'));
+      let sign=0;for(let i=0;i<p.length;i++){const a=p[i],b=p[(i+1)%p.length],c=p[(i+2)%p.length];const cross=(b[0]-a[0])*(c[1]-b[1])-(b[1]-a[1])*(c[0]-b[0]);if(Math.abs(cross)<1e-10){errs.push(new Error('轮廓存在重复点或共线边'));break;}if(sign&&Math.sign(cross)!==sign){errs.push(new Error('轮廓须为有序凸多边形'));break;}sign=Math.sign(cross);}
+      // Reject non-adjacent intersections, including winding star polygons.
+      const cross=(a:number[],b:number[],c:number[])=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+      for(let i=0;i<p.length;i++)for(let j=i+2;j<p.length;j++){if(i===0&&j===p.length-1)continue;const a=p[i],b=p[(i+1)%p.length],c=p[j],d=p[(j+1)%p.length];if(cross(a,b,c)*cross(a,b,d)<0&&cross(c,d,a)*cross(c,d,b)<0)errs.push(new Error('轮廓不能自交'));}
+    }
+    return errs;
+  }
   const required: Record<GeometryType, string[]> = {
-    capsule:['radius','length'],frame:['width','height','depth','thickness'],tube:['outerRadius','innerRadius','height'],trapezoid:['widthTop','widthBottom','height','depth'],
+    loft:[],sweepTube:[],mesh:[],lathe:[],profile:[],capsule:['radius','length'],frame:['width','height','depth','thickness'],tube:['outerRadius','innerRadius','height'],trapezoid:['widthTop','widthBottom','height','depth'],
     roundedPlate: ['width','height','depth','cornerRadius'], box: ['width', 'height', 'depth'], sphere: ['radius'],
     cylinder: ['radiusTop', 'radiusBottom', 'height'], cone: ['radius', 'height'], plane: ['width', 'depth'],
   };
@@ -210,6 +252,11 @@ export function validateMaterial(m: Material): Error[] {
   if (!isFiniteNumber(m.metalness) || m.metalness < 0 || m.metalness > 1) errs.push(new Error(`材质 ${m.id} metalness 超出 [0,1]`));
   if(m.emissive!==undefined&&!/^#[0-9a-f]{6}$/i.test(m.emissive))errs.push(new Error('发光颜色无效'));
   if(m.emissiveIntensity!==undefined&&(!isFiniteNumber(m.emissiveIntensity)||m.emissiveIntensity<0||m.emissiveIntensity>2))errs.push(new Error('发光强度需为0–2'));
+  if(m.alphaTest!==undefined&&(!Number.isFinite(m.alphaTest)||m.alphaTest<0||m.alphaTest>1))errs.push(new Error('透明裁切阈值需为0–1'));
+  if(m.transparent!==undefined&&typeof m.transparent!=='boolean'||m.doubleSided!==undefined&&typeof m.doubleSided!=='boolean')errs.push(new Error('材质透明/双面设置无效'));
+  if(m.maps)errs.push(...validateTextureMaps(m.maps).map(x=>new Error(x)));
+  if(m.surface&&!validateSurface(m.surface))errs.push(new Error('程序化表面参数无效'));
+  if(m.normalScale!==undefined&&(!Number.isFinite(m.normalScale)||m.normalScale<0||m.normalScale>10))errs.push(new Error('法线强度需为0–10'));
   if (m.opacity !== undefined && (!isFiniteNumber(m.opacity) || m.opacity < 0 || m.opacity > 1)) {
     errs.push(new Error(`材质 ${m.id} opacity 超出 [0,1]`));
   }
@@ -222,6 +269,7 @@ export function validateNode(node: SceneNode): Error[] {
     errs.push(new Error(`节点 id 非法：${node?.id ?? '?'}`));
   }
   for(const key of ['assemblyName','zone','label','planKey'] as const)if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key]!.length>200))errs.push(new Error('场景标注或分组名称无效'));
+  if(node.connection){const c=node.connection;if(!isValidId(c.targetId)||c.targetId===node.id||validateVec3(c.sourcePoint,'连接源点').length||validateVec3(c.targetPoint,'连接目标点').length||!Number.isFinite(c.maxDistance)||c.maxDistance<=0||c.maxDistance>10||typeof c.purpose!=='string'||!c.purpose.trim()||c.purpose.length>160)errs.push(new Error('连接关系无效'));}
   if(node.sceneRole!==undefined&&!SCENE_ROLES.includes(node.sceneRole))errs.push(new Error('场景角色无效'));
   if(node.assemblyId!==undefined&&!isValidId(node.assemblyId))errs.push(new Error('设备组件标识无效'));
   if (typeof node.name !== 'string') errs.push(new Error(`节点 ${node?.id} name 不是字符串`));
@@ -249,6 +297,8 @@ export function validateDocument(doc: SceneDocument): Error[] {
     return errs;
   }
   if (!isFiniteNumber(doc.revision) || doc.revision < 0) errs.push(new Error('revision 非法'));
+  if((doc.nodes??[]).reduce((n,x)=>n+(x.geometry?.type==='mesh'?x.geometry.params.positions.length:0),0)>1500000)errs.push(new Error('项目网格总顶点数超过50万预算'));
+  if((doc.materials??[]).reduce((sum,m)=>sum+Object.values(m.maps??{}).reduce((n,t)=>n+(t?.dataUrl?.length??0),0),0)>12*1024*1024)errs.push(new Error('项目内嵌贴图总量超过12MB'));
   const nodeIds = new Set<string>();
   const materialIds = new Set<string>();
   const assetIds = new Set<string>();
@@ -265,10 +315,12 @@ export function validateDocument(doc: SceneDocument): Error[] {
     if (n.materialId && !materialIds.has(n.materialId)) {
       errs.push(new Error(`节点 ${n.id} 悬空引用材质 ${n.materialId}`));
     }
+    const material=doc.materials.find(m=>m.id===n.materialId);if(n.geometry?.type==='mesh'&&(material?.surface||Object.keys(material?.maps??{}).length)&&!n.geometry.params.uvs)errs.push(new Error(`网格贴图缺少UV：${n.name}`));
     if (n.assetId && !assetIds.has(n.assetId)) {
       errs.push(new Error(`节点 ${n.id} 悬空引用资产 ${n.assetId}`));
     }
   }
+  for(const n of doc.nodes??[])if(n.connection&&!nodeIds.has(n.connection.targetId))errs.push(new Error(`连接目标不存在，请先解除关联：${n.name}`));
   // 父引用与循环层级
   for (const n of doc.nodes ?? []) {
     if (n.parentId !== null && !nodeIds.has(n.parentId)) {

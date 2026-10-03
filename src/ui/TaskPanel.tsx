@@ -1,3 +1,5 @@
+import {DETAIL_CRITERIA} from '../domain/detailAcceptance';
+import {runDiagnostics} from '../domain/runDiagnostics';
 import {RunTrace} from './RunTrace';
 import {useEffect,useState} from 'react';
 import {useEditorStore} from '../store';
@@ -7,11 +9,12 @@ export function TaskPanel({onConversation}:{onConversation:()=>void}){
  const busy=['capturing','context','generating','validating','applying'].includes(aiStatus);
  const [now,setNow]=useState(Date.now());
  useEffect(()=>{if(!busy)return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[busy]);
+ const exportDiagnostics=()=>{const state=useEditorStore.getState();const url=URL.createObjectURL(new Blob([JSON.stringify(runDiagnostics(state.aiStatus,state.lastRun,state.aiError),null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='chat3d-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
  const runs=messages.filter(m=>m.run).slice().reverse();
  const latestRun=runs[0]?.run;
  const latestReply=[...messages].reverse().find(m=>m.role==='assistant');
  const hasHistory=!!lastRun||!!latestRun||messages.some(m=>m.batch);
- const modeTitle=latestRun?.mode==='demo'?'离线演示':latestRun?.mode==='single'?'单次生成':'本轮任务';
+ const modeTitle=latestRun?.mode==='demo'?'历史模拟记录':latestRun?.mode==='single'?'单次生成':'本轮任务';
  const idleTitle=latestRun?.status==='failed'?'最近任务未完成':latestRun?.status==='stopped'?'最近任务已停止':hasHistory?`${modeTitle}已结束 · 当前无运行任务`:'用一句话开始建模';
  const outcomes=messages.filter(m=>m.batch).slice().reverse();
  return <section className="task-panel" aria-label="任务记录">
@@ -20,9 +23,11 @@ export function TaskPanel({onConversation}:{onConversation:()=>void}){
  {lastRun&&<><div className="task-metrics"><div><strong>{lastRun.turn}</strong><span>模型轮次</span></div><div><strong>{lastRun.toolCalls}</strong><span>工具调用</span></div><div><strong>{lastRun.usageReported?(lastRun.inputTokens+lastRun.outputTokens).toLocaleString():'—'}</strong><span>Token 用量</span></div></div>
  {!!lastRun.plan.length&&<div className="task-section"><h3>执行计划</h3><ol>{lastRun.plan.map((step,i)=><li key={i}><span>{i+1}</span>{step}</li>)}</ol><p className="task-footnote">计划不等于完成结果，实际状态以执行记录和预览为准</p></div>}
  {lastRun.design&&<details className="task-section"><summary>设计方案 · {lastRun.design.equipment.length} 类设备</summary><div className="task-events"><p>工艺：{lastRun.design.flow.join(' → ')}</p><p>布局：{lastRun.design.layout}</p>{lastRun.design.equipment.map((e,i)=><p key={i}>{e.name} × {e.count}：{e.features.join('、')}</p>)}<p>检查标准：{lastRun.design.checks.join('；')}</p>{lastRun.design.composition&&<><p>分区：{lastRun.design.composition.zones.map(z=>z.name+'：'+z.purpose).join('；')}</p><p>连接：{lastRun.design.composition.connections.map(c=>c.from+' → '+c.to+'（'+c.via+'）').join('；')}</p><p>配套：{lastRun.design.composition.support.map(e=>e.name+' × '+e.count+'：'+e.purpose).join('；')}</p><p>观感：{lastRun.design.composition.palette.join('、')}；{lastRun.design.composition.presentation}</p></>}</div></details>}
+ {lastRun.detailAcceptance&&<details className="task-section"><summary>细节验收 · {{not_required:'本轮无需重验',pending:'待验收',needs_work:'未达标',self_reviewed:'已自检，待人工确认'}[lastRun.detailAcceptance.status]}</summary><div className="task-events"><p>外形比例、功能结构、连接接触、材质表面、用途相关细节、完整性与环境关系。适用于所有模型。</p><p>检查版本 {lastRun.detailAcceptance.revision}{(pendingResult?.doc.revision??doc.revision)!==lastRun.detailAcceptance.revision?' · 已过期，需重新检查':''}</p>{lastRun.detailAcceptance.issues.map((x,i)=><p key={i}>{x}</p>)}{lastRun.detailAcceptance.reviews.map(r=><details key={r.componentId}><summary>{lastRun.detailAcceptance?.targets.find(t=>t.id===r.componentId)?.name}</summary>{r.checks.map(c=><p key={c.criterion}>{DETAIL_CRITERIA.find(x=>x.key===c.criterion)?.name??c.criterion} · {{pass:'自检通过',fail:'未达标',unknown:'待核对',not_applicable:'不适用'}[c.status]}：{c.evidence}</p>)}</details>)}<p>模型自检不等于人工验收，不按零件数量评分。</p></div></details>}
  {lastRun.quality&&<details className="task-section"><summary>场景检查 · {lastRun.quality.issues.length} 项待核对</summary><div className="task-events"><p>检查版本 {lastRun.quality.revision} · {lastRun.quality.componentCount} 个组件{(pendingResult?.doc.revision??doc.revision)!==lastRun.quality.revision?' · 场景已变化，检查可能已过期':''}</p>{lastRun.quality.coverage.map((c,i)=><p key={i}>{c.name}：已关联 {c.actual} / 计划 {c.expected}</p>)}{lastRun.quality.issues.map((issue,i)=><p key={i}>{issue}</p>)}<p>仅为清单和几何线索，仍需核对画面与工艺合理性</p></div></details>}
  <div className="task-section"><h3>执行时间线</h3>{lastRun.timings.length?lastRun.timings.map(t=><div className="task-timeline-item" key={t.id}>{t.failed?<CrossCircledIcon color="#e69f95"/>:t.endedAt!==undefined?<CheckCircledIcon/>:<ClockIcon/>}<div><strong>{t.label}</strong><span>{((Math.max(t.endedAt??(busy?now:lastRun.lastEventAt),t.startedAt)-t.startedAt)/1000).toFixed(1)} 秒 · {t.failed?'失败':t.endedAt!==undefined?'已结束':busy?'进行中':'已中断'}</span></div></div>):<p>暂未记录耗时</p>}</div>
  <details className="task-section"><summary>详细活动 · {lastRun.events.length} 条</summary><div className="task-events">{lastRun.events.map((event,i)=><p key={i}>{event}</p>)}</div></details></>}
+ {!busy&&(lastRun||latestRun)&&<button onClick={exportDiagnostics}>下载脱敏诊断记录</button>}
  <div className="task-section"><h3>逐轮执行历史</h3>{runs.map(m=><details key={m.id} className="mt-2"><summary className="cursor-pointer text-sm">{m.text.slice(0,90)}</summary><RunTrace run={m.run!} now={now}/></details>)}</div>
  <div className="task-section"><h3>本会话的修改记录 <span>{outcomes.length}</span></h3>{outcomes.length?outcomes.map(m=><div className="task-outcome" key={m.id}><span className={`outcome-label ${m.outcome??'preview'}`}>{m.outcome==='applied'?'已应用':m.outcome==='discarded'?'已放弃':m.outcome==='superseded'?'已合并到后续预览':pendingBatch?.requestId===m.batch?.requestId?'待确认':'预览已结束'}</span><p>{m.batch?.summary||m.text}</p><small>{m.batch?.operations.length} 项操作 · {new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</small></div>):<p className="task-footnote">还没有场景修改记录。完成一次生成后会在这里显示</p>}</div>
  </section>;

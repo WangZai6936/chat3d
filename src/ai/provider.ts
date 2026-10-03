@@ -19,7 +19,7 @@ export interface ModelConfig {
   model: string; // 如 gpt-4o-mini
   agentMode?: 'pi' | 'single';
   stream?: boolean; // 默认流式；不支持 SSE 的服务可关闭
-  useMock: boolean; // 离线演示开关：true 时走模拟回包，不联网
+  useMock?: boolean; // 仅识别旧配置；true 时要求重新配置真实模型
 }
 
 export interface SceneContext {
@@ -55,7 +55,7 @@ const IMPLEMENTED_OPS = new Set([
   'setMaterial','setAppearance','setAssemblyMetadata',
 ]);
 
-const GEOMETRY_TYPES = new Set(['box', 'sphere', 'cylinder', 'cone', 'plane', 'roundedPlate','capsule','frame','tube','trapezoid']);
+const GEOMETRY_TYPES = new Set(['loft','sweepTube','lathe','profile','box', 'sphere', 'cylinder', 'cone', 'plane', 'roundedPlate','capsule','frame','tube','trapezoid']);
 
 const KNOWN_MATERIALS = new Set([...EXTRA_MATERIALS.map(m=>m.id),'mat_gray', 'mat_blue', 'mat_dark', 'mat_metal', 'mat_white', 'mat_rubber', 'mat_yellow', 'mat_red', 'mat_cyan', 'mat_black','mat_glass','mat_screen','mat_pcb','mat_green']);
 
@@ -87,7 +87,7 @@ follow轨道使用sourceId、start、end，不用keyframes；跟随源对象从s
 示例：{op:"setAnimation",animation:{version:1,name:"物料输送",duration:10,loop:true,tracks:[{id:"material-move",name:"移动停留",targetIds:["真实ID"],channel:"position",keyframes:[{time:0,value:[0,0,0]},{time:3,value:[2,0,0]},{time:5,value:[2,0,0]},{time:10,value:[0,0,0]}]}]}}。
 动画会先进入用户可播放预览，确认后保存；用户无需建立动作库或手工绑定。只在对象或路线不明确时澄清。已有位置锁仅锁编辑基准，不禁止被授权对象的动画运动；仅选中范围仍必须遵守。GLB导出当前只含静态几何，动画保存在项目JSON。
 
-# 建模优先级
+# 已有网格模型\n已有mesh几何来自导入的真实网格，禁止用基础体覆盖以冒充细节修改。支持复制组件、移动、旋转、缩放、显隐与材质；拓扑级修改需返回原建模软件，不要伪造已完成。可先inspect_scene检查实际边界，不要请求或输出全部顶点。\n\n# 通用细节验收标准\n所有模型都按外形与比例、功能结构、连接接触、材质表面、用途相关细节、完整性与环境关系六项构建；不局限工业或已有组件。按对象用途决定必要细节：家具支撑接合、人物解剖服装、植物枝叶关系等。简单实体不虚构机构，复杂对象不能用贴标签的箱体代替。零件数/多边形数/装饰/灯光不等于质量。单次生成没有逐项视觉证据，必须作为待细节验收草稿，不声称合格。\n\n# 建模优先级
 先匹配外轮廓和长宽高比例，再匹配部件位置、真实开孔、负空间、颜色，最后补细节。零件数量不能替代准确性。
 按需要拆分主体、顶板、支承、轮胎轮毂、防撞边、传感器、灯带和按钮。每次 edit_scene 最多40项，复杂任务用多次调用连续完成；利用组合与阵列压缩重复部件，不以减少结构细节代替效率。不声称完整复刻。
 图像参考优先于下方通用工作台示例，不能把所有设备套成盒子。不要为了材质混搭而擅自改变参考色。
@@ -116,6 +116,7 @@ mat_fabric 深蓝哑光工作服；mat_skin 肤色；mat_light 柔和发光灯�
 要点：整台设备只用一种颜色会显得假；「深骨架 + 浅面板 + 亮钢把手 + 橡胶脚垫」的组合最真实。
 
 # 坐标系与摆放
+用户自然尺寸“长×宽×总高”默认沿X×Z×Y：box参数width=长、depth=宽、height=高；总高是完整组件包围盒，不是单个零件高度。“宽×深×高”则沿X×Z×Y。明确不同方向时遵守用户约定；不确定时说明并请求确认，不得交换数值充当符合。
 - Y 轴向上，单位米，原点在场景中心，地面 y=0。
 - 几何体以自身中心定位：落地物体 y = 高度/2（圆柱/油桶放 y=高度一半）。
 - 零件之间贴合、不互相穿插：台面正好压在骨架顶上，脚轮贴地，抽屉嵌进柜体开口。
@@ -165,7 +166,7 @@ box 可指定 bevelRadius（米，0为锐边），用小倒角表达钣金，不
 createAssembly还可指定sceneRole（equipment/conveyor/workstation/storage/person/safety/building/floor/transport/other）、planKey（对应设计清单名称）、zone（区域名）。省略materialId时按sceneRole选择基础材质，细分玻璃、金属、肤色等仍需显式设置。每个逻辑实体单独分组，例如一名人员为一个组合，不能把全车间塞成一个组合。重复同类可复制组并保留planKey。
 parts可加label短文本；仅用于尺寸足够的平面标牌/面板，使用plate/box薄片作承载，避免给曲面贴字。不写虚构品牌。
 上面只演示语法，不是设备模板；必须自己根据请求设计真实结构。position/yaw放置整体，parts位置是组合局部坐标；每条默认单位缩放和无旋转。transform可用rotationDegrees:[x,y,z]表示XYZ欧拉角（度），无需手算四元数；提供rotationQuaternion时以它为准。
-duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id或本批tempId","offset":[3,0,0],"name":"第二台自设计设备"} 可复制已生成组合，避免重复输出所有零件。translateAssembly只移动，duplicateAssembly才复制。
+duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id或本批tempId","offset":[3,0,0],"name":"第二台自设计设备"} 可复制已生成组合，避免重复输出所有零件。translateAssembly只移动，duplicateAssembly才复制。整组平移的准确格式为 {"op":"translateAssembly","targetId":"组件任意真实零件ID","value":[dx,dy,dz]}；value是世界坐标增量，不是目标位置；不要使用offset、delta、position或assemblyId作为字段。
 用组合/阵列表达重复结构，把输出预算用在差异化形体、负空间、连接、尺度和材质层次上，而不是降级成占位箱体。
 
 # 已有组件的局部细化
@@ -182,6 +183,10 @@ duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id�
      frame: width,height,depth,thickness。XY平面真实矩形开口边框，沿Z厚度；thickness<min(width,height)/2；适合观察窗框、门洞、机架开口，中心为空。玻璃放开口内，不被实心机壳遮挡。
      tube: outerRadius,innerRadius,height。沿Y中空管件，0<innerRadius<outerRadius，可用于管道/套筒/轮毂。
      trapezoid: widthTop,widthBottom,height,depth。XY梯形沿Z拉伸；上窄下宽或上宽下窄，适合斜面机罩、底座、人体躯干。组合局部旋转可改变斜面方向。
+     loft: rings=[{center:[x,y,z],radiusX, radiusZ},...]，2–32个椭圆截面，Y严格递增、半径>0，segments=8–64。连续封闭放样，支持偏心和宽深独立变化，用于收腰躯干、曲面外壳、软垫、渐变形体；不要再用箱体冒充曲面。
+     sweepTube: points=[[x,y,z],...]为2–32个连续曲线控制点，radius为圆管半径，segments=8–128，radialSegments=8–32；沿真实路径生成连续曲线管，用于软管、线缆、弯曲扶手/枝条。两端开放，按用途加接头，不等于流体仿真。
+     lathe: points=[[半径,高度],...]为Y轴旋转剖面，2–32点，高度严格递增，半径非负；segments=8–64。用于渐变壳体、人体躯干/肢体等，非均匀缩放可形成椭圆截面。轮廓不是自动居中。
+     profile: points=[[x,y],...]为3–32点有序凸多边形，depth沿Z对称挤出。用于斜切机壳、护罩、人体轮廓，禁止自交；真实开口仍用frame/tube，不能实心覆盖。
      roundedPlate: width,height,depth,cornerRadius,holeRadius(可选，默认0)。水平 XZ 圆角轮廓，厚度沿Y，中心圆孔沿Y贯穿。cornerRadius>0且<=短边/2；holeRadius>=0且<短边/2。
      box: width,height,depth
      cylinder: radiusTop,radiusBottom,height,radialSegments(建议 16-32)
@@ -297,6 +302,7 @@ function cleanGeometry(raw: unknown): Geometry | null {
   const g = raw as Record<string, unknown>;
   const type = typeof g.type === 'string' ? g.type : '';
   if (!GEOMETRY_TYPES.has(type)) return null;
+  if(type==='loft'||type==='sweepTube'||type==='lathe'||type==='profile'){const candidate=structuredClone(g) as unknown as Geometry;return validateGeometry(candidate).length?null:candidate;}
   const paramsRaw = (g.params ?? {}) as Record<string, unknown>;
   const params: Record<string, number> = {};
   let ok = true;
@@ -676,7 +682,7 @@ export function buildSceneContext(doc: Pick<SceneDocument, 'nodes'|'animation'>,
     animation:doc.animation,
     nodes: doc.nodes.map((n) => {
       const g = n.geometry;
-      const desc = g
+      const desc = g?.type==='mesh'?`导入网格，${g.params.positions.length/3}顶点，${g.params.indices.length/3}三角形；可变换/改材质，不要重新输出顶点` : g
         ? `${g.type} ${Object.entries(g.params)
             .map(([k, v]) => `${k}=${v}`)
             .join(' ')}`

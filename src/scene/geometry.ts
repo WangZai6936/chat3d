@@ -5,6 +5,20 @@ import { Geometry } from '../domain/types';
 // 视口与导出共享几何构建，避免下载模型与画面不一致。
 export function buildPrimitiveGeometry(g: Geometry): THREE.BufferGeometry {
   switch (g.type) {
+    case 'loft': {
+      const {rings,segments:N}=g.params;const positions:number[]=[],indices:number[]=[],uvs:number[]=[];const stride=N+1;
+      // Duplicate the UV seam: shared U=0 vertices formerly stretched the final strip.
+      for(const r of rings)for(let j=0;j<=N;j++){const a=(j===N?0:j)*Math.PI*2/N;positions.push(r.center[0]+r.radiusX*Math.cos(a),r.center[1],r.center[2]+r.radiusZ*Math.sin(a));uvs.push(j/N,(r.center[1]-rings[0].center[1])/(rings[rings.length-1].center[1]-rings[0].center[1]));}
+      for(let i=0;i<rings.length-1;i++)for(let j=0;j<N;j++){const a=i*stride+j,b=a+1,c=(i+1)*stride+j,d=c+1;indices.push(a,c,b,b,c,d);}
+      // Independent cap vertices preserve sharp rims and non-collapsed planar UVs.
+      for(const upper of [false,true]){const row=upper?rings.length-1:0,r=rings[row],centre=positions.length/3;positions.push(...r.center);uvs.push(.5,.5);const rim=positions.length/3;for(let j=0;j<N;j++){const a=j*Math.PI*2/N;positions.push(r.center[0]+r.radiusX*Math.cos(a),r.center[1],r.center[2]+r.radiusZ*Math.sin(a));uvs.push(.5+.5*Math.cos(a),.5+.5*Math.sin(a));}for(let j=0;j<N;j++){const a=rim+j,b=rim+(j+1)%N;indices.push(centre,upper?b:a,upper?a:b);}}
+      const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geo.setIndex(indices);geo.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));geo.computeVertexNormals();
+      const normals=geo.getAttribute('normal');for(let i=0;i<rings.length;i++){const a=i*stride,b=a+N,v=new THREE.Vector3().fromBufferAttribute(normals,a).add(new THREE.Vector3().fromBufferAttribute(normals,b)).normalize();normals.setXYZ(a,v.x,v.y,v.z);normals.setXYZ(b,v.x,v.y,v.z);}return geo;
+    }
+    case 'sweepTube':return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(g.params.points.map(p=>new THREE.Vector3(...p)),false,'centripetal'),g.params.segments,g.params.radius,g.params.radialSegments,false);
+    case 'mesh': {const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(g.params.positions,3));geo.setIndex(g.params.indices);if(g.params.uvs)geo.setAttribute('uv',new THREE.Float32BufferAttribute(g.params.uvs,2));if(g.params.normals)geo.setAttribute('normal',new THREE.Float32BufferAttribute(g.params.normals,3));else geo.computeVertexNormals();return geo;}
+    case 'lathe': {const geo=new THREE.LatheGeometry(g.params.points.map(p=>new THREE.Vector2(...p)),g.params.segments);geo.computeVertexNormals();return geo;}
+    case 'profile': {const shape=new THREE.Shape(g.params.points.map(p=>new THREE.Vector2(...p)));shape.closePath();const geo=new THREE.ExtrudeGeometry(shape,{depth:g.params.depth,bevelEnabled:false,steps:1});geo.translate(0,0,-g.params.depth/2);return geo;}
     case 'capsule':return new THREE.CapsuleGeometry(g.params.radius,g.params.length,8,24);
     case 'frame': {
       const {width:w,height:h,depth:d,thickness:t}=g.params;

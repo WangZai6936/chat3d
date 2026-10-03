@@ -7,5 +7,10 @@ test('diff reports additions, material and geometry edits, removals, and unchang
 const {conversationScope}=await server.ssrLoadModule('/src/domain/conversationScope.ts');
 test('conversation scope is global by default and narrows only for an explicit selected-object instruction',()=>{const selected=[before.nodes[0].id];assert.deepEqual(conversationScope('给人物补动作',before,selected),{});assert.deepEqual(conversationScope('开始',before,selected),{});assert.deepEqual(conversationScope('只修改选中对象的颜色',before,selected).nodeIds,selected);assert.equal(conversationScope('不要只修改选中对象，其他也要改',before,selected).nodeIds,undefined);assert.equal(conversationScope('只修改选中对象以外的设备',before,selected).nodeIds,undefined);assert.equal(conversationScope('开始',before,selected,true).lockPlacement,true);});
 test('explicit motion overrides an older placement toggle but negative and local instructions remain respected',()=>{const selected=[before.nodes[0].id];assert.equal(conversationScope('移动这台设备到左边',before,selected,true).lockPlacement,undefined);assert.equal(conversationScope('不要移动设备，只改颜色',before,selected,true).lockPlacement,true);const local=conversationScope('只移动选中对象',before,selected,true);assert.deepEqual(local.nodeIds,selected);assert.equal(local.lockPlacement,undefined);const continued=conversationScope('开始吧',before,selected,true,[{role:'user',text:'只移动选中对象'}]);assert.deepEqual(continued,local);});
-console.log(`${passed} scope and diff checks passed`);
+test('colloquial explicit movement unlocks while negatives quotes questions and unrelated current turns stay locked',()=>{
+ for(const text of ['向左挪两米','往右移两米','把设备挪到右边','旋转90度'])assert.equal(conversationScope(text,before,[],true).lockPlacement,undefined,text);
+ for(const text of ['创建挪威风格的车间','不要向左挪两米','保持位置，只改颜色','是否向左挪两米？','标注“向左挪两米”','只改颜色'])assert.equal(conversationScope(text,before,[],true,[{role:'user',text:'向左挪两米'}]).lockPlacement,true,text);
+ const scope=conversationScope('只挪选中对象向左两米',before,[before.nodes[0].id],true);assert.deepEqual(scope.nodeIds,[before.nodes[0].id]);assert.equal(scope.lockPlacement,undefined);
+});
+ console.log(`${passed} scope and diff checks passed`);
 }finally{await server.close()}

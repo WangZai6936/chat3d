@@ -1,9 +1,9 @@
 // 模拟模型回包（方案 P0：先用模拟回包跑通"验证、预览与撤销"，再接真实端点）
 // 这是 AIAdapter 的离线替身：解析中文输入 → 生成合法命令批
 // 真实适配器（src/ai/provider.ts）在 P2 接入，协议差异在适配器内处理
-import { Command, CommandBatch } from '../domain/commands';
-import { makeId } from '../util/ids';
-import { useEditorStore } from '../store';
+import { Command, CommandBatch } from '../../src/domain/commands';
+import { makeId } from '../../src/util/ids';
+import { useEditorStore } from '../../src/store';
 
 interface ParsedIntent {
   summary: string;

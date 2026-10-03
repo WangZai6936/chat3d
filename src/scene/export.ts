@@ -1,3 +1,4 @@
+import {materialReady,disposeMaterialTextures} from './surfaceTextures';
 import {createSceneMaterial} from './material';
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
@@ -11,7 +12,7 @@ export function buildExportScene(doc: SceneDocument): THREE.Scene {
     if (n.kind!=='primitive'||!n.geometry||n.parentId!==null) throw new Error('当前 GLB 导出仅支持无分组的基础模型');
     const m=doc.materials.find((v)=>v.id===n.materialId);
     const mesh=new THREE.Mesh(buildPrimitiveGeometry(n.geometry),createSceneMaterial(m,n.label));
-    mesh.name=n.name;mesh.userData={nodeId:n.id,assemblyId:n.assemblyId,assemblyName:n.assemblyName,label:n.label,sceneRole:n.sceneRole,planKey:n.planKey,zone:n.zone};mesh.position.fromArray(n.transform.position);mesh.quaternion.fromArray(n.transform.rotationQuaternion);mesh.scale.fromArray(n.transform.scale);scene.add(mesh);
+    mesh.name=n.name;mesh.userData={connection:n.connection,nodeId:n.id,assemblyId:n.assemblyId,assemblyName:n.assemblyName,label:n.label,sceneRole:n.sceneRole,planKey:n.planKey,zone:n.zone};mesh.position.fromArray(n.transform.position);mesh.quaternion.fromArray(n.transform.rotationQuaternion);mesh.scale.fromArray(n.transform.scale);scene.add(mesh);
   }
   return scene;
 }
@@ -19,10 +20,11 @@ export async function exportGlb(doc: SceneDocument): Promise<ArrayBuffer> {
   if (!doc.nodes.some((n)=>n.visible)) throw new Error('没有可导出的可见对象');
   const scene=buildExportScene(doc);
   try {
+    const pending:Promise<void>[]=[];scene.traverse(o=>{if(o instanceof THREE.Mesh)for(const m of Array.isArray(o.material)?o.material:[o.material]){const ready=materialReady.get(m);if(ready)pending.push(ready);}});await Promise.all(pending);
     const result=await new GLTFExporter().parseAsync(scene,{binary:true,onlyVisible:true});
     if (!(result instanceof ArrayBuffer)) throw new Error('GLB 导出结果格式错误');
     return result;
   } finally {
-    scene.traverse((object)=>{if(object instanceof THREE.Mesh){object.geometry.dispose();const materials=Array.isArray(object.material)?object.material:[object.material];materials.forEach((m)=>{(m as THREE.MeshStandardMaterial).map?.dispose();m.dispose()})}});
+    scene.traverse((object)=>{if(object instanceof THREE.Mesh){object.geometry.dispose();const materials=Array.isArray(object.material)?object.material:[object.material];materials.forEach(disposeMaterialTextures)}});
   }
 }

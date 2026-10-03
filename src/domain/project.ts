@@ -11,7 +11,7 @@ export function serializeProject(doc: SceneDocument): string {
     unit: doc.unit, upAxis: doc.upAxis, nodes: doc.nodes, materials: doc.materials,
     assets: doc.assets, ...(doc.animation?{animation:doc.animation}:{}), ...(doc.viewState ? { viewState: doc.viewState } : {}),
   };
-  return JSON.stringify({ format: 'chat3d-project', version: 1, scene }, null, 2);
+  const output=JSON.stringify({ format: 'chat3d-project', version: 1, scene }, null, doc.nodes.some(n=>n.geometry?.type==='mesh')?undefined:2);if(new TextEncoder().encode(output).length>MAX_PROJECT_BYTES)throw Error('项目文件超过20MB，请精简贴图或拆分场景后导出');return output;
 }
 
 export function parseProject(text: string): SceneDocument {
@@ -24,7 +24,7 @@ export function parseProject(text: string): SceneDocument {
   if (doc.schemaVersion !== SCHEMA_VERSION || typeof doc.projectId !== 'string' || !doc.projectId || !Number.isSafeInteger(doc.revision) || doc.revision < 0 || doc.unit !== 'm' || doc.upAxis !== 'Y') throw new Error('项目标识、版本、单位或坐标系无效');
   if (!Array.isArray(doc.nodes) || !Array.isArray(doc.materials) || !Array.isArray(doc.assets) || doc.nodes.length > 10000) throw new Error('项目列表结构无效或对象数量超过上限');
   if (doc.assets.length) throw new Error('此版本尚不支持导入外部模型资产');
-  const required: Record<string, string[]> = {capsule:['radius','length'],frame:['width','height','depth','thickness'],tube:['outerRadius','innerRadius','height'],trapezoid:['widthTop','widthBottom','height','depth'],roundedPlate:['width','height','depth','cornerRadius'],box:['width','height','depth'],sphere:['radius'],cylinder:['radiusTop','radiusBottom','height'],cone:['radius','height'],plane:['width','depth']};
+  const required: Record<string, string[]> = {loft:[],sweepTube:[],mesh:[],lathe:[],profile:[],capsule:['radius','length'],frame:['width','height','depth','thickness'],tube:['outerRadius','innerRadius','height'],trapezoid:['widthTop','widthBottom','height','depth'],roundedPlate:['width','height','depth','cornerRadius'],box:['width','height','depth'],sphere:['radius'],cylinder:['radiusTop','radiusBottom','height'],cone:['radius','height'],plane:['width','depth']};
   try {
     for (const n of doc.nodes) {
       if (!n || n.kind !== 'primitive' || !n.geometry || !required[n.geometry.type] || typeof n.visible !== 'boolean' || !n.transform || !Array.isArray(n.transform.scale)) throw new Error('存在不支持或不完整的节点');

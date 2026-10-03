@@ -1,11 +1,11 @@
+import {isServerCaptureAvailable} from '../scene/serverCapture';
+import {evaluateDetailAcceptance} from '../domain/detailAcceptance';
 import {SiteAccessRecovery} from './SiteAccessRecovery';
-import {runDiagnostics} from '../domain/runDiagnostics';
-import {RunTrace} from './RunTrace';
+import {ConversationRun} from './ConversationRun';
 import {MessageText} from './MessageText';
 import {continueDraft,type DraftBaseline} from '../domain/draftContinuation';
 import {conversationScope} from '../domain/conversationScope';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { buildBatch } from '../ai/mockModel';
 import { buildSceneContext, generateBatch } from '../ai/provider';
 import { GenerationProgress } from '../ai/stream';
 import type { AgentActivity, AgentResult, AgentControl } from '../ai/modelingAgent';
@@ -17,7 +17,6 @@ import { useEditorStore } from '../store';
 
 const MAX_IMAGES = 4;
 export const REQUEST_TIMEOUT_MS = 180_000;
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 async function compressImage(file: File | Blob): Promise<string> {
   const bitmap = await createImageBitmap(file);
   const maxSide = 1024;
@@ -49,14 +48,13 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
   const controlRef=useRef<AgentControl|null>(null);
   const [canSteer,setCanSteer]=useState(false);
   const [sendMode,setSendMode]=useState<'guide'|'question'|'later'>('guide');
-  const exportDiagnostics=()=>{const current=store();const content=runDiagnostics(current.aiStatus,current.lastRun,current.aiError);const url=URL.createObjectURL(new Blob([JSON.stringify(content,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='chat3d-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
   const markSteering=(id:string,status:'queued'|'received'|'interrupted')=>useEditorStore.setState(state=>({messages:state.messages.map(m=>m.id===id?{...m,steering:{runId:runMessageId.current??'',status}}:m)}));
   const clearControl=()=>{controlRef.current=null;setCanSteer(false);useEditorStore.setState(state=>({messages:state.messages.map(m=>m.steering?.runId===runMessageId.current&&m.steering.status==='queued'?{...m,steering:{...m.steering,status:'interrupted' as const}}:m)}));};
   const runMessageId=useRef<string|null>(null);
   const parentDraft=useRef<DraftBaseline|null>(null);
   const finishRun=(status:'preview'|'completed'|'failed'|'stopped')=>{if(runMessageId.current)store().updateMessageRun(runMessageId.current,{status,endedAt:Date.now(),activity:store().lastRun??undefined});};
   const [runPi, setRunPi] = useState(false);
-  const [progress, setProgress] = useState<GenerationProgress | null>(null);
+  const [, setProgress] = useState<GenerationProgress | null>(null);
   const [started, setStarted] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [lastRequest, setLastRequest] = useState<{text: string; images: string[]} | null>(null);
@@ -76,6 +74,7 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const busy = ['capturing','context','generating','validating','applying'].includes(aiStatus);
+  const viewportStatus=useEditorStore(s=>s.viewportStatus);
   const previewing = aiStatus === 'previewing';
   const changes=useMemo(()=>previewing&&pendingResult?sceneChanges(doc,pendingResult.doc):[],[previewing,doc,pendingResult]);
   const elapsed = Math.max(0, Math.floor((now - started) / 1000));
@@ -123,6 +122,8 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
     if(result.errors.length) { fail(`结果未通过校验，场景保持不变：${result.errors.map(e=>e.message).join('；')}`); return; }
     store().setAiError(null);
     if (!batch.operations.length) { store().setPreviewDoc(null); store().setAiStatus('idle'); finishRun('completed'); store().addAssistantMessage(batch.summary); return; }
+    const detail=evaluateDetailAcceptance(store().doc,result.doc,store().lastRun?.detailAcceptance?.reviews??[]);
+    if(detail.issues.length){batch={...batch,incomplete:true,continuation:batch.continuation??'继续按通用六项细节标准检查并修正当前模型',summary:batch.summary+(batch.summary.includes('细节验收')?'':'\n细节验收未完成：'+detail.issues.slice(0,8).join('；'))};}
     if(parentDraft.current&&batch.requestId!==parentDraft.current.batch.requestId){const priorId=parentDraft.current.batch.requestId;useEditorStore.setState(state=>({messages:state.messages.map(m=>m.batch?.requestId===priorId?{...m,outcome:'superseded' as const}:m)}));}
     store().setPendingBatch(batch); store().setPendingResult(result); store().setPreviewDoc(result.doc);
     store().setAiStatus('previewing'); finishRun('preview'); store().addAssistantMessage(batch.summary, batch);
@@ -146,11 +147,10 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
       setInput('');setAttachments([]);setNotice('补充要求已排队，当前操作结束后接收');stickRef.current=true;return;
     }
     const cfg = store().aiConfig;
-    if(!cfg || (!cfg.useMock && (!cfg.baseURL.trim() || !cfg.apiKey.trim() || !cfg.model.trim()))) {
+    if(!cfg || cfg.useMock || !cfg.baseURL.trim() || !cfg.apiKey.trim() || !cfg.model.trim()) {
       setNotice('请先打开顶部“模型配置”，获取并选择模型；指令和图片已保留'); return;
     }
-    if(cfg.useMock && attachments.length) { setNotice('离线演示不能识别参考图，请先配置支持看图的模型'); return; }
-    const usePi = !cfg.useMock && cfg.agentMode !== 'single';
+    const usePi = cfg.agentMode !== 'single';
     if(usePi && cfg.stream === false) { setNotice('Pi 分步建模需要流式输出，请在模型配置中开启；也可选择单次生成兼容模式'); return; }
     let lastActivitySave=0;
     const parent=store().aiStatus==='previewing'&&store().pendingBatch&&store().pendingResult?{batch:store().pendingBatch!,result:store().pendingResult!}:null;
@@ -162,7 +162,7 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
     const sentImages = [...attachments];
     // Current reference stays visible in the conversation; a follow-up may reuse the latest image.
     const reference = sentImages.length ? sentImages : reuseReference ? [...messages].reverse().find(m=>m.role==='user' && !m.queuedTask && m.images?.length)?.images ?? [] : [];
-    const images = cfg.useMock ? [] : reference;
+    const images = reference;
     const history = messages.filter(m=>m.role!=='system' && !m.error && !m.queuedTask).map(m=>({role:m.role as 'user'|'assistant',text:m.batch ? `${m.text}\n[${m.outcome==='applied'?'已应用':m.outcome==='discarded'?'已放弃，不要视作已存在':m.outcome==='superseded'?'已合并到后续草稿':'仅预览'}]` : m.text}));
     const myRun = ++runRef.current;
     const alive = () => aliveRef.current && myRun === runRef.current;
@@ -170,7 +170,7 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
     setInput(''); setAttachments([]); setNotice(''); setLastRequest({text, images:sentImages});
     setStarted(Date.now()); setNow(Date.now()); setProgress(null);
     runMessageId.current=store().addUserMessage(text || '请根据参考图建模', sentImages);
-    store().updateMessageRun(runMessageId.current,{startedAt:Date.now(),status:'running',mode:cfg.useMock?'demo':usePi?'pi':'single'});
+    store().updateMessageRun(runMessageId.current,{startedAt:Date.now(),status:'running',mode:usePi?'pi':'single'});
     store().setAiError(null); store().setAiStatus('capturing');
     const baseRevision = working.revision;
     const projectId = working.projectId;
@@ -196,12 +196,10 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
       setProgress({phase:'waiting',attempt:1,characters:0,lastEventAt:Date.now(),streaming:cfg.stream !== false});
       let batch: CommandBatch;
       let prepared: ExecutionResult | undefined;
-      if (cfg.useMock) {
-        await sleep(500); if(!alive()) return; batch = {...buildBatch(text),projectId,baseRevision};
-      } else if(usePi) {
+      if(usePi) {
         const {runModelingAgent} = await import('../ai/modelingAgent');
         if(!alive()) return;
-        const generated = await runModelingAgent({text,config:cfg,document:working,selection:selectedIds,images,history,signal:controller.signal,editScope,
+        const generated = await runModelingAgent({text,config:cfg,document:working,qualityBaseline:parent?original:working,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:()=>store().viewportStatus==='ready'||isServerCaptureAvailable(),
           onControl:control=>{if(alive()){controlRef.current=control;setCanSteer(!!control);if(!control)clearControl();}},
           onSteeringApplied:id=>{if(alive()){markSteering(id,'received');setNotice('补充要求已送入模型上下文');}},
           onCheckpoint:cp=>{if(alive()){const combined=continueDraft(original,parent,cp.batch,cp.result);checkpointRef.current={...cp,...combined};useEditorStore.setState({pendingBatch:combined.batch,pendingResult:combined.result});}},
@@ -235,30 +233,30 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
     if(input.trim() || attachments.length) { setNotice('请先处理当前草稿，再恢复上一条指令'); return; }
     setInput(lastRequest.text); setAttachments(lastRequest.images); setNotice('已恢复，请按需修改后发送'); inputRef.current?.focus();
   };
-  const progressTitle = runPi && agentActivity ? agentActivity.title : aiConfig?.useMock ? '正在生成离线演示结果' : progress?.phase==='correcting' ? '正在请求修正输出格式（第 2 次）' : progress?.phase==='validating' || aiStatus==='validating' ? '回复已收齐，正在校验模型结构' : progress?.phase==='receiving' ? progress.characters ? '正在接收模型输出' : '服务已响应，等待答案内容' : '请求已发起，等待模型响应';
+
   const commit = () => {const continuation=store().pendingBatch?.continuation;store().confirmPending();if(store().aiStatus==='idle' && continuation){if(!store().composerText.trim()){setInput(continuation);setNotice('阶段已保留，继续指令已填入；点击发送才会继续调用模型');}else setNotice('阶段已保留；当前输入草稿未改动，可以发送指令继续完善');}checkpointRef.current=null;parentDraft.current=null; inputRef.current?.focus();};
   const discard = () => {checkpointRef.current=null;parentDraft.current=null;store().discardPending(); setNotice('已放弃预览，原场景保持不变'); inputRef.current?.focus();};
   const previewCard=(previewing && pendingBatch && <div className="mx-3 mb-2 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
-      <div className="text-emerald-300 text-sm font-medium">{pendingBatch.incomplete?'阶段草稿 · 未完成复核':'预览已就绪'} · {pendingBatch.operations.length} 项操作</div>
-      <p className="text-xs text-gray-400 mt-1">{pendingBatch.incomplete?'这不是完整交付。可旋转检查，可直接发送指令继续完成，也可先保留此阶段；原场景仍未修改。':'可旋转、缩放查看。可以直接发送下一条继续调整当前预览，满意后再应用。'}</p>
+      <div className="text-emerald-300 text-sm font-medium">{viewportStatus!=='ready'?'草稿已生成 · 三维画面不可用':pendingBatch.incomplete?'阶段草稿 · 未完成复核':'预览已就绪'} · {pendingBatch.operations.length} 项操作</div>
+      <p className="text-xs text-gray-400 mt-1">{viewportStatus!=='ready'?'尚未完成画面检查。可查看对象与属性、继续调整、应用或放弃草稿；请恢复三维视图后进行视觉验收。':pendingBatch.incomplete?'这不是完整交付。可旋转检查，可直接发送指令继续完成，也可先保留此阶段；原场景仍未修改。':'可旋转、缩放查看。可以直接发送下一条继续调整当前预览，满意后再应用。'}</p>
       {pendingResult&&<div className="mt-3 border-t border-white/10 pt-2 text-xs text-gray-300"><p>修改对比：新增 {changes.filter(c=>c.kind==='added').length} · 修改 {changes.filter(c=>c.kind==='modified').length} · 移除 {changes.filter(c=>c.kind==='removed').length}</p><details className="mt-2"><summary className="cursor-pointer">查看受影响对象</summary><ul className="max-h-40 overflow-auto mt-1 space-y-1">{changes.map(c=><li key={c.id}><button className="text-left hover:text-blue-200 disabled:opacity-50" disabled={!pendingResult.doc.nodes.some(n=>n.id===c.id)} onClick={()=>store().select([c.id])}>{c.group} / {c.name}：{c.fields.join('、')}</button></li>)}</ul></details><button className="mt-2 rounded bg-white/10 px-2 py-1" onClick={()=>{const before=!compareBefore;setCompareBefore(before);store().setPreviewDoc(before?doc:pendingResult.doc);}}>{compareBefore?'查看修改后':'查看修改前'}</button>{compareBefore&&<p className="mt-1 text-amber-200">当前显示修改前，请切回修改后再确认应用</p>}</div>}
       <button className="mt-3 text-xs text-blue-300" onClick={()=>{if(!input.trim()&&pendingBatch.continuation)setInput(pendingBatch.continuation);inputRef.current?.focus();}}>{pendingBatch.incomplete?'继续完成':'继续调整'}</button>
       <div className="flex gap-2 mt-3"><button disabled={compareBefore} onClick={commit} className="flex-1 bg-emerald-600 hover:bg-emerald-500 rounded py-2 text-sm">{pendingBatch.incomplete?'保留此阶段':'确认应用'}</button><button onClick={discard} className="px-3 bg-white/10 rounded text-sm">放弃预览</button></div>
     </div>);
   return <div className="chat-panel flex flex-col h-full min-w-0 bg-[#20242b] text-gray-200">
     <div title="会话在本浏览器保存；请下载项目文件长期备份" className="px-3 py-2 border-b border-white/10 text-xs text-gray-400 flex justify-between gap-2">
-      <span className="truncate">{!aiConfig?.useMock && aiConfig?.agentMode !== 'single' ? 'Pi · ' : ''}{aiConfig?.useMock ? '离线演示 · 模拟结果' : aiConfig?.model || '请先配置模型'}</span>
+      <span className="truncate">{!aiConfig?.useMock && aiConfig?.agentMode !== 'single' ? 'Pi · ' : ''}{aiConfig?.useMock ? '请先配置模型' : aiConfig?.model || '请先配置模型'}</span>
       <span className="shrink-0">{selection.length ? `已选 ${selection.length} 个对象` : `场景 ${doc.nodes.length} 个对象`}</span>
     </div>
     <div ref={scrollRef} onScroll={() => {const el=scrollRef.current; if(el) {stickRef.current=el.scrollHeight-el.scrollTop-el.clientHeight<64;if(stickRef.current)setNewMessages(false);}}} className="chat-transcript flex-1 overflow-auto p-3 space-y-4 min-h-0">
       {!messages.length && <div className="chat-welcome text-sm text-gray-400 py-5 leading-relaxed">
         <p className="text-gray-200 font-medium mb-2">从一个想法开始</p>
-        {!aiConfig&&<div className="flex flex-wrap gap-2 my-3"><button onClick={onConfigure} className="rounded bg-blue-600 px-3 py-2 text-white">连接模型</button><button className="rounded bg-white/10 px-3 py-2" onClick={()=>{store().setAiConfig({baseURL:'',apiKey:'',model:'',useMock:true,agentMode:'pi',stream:true});setNotice('已进入离线演示：仅支持示例创建和选中零件的简单修改，不支持图片理解或动画');}}>体验离线演示</button></div>}
+
         <p>可以附参考图，说明尺寸、用途和需要保留的细节。也可以通过对话给现有场景添加运动，先播放预览，再决定应用。</p>
         <button className="mt-3 text-blue-300 text-left" onClick={()=>setInput('创建一个长 1.2 米、宽 0.8 米、高 0.75 米的工作台')}>试试：创建一个有明确尺寸的工作台 ↗</button>
         <p className="mt-3 text-xs">图片建模是可编辑的近似重建，单张图无法确定背面与真实尺寸。</p>
       </div>}
-      {aiConfig?.useMock&&<p className="text-xs text-amber-200 rounded border border-amber-300/20 p-2">离线演示：支持示例创建；选中一个零件后可改色、移动、改名。图片理解、动画及复杂修改需连接真实模型。{onConfigure&&<button onClick={onConfigure} className="ml-2 underline">连接真实模型</button>}</p>}
+      {(!aiConfig || aiConfig.useMock)&&<p className="text-xs text-amber-200 p-2">请连接真实模型后生成。已有项目仍可打开、手动编辑、保存和导出。<button onClick={onConfigure} className="ml-2 underline">连接模型</button></p>}
       {messages.map(m=><div key={m.id}><div className={`flex ${m.role==='user'?'justify-end':'justify-start'}`}>
         <div className={`chat-message ${m.role==='user'?'chat-message-user':'chat-message-assistant'} max-w-[94%] rounded-xl px-3 py-2.5 text-sm leading-relaxed ${m.role==='user'?'bg-blue-600 text-white':m.error?'bg-red-950/50 border border-red-500/30 text-red-200':'bg-[#2c323b]'}`}>
           <div className="text-[10px] opacity-60 mb-1">{m.role==='user'?'你':'chat3d'} · {new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
@@ -270,7 +268,7 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
         </div>
       </div>
       {m.run&&['failed','stopped'].includes(m.run.status)&&!busy&&<button className="mt-1 text-xs text-blue-300 underline" onClick={()=>{if(input.trim()||attachments.length){setNotice('请先处理输入框中的内容');return;}setInput(m.text);setAttachments(m.images??[]);inputRef.current?.focus();}}>恢复本轮指令</button>}
-      {m.run&&<RunTrace run={m.run} activity={busy&&m.id===runMessageId.current?agentActivity:undefined} title={progressTitle} characters={busy&&m.id===runMessageId.current?progress?.characters:undefined} now={now} onStop={busy&&m.id===runMessageId.current?cancel:undefined}/>}
+      {m.run&&<ConversationRun run={m.run} activity={busy&&m.id===runMessageId.current?agentActivity:undefined} onStop={busy&&m.id===runMessageId.current?cancel:undefined}/>}
       {previewing&&m.batch?.requestId===pendingBatch?.requestId&&previewCard}
       </div>)}
     {(aiStatus==='error' || aiStatus==='cancelled') && <div className="px-3 pb-2 text-xs" role="status"><span className="text-amber-300">{aiStatus==='error'?'本次未完成，原场景未修改':'已停止生成'}</span>{lastRequest && <button onClick={restore} className="ml-3 text-blue-300 underline">恢复指令重试</button>}{aiError && <details className="mt-1 text-gray-400"><summary>错误详情</summary><p className="select-text break-words whitespace-pre-wrap">{aiError}</p></details>}</div>}
@@ -278,9 +276,8 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
     </div>
     <SiteAccessRecovery error={aiError}/>
     {newMessages && <button className="text-xs text-blue-300 py-1" onClick={()=>{stickRef.current=true;setNewMessages(false);if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight;}}>查看最新消息 ↓</button>}
-    {(aiError||store().lastRun)&&!busy&&<button onClick={exportDiagnostics} className="px-3 py-1 text-xs text-gray-400 text-left underline">下载脱敏诊断记录</button>}
     {notice && <div role="status" className="px-3 py-2 text-xs text-amber-200">{notice}</div>}
-    {busy && agentActivity && (agentActivity.inputTokens+agentActivity.outputTokens>=100000 || elapsed>=300) && <p role="status" className="px-3 pb-2 text-xs text-amber-300">任务仍在继续，累计 {agentActivity.inputTokens+agentActivity.outputTokens} Token，已运行 {Math.floor(elapsed/60)} 分钟。可随时停止并保留已生成草稿。</p>}
+    {busy && agentActivity && (agentActivity.inputTokens+agentActivity.outputTokens>=100000 || elapsed>=300) && <p role="status" className="px-3 pb-2 text-xs text-amber-300">任务耗时较长，详情见任务记录。可随时停止并保留已生成草稿。</p>}
     {!!attachments.length && <div className="flex gap-2 p-2 flex-wrap">{attachments.map((src,i)=><div key={i} className="relative"><button onClick={()=>setImageView(src)}><img src={src} alt={`待发送参考图 ${i+1}`} className="w-16 h-14 rounded object-cover"/></button><button aria-label={`移除参考图 ${i+1}`} onClick={()=>setAttachments(prev=>prev.filter((_,j)=>i!==j))} className="absolute -top-1 -right-1 rounded-full bg-red-600 w-5 h-5 text-xs">×</button></div>)}</div>}
     {doc.nodes.length>0&&<details className="mx-3 text-xs text-gray-400"><summary className="cursor-pointer">修改选项</summary><fieldset disabled={busy} className="edit-scope-controls mx-3 mb-2 space-y-1 text-xs text-gray-300 disabled:opacity-50"><p>对话可编辑全场景，选中对象仅用于指代；局部修改请在指令中说明</p><label className="flex gap-2 items-center"><input type="checkbox" checked={lockPlacement} onChange={e=>setLockPlacement(e.target.checked)}/>锁定已有对象的位置与朝向</label></fieldset></details>}
     <div className="chat-composer p-3 border-t border-white/10 bg-[#252A31]">

@@ -1,0 +1,146 @@
+[
+  {
+    "key": "vmc",
+    "name": "立式加工中心",
+    "role": "equipment",
+    "parts": 145,
+    "size": [
+      2.935,
+      2.542,
+      1.92
+    ],
+    "front": "+Z"
+  },
+  {
+    "key": "hmc",
+    "name": "卧式加工中心",
+    "role": "equipment",
+    "parts": 63,
+    "size": [
+      3.47,
+      2.635,
+      2.1
+    ],
+    "front": "+Z"
+  },
+  {
+    "key": "gantry",
+    "name": "龙门加工中心",
+    "role": "equipment",
+    "parts": 94,
+    "size": [
+      5.58,
+      3.56,
+      3.0
+    ],
+    "front": "+Z"
+  },
+  {
+    "key": "cmm",
+    "name": "三坐标检测工位",
+    "role": "equipment",
+    "parts": 28,
+    "size": [
+      4.05,
+      2.21,
+      1.8
+    ],
+    "front": "+Z"
+  },
+  {
+    "key": "cleaning",
+    "name": "多槽清洗设备",
+    "role": "equipment",
+    "parts": 42,
+    "size": [
+      2.51,
+      1.878,
+      1.21
+    ],
+    "front": "+Z"
+  },
+  {
+    "key": "grinding",
+    "name": "打磨除尘工位",
+    "role": "equipment",
+    "parts": 37,
+    "size": [
+      3.28,
+      2.255,
+      1.18
+    ],
+    "front": "+Z"
+  },
+  {
+    "key": "packing",
+    "name": "装箱工位",
+    "role": "workstation",
+    "parts": 36,
+    "size": [
+      3.95,
+      1.714,
+      1.1
+    ],
+    "front": "+Z"
+  },
+  {
+    "key": "rack",
+    "name": "仓储货架",
+    "role": "storage",
+    "parts": 27,
+    "size": [
+      2.685,
+      3.1,
+      1.045
+    ],
+    "front": "+Z"
+  },
+  {
+    "key": "production-worker",
+    "name": "生产人员",
+    "role": "person",
+    "parts": 32,
+    "size": [
+      0.599,
+      1.755,
+      0.61
+    ],
+    "front": "-Z"
+  },
+  {
+    "key": "quality-worker",
+    "name": "质检人员",
+    "role": "person",
+    "parts": 35,
+    "size": [
+      0.599,
+      1.755,
+      0.61
+    ],
+    "front": "-Z"
+  },
+  {
+    "key": "warehouse-worker",
+    "name": "仓管员",
+    "role": "person",
+    "parts": 34,
+    "size": [
+      0.599,
+      1.755,
+      0.62
+    ],
+    "front": "-Z"
+  },
+  {
+    "key": "packing-worker",
+    "name": "打包人员",
+    "role": "person",
+    "parts": 34,
+    "size": [
+      0.599,
+      1.755,
+      0.63
+    ],
+    "front": "-Z"
+  }
+]

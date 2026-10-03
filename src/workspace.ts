@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { useEditorStore, createInitialDoc, type EditorState } from './store';
+import { useEditorStore, setWorkspacePersistenceActive, createInitialDoc, type EditorState } from './store';
 import { parseProject, serializeProject } from './domain/project';
 import { readWorkspace, writeWorkspace } from './domain/workspaceStorage';
 import { makeId } from './util/ids';
@@ -41,7 +41,7 @@ export async function flushWorkspace():Promise<void>{
   if(blocked||!pending)return;
   saving=true;pending=false;
   const w=useWorkspaceStore.getState();
-  try{revision=await writeWorkspace({version:1,activeId:w.activeId,sessions:w.sessions},revision);useWorkspaceStore.setState({error:null});}
+  try{revision=await writeWorkspace({version:1,activeId:w.activeId,sessions:w.sessions},revision);setWorkspacePersistenceActive(true);useWorkspaceStore.setState({error:null});}
   catch(e){blocked=true;pending=false;useWorkspaceStore.setState({error:e instanceof Error?e.message:'会话保存失败'});}
   finally{saving=false;useWorkspaceStore.setState({saving:pending});if(pending)await flushWorkspace();else {const done=waiters;waiters=[];done.forEach(resolve=>resolve());}}
 }
@@ -63,7 +63,7 @@ export function initializeWorkspace():Promise<void>{
         if(stored.version!==1||!Array.isArray(stored.sessions))throw new Error('会话数据版本不受支持，请先备份本页项目');
         const sessions=stored.sessions.map(validate);let active=sessions.find(s=>s.id===stored.activeId&&!s.deletedAt)??sessions.find(s=>!s.deletedAt);
         if(!active){active=record(fresh());sessions.push(active);}
-        revision=stored.revision;useWorkspaceStore.setState({sessions,activeId:active.id,ready:true});restore(active);
+        setWorkspacePersistenceActive(true);revision=stored.revision;useWorkspaceStore.setState({sessions,activeId:active.id,ready:true});restore(active);
       }else{const first=record(snapshot(),useEditorStore.getState().doc.nodes.length?'恢复的项目':'新建会话');useWorkspaceStore.setState({sessions:[first],activeId:first.id,ready:true});}
       schedule();await flushWorkspace();
     }catch(e){blocked=true;const first=record(snapshot(),'当前项目');useWorkspaceStore.setState({ready:true,activeId:first.id,sessions:[first],error:e instanceof Error?e.message:'会话恢复失败；已有存储不会被覆盖'});}
@@ -99,3 +99,27 @@ export function restoreSession(id:string):void{
 useEditorStore.subscribe((s,prev)=>{
   if(s.doc!==prev.doc||s.messages!==prev.messages||s.past!==prev.past||s.future!==prev.future||s.dirty!==prev.dirty||s.composerText!==prev.composerText||s.composerImages!==prev.composerImages||s.lastRun!==prev.lastRun||s.aiStatus!==prev.aiStatus||s.pendingBatch!==prev.pendingBatch||s.pendingResult!==prev.pendingResult)schedule();
 });
+
+/** Portable local backup. No model configuration or browser credentials are included. */
+export function exportWorkspaceBackup():string{
+ if(busy())throw Error('请先停止生成再备份，以保存一致的草稿');capture();
+ const sessions=useWorkspaceStore.getState().sessions.filter(s=>!s.deletedAt).map(s=>({title:s.title,pinned:!!s.pinned,project:JSON.parse(serializeProject(s.snapshot.doc)),draft:s.snapshot.pendingResult?JSON.parse(serializeProject(s.snapshot.pendingResult.doc)):null,messages:s.snapshot.messages.map(m=>({role:m.role,text:m.text,createdAt:m.createdAt})),composerText:s.snapshot.composerText}));
+ const output=JSON.stringify({format:'chat3d-workspace-backup',version:1,createdAt:new Date().toISOString(),sessions});
+ if(new TextEncoder().encode(output).length>50*1024*1024)throw Error('备份超过50MB，请分别导出项目');return output;
+}
+export function importWorkspaceBackup(text:string):number{
+ if(busy()||blocked||!useWorkspaceStore.getState().ready)throw Error('请先结束当前任务并解决存储错误');
+ if(new TextEncoder().encode(text).length>50*1024*1024)throw Error('备份超过50MB');
+ const pack=JSON.parse(text);if(pack?.format!=='chat3d-workspace-backup'||pack.version!==1||!Array.isArray(pack.sessions)||pack.sessions.length>100)throw Error('备份格式错误，或会话超过100');
+ const next:WorkspaceSession[]=[];
+ for(const item of pack.sessions){
+  if(typeof item.title!=='string'||!Array.isArray(item.messages)||item.messages.length>10000||typeof item.composerText!=='string')throw Error('备份会话格式无效');
+  const messages=item.messages.map((m:{role:string;text:string;createdAt:number})=>{if(!m||!['user','assistant','system'].includes(m.role)||typeof m.text!=='string'||m.text.length>200000)throw Error('备份消息格式无效');return {id:makeId(),role:m.role as 'user'|'assistant'|'system',text:m.text,createdAt:Number.isFinite(m.createdAt)?m.createdAt:Date.now()};});
+  const doc=parseProject(JSON.stringify(item.project));
+  const r=record({...fresh(),doc,messages,composerText:item.composerText.slice(0,200000)},item.title.slice(0,80)+'（导入）');r.pinned=!!item.pinned;next.push(r);
+  // Pending work is imported as a separate explicitly-labelled recovery project,
+  // never silently committed to the original or trusted as an executable batch.
+  if(item.draft){const draft=parseProject(JSON.stringify(item.draft));next.push(record({...fresh(),doc:draft},item.title.slice(0,65)+'（未确认草稿副本）'));}
+ }
+ capture();useWorkspaceStore.setState(w=>({sessions:[...next,...w.sessions]}));schedule();return next.length;
+}

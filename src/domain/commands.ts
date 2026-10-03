@@ -26,6 +26,9 @@ export type TransformMode = 'set' | 'delta'; // set=移动到，delta=移动了�
 
 // 命令白名单（方案第一版开放集合的 P0 子集）
 export type CommandOp =
+  | 'setSurface'
+  | 'setConnection'
+  | 'importMeshComponent'
   | 'setAnimation'
   | 'clearAnimation'
   | 'createAssembly'
@@ -145,6 +148,9 @@ export interface DeleteCommand {
 
 export type AppearancePatch=Partial<Pick<Material,'baseColor'|'roughness'|'metalness'|'opacity'>>;
 export type Command =
+  | {op:'setSurface';targetId:string;scope?:'assembly';sourceMaterialIds?:string[];surface:import('./textures').SurfaceDetail|null}
+  | {op:'setConnection';targetId:string;connection:import('./connections').Connection|null}
+  | {op:'importMeshComponent';nodes:SceneNode[];materials:Material[]}
   | {op:'setAnimation';animation:AnimationProgram}
   | {op:'clearAnimation'}
   | {op:'transformAssembly';targetId:string;rotationDegrees?:Vec3;scaleFactor?:number;pivot?:Vec3}
@@ -188,12 +194,14 @@ export function affectedNodeIds(op: Command, doc: SceneDocument): string[] {
   switch (op.op) {
     case 'setAnimation':
     case 'clearAnimation':
+    case 'importMeshComponent':
     case 'createAssembly':
     case 'duplicateAssembly':
     case 'createPrimitive':
     case 'createTemplate':
     case 'instantiateAsset':
       return [];
+    case 'setSurface':
     case 'setAppearance': {
       const root=doc.nodes.find(n=>n.id===op.targetId);const candidates=op.scope==='assembly'&&root?.assemblyId?doc.nodes.filter(n=>n.assemblyId===root.assemblyId):doc.nodes.filter(n=>n.id===op.targetId);
       return candidates.filter(n=>!op.sourceMaterialIds||op.sourceMaterialIds.includes(n.materialId??'')).map(n=>n.id);
@@ -233,6 +241,7 @@ const DEFAULT_BUDGET: Budget = { maxCommands: 200, maxNewNodes: 3000 }; // 方�
 export function estimateCost(ops: Command[]): { commands: number; newNodes: number } {
   let newNodes = 0;
   for (const op of ops) {
+    if(op.op==='importMeshComponent')newNodes+=op.nodes?.length??10001;
     if(op.op==='appendAssemblyParts'||op.op==='replaceAssemblyParts')newNodes+=Array.isArray(op.parts)?op.parts.reduce((n,p)=>n+(p.repeat?.count??1),0):2001;
     if(op.op==='createAssembly')newNodes+=Array.isArray(op.parts)?op.parts.reduce((n,p)=>n+(p.repeat?.count??1),0):2001;
     if(op.op==='duplicateAssembly')newNodes+=2000;
@@ -322,6 +331,12 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
   let createdIds: string[] | undefined;
 
   switch (op.op) {
+    case 'setSurface': {
+      if(op.scope!==undefined&&op.scope!=='assembly'||op.sourceMaterialIds!==undefined&&(!Array.isArray(op.sourceMaterialIds)||!op.sourceMaterialIds.length||op.sourceMaterialIds.some(x=>typeof x!=='string')))return {doc,error:new Error('表面作用范围无效')};
+      const ids=new Set(affectedNodeIds(op,doc));if(!ids.size)return {doc,error:new Error('没有匹配的表面部件')};
+      for(const n of nodes)if(ids.has(n.id)){const source=materials.find(m=>m.id===n.materialId)??materials[0];if(!source)return {doc,error:new Error('表面材质不存在')};if(op.surface&&n.geometry?.type==='mesh'&&!n.geometry.params.uvs)return {doc,error:new Error('网格缺少UV，请先在建模端展开UV')};const maps=source.maps?{...source.maps}:undefined;if(maps&&op.surface){delete maps.normal;delete maps.roughness;}const candidate={...source,id:makeId(),surface:op.surface??undefined,maps};const errors=validateMaterial(candidate);if(errors.length)return {doc,error:errors[0]};const {id,...properties}=candidate;const same=materials.find(m=>{const {id,...rest}=m;return JSON.stringify(rest)===JSON.stringify(properties)});if(same)n.materialId=same.id;else{materials=[...materials,candidate];n.materialId=candidate.id;}}break;
+    }
+    case 'setConnection': {const n=findNodeInList(nodes,op.targetId)!;if(op.connection)n.connection=structuredClone(op.connection);else delete n.connection;break;}
     case 'setAnimation': {
       animation=structuredClone(op.animation);
       if(animation&&Array.isArray(animation.tracks))for(const track of animation.tracks){if(track&&Array.isArray(track.targetIds))track.targetIds=track.targetIds.map(id=>tempIdMap.get(id)??id);if(track?.sourceId)track.sourceId=tempIdMap.get(track.sourceId)??track.sourceId;}
@@ -329,6 +344,14 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
       break;
     }
     case 'clearAnimation': animation=undefined;break;
+    case 'importMeshComponent': {
+      if(!Array.isArray(op.nodes)||!op.nodes.length||op.nodes.length>1000||!Array.isArray(op.materials)||op.materials.length>100)return {doc,error:new Error('网格组件数量或材质数量无效')};
+      const imported:SceneDocument={...doc,nodes:op.nodes,materials:op.materials,assets:[]};delete imported.animation;
+      const errors=validateDocument(imported);if(errors.length||op.nodes.some(n=>n.geometry?.type!=='mesh'||n.parentId!==null))return {doc,error:errors[0]??new Error('网格组件只能包含平级三角网格')};
+      const materialMap=new Map(op.materials.map(m=>[m.id,makeId()]));materials=[...materials,...op.materials.map(m=>({...m,id:materialMap.get(m.id)!}))];
+      const groupMap=new Map<string,string>();const copies=op.nodes.map((n,i)=>{const old=n.assemblyId??'component';if(!groupMap.has(old))groupMap.set(old,makeId());const group=groupMap.get(old)!;return {...cloneNode(n),id:i===0?group:makeId(),assemblyId:group,materialId:materialMap.get(n.materialId!)}});
+      createdIds=copies.map(n=>n.id);nodes.push(...copies);break;
+    }
     case 'createAssembly': {
       try{const parts=buildAssembly(op);createdIds=parts.map(n=>n.id);if(op.tempId)tempIdMap.set(op.tempId,parts[0].id);nodes.push(...parts);}catch(e){return {doc,error:e instanceof Error?e:new Error('组合创建失败')};}break;
     }

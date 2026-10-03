@@ -5,10 +5,11 @@ const rasterIntent = /画一张|绘一张|生成一张|生成图片|生图|出�
 
 /** Disambiguate editable scene construction without rewriting explicit raster-image requests. */
 export function normalizeModelingRequestText(text: string): string {
-  if (!sceneIntent.test(text) || rasterIntent.test(text)) return text;
-  return text
+  if (!sceneIntent.test(text) || rasterIntent.test(text) || /原样|原文|逐字|照抄|不要改写|不要修改|verbatim|exact(?:ly)?|do not (?:change|rewrite)/i.test(text)) return text;
+  // Quoted labels, examples and code are user data, not modeling verbs.
+  return text.split(/(```[\s\S]*?```|`[^`]*`|“[^”]*”|「[^」]*」|『[^』]*』|‘[^’]*’|"[^"]*"|'[^'\n]*')/g).map((part,index) => index % 2 ? part : part
     .replace(/(?:绘制|画)(?=[一个只])/g, '构建')
-    .replace(/\bdraw\s+(?=an?\s)/gi, 'build ');
+    .replace(/\bdraw\s+(?=an?\s)/gi, 'build ')).join('');
 }
 
 /** Normalize only outbound user text; stored conversations, images and tool messages stay intact. */

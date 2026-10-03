@@ -72,6 +72,7 @@ export interface HistoryEntry {
 }
 
 export interface EditorState {
+  viewportStatus: 'starting'|'ready'|'error';
   // 项目状态（进入核心命令历史）
   doc: SceneDocument;
   past: HistoryEntry[];
@@ -143,8 +144,9 @@ function loadConfig(): ModelConfig | null {
     const s = localStorage.getItem(CONFIG_KEY);
     if (!s) return null;
     const c = JSON.parse(s) as Partial<ModelConfig>;
+    if (c.useMock === true) return null;
     if (typeof c.baseURL !== 'string' || typeof c.apiKey !== 'string' || typeof c.model !== 'string') return null;
-    return { baseURL: c.baseURL, apiKey: c.apiKey, model: c.model, agentMode: c.agentMode === 'single' ? 'single' : 'pi', stream: c.stream !== false, useMock: c.useMock === true };
+    return { baseURL: c.baseURL, apiKey: c.apiKey, model: c.model, agentMode: c.agentMode === 'single' ? 'single' : 'pi', stream: c.stream !== false, useMock: false };
   } catch {
     return null;
   }
@@ -154,6 +156,7 @@ const restoredProject = loadAutosave();
 const EDIT_LOCKED = new Set<AiTaskStatus>(['capturing', 'context', 'generating', 'validating', 'previewing', 'applying']);
 
 export const useEditorStore = create<EditorState>((set, get) => ({
+  viewportStatus:'starting',
   composerText:'',composerImages:[],lastRun:null,
   setComposerText:(composerText)=>set({composerText}),setComposerImages:(composerImages)=>set({composerImages}),setLastRun:(lastRun)=>set({lastRun}),
   doc: restoredProject.doc ?? createInitialDoc(),
@@ -353,9 +356,12 @@ export function useDisplayDoc() {
   return useEditorStore((s) => s.previewDoc ?? s.doc);
 }
 
+// Once the IndexedDB workspace is authoritative, do not duplicate large mesh scenes into the small localStorage quota.
+let workspacePersistenceActive=false;
+export function setWorkspacePersistenceActive(active:boolean){workspacePersistenceActive=active;if(active&&useEditorStore.getState().autosaveError?.startsWith('自动恢复副本保存失败'))useEditorStore.setState({autosaveError:null});}
 // 只保存已提交场景；预览、密钥、聊天内容不会进入恢复副本。
 useEditorStore.subscribe((state, previous) => {
-  if (state.doc === previous.doc || typeof localStorage === 'undefined') return;
+  if (workspacePersistenceActive || state.doc === previous.doc || typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(AUTOSAVE_KEY, serializeProject(state.doc));
     if (state.autosaveError) useEditorStore.setState({ autosaveError: null });

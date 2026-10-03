@@ -1,3 +1,4 @@
+import {materialReady,disposeMaterialTextures} from './surfaceTextures';
 import {createAnimationEvaluator} from '../domain/animation';
 import {AnimationClock,type PlaybackState} from './animationPlayback';
 // Three.js 视口 — 命令式渲染器（方案第 2、11 节）
@@ -128,11 +129,11 @@ export class Viewport {
 
   // 半球补光 + 主方向光（带阴影）+ 冷色轮廓光
   private setupLights(): void {
-    const hemi = new THREE.HemisphereLight('#f5fcff', '#789095', .85);
+    const hemi = new THREE.HemisphereLight('#f5fcff', '#789095', 1.10);
     this.scene.add(hemi);
 
     // 暖白主光：模拟厂房高侧窗，投影方向稳定、边缘柔和
-    const dir = new THREE.DirectionalLight('#fff5e4', 2.6);
+    const dir = new THREE.DirectionalLight('#fff5e4', 2.0);
     this.keyLight = dir;
     dir.position.set(-12, 24, 14);
     dir.castShadow = true;
@@ -146,6 +147,7 @@ export class Viewport {
     dir.shadow.camera.bottom = -14;
     dir.shadow.bias = -0.0002;
     dir.shadow.normalBias = 0.003;
+    dir.shadow.radius = 3;
     this.scene.add(dir);
 
     // 冷色逆光：把物体轮廓从暗背景里剌出来
@@ -316,6 +318,7 @@ export class Viewport {
 
   // Incremental reconciliation: preserve unchanged mesh/geometry/material identities.
   sync(doc: SceneDocument): void {
+    this.frameMaterialKeys.clear();
     if(doc===this.lastSyncedDoc)return;
     if(!this.animationClock)this.animationClock=new AnimationClock();
     this.animationClock.configure(doc.animation?.duration,doc.animation?.loop);
@@ -335,7 +338,7 @@ export class Viewport {
     }
     const geometries=new Set([...this.nodeMap.values()].map(v=>v.geometry)),materials=new Set([...this.nodeMap.values()].map(v=>v.material));
     for(const [key,g] of this.sharedGeometryCache)if(!geometries.has(g)){g.dispose();this.sharedGeometryCache.delete(key);}
-    for(const [key,m] of this.materialCache)if(!materials.has(m)){m.map?.dispose();m.dispose();this.materialCache.delete(key);}
+    for(const [key,m] of this.materialCache)if(!materials.has(m)){disposeMaterialTextures(m);this.materialCache.delete(key);}
     this.lastSyncedDoc=doc;
     this.notifyPlayback();
     if(firstContent||!this.nodeMap.size)this.frameScene();
@@ -380,11 +383,12 @@ export class Viewport {
     return this.getOrCreateMaterial(found,label);
   }
 
+  private frameMaterialKeys=new Map<Material,string>();
   private getOrCreateMaterial(m: Material,label?:string): THREE.MeshStandardMaterial {
-    const key = JSON.stringify(m)+(label??'');
+    let materialKey=this.frameMaterialKeys.get(m);if(!materialKey){materialKey=JSON.stringify(m);this.frameMaterialKeys.set(m,materialKey);}const key=materialKey+(label??'');
     const cached = this.materialCache.get(key);
     if (cached) return cached;
-    const mat = createSceneMaterial(m,label);
+    const mat = createSceneMaterial(m,label);materialReady.get(mat)?.then(()=>this.markDirty()).catch(()=>this.markDirty());
     this.materialCache.set(key, mat);
     return mat;
   }
@@ -408,17 +412,17 @@ export class Viewport {
     this.selectionHelpers = [];
   }
 
-  captureDocument(doc: SceneDocument, view: 'perspective' | 'front' | 'side' | 'top', targetIds?:string[],time?:number): string {
+  async captureDocument(doc: SceneDocument, view: 'perspective' | 'front' | 'side' | 'back' | 'left' | 'top', targetIds?:string[],time?:number): Promise<string> {
     if(this.renderer.getContext().isContextLost())throw new Error('WebGL 上下文丢失，无法截图');
     if(this.host.clientWidth<=0 || this.host.clientHeight<=0)throw new Error('视口不可见，无法截图');
-    this.sync(doc);
+    this.sync(doc);await Promise.all([...this.materialCache.values()].map(m=>materialReady.get(m)??Promise.resolve()));if(this.lastSyncedDoc!==doc)throw Error('贴图加载期间场景已变化，请重新截图');
     const savedPlayback={...this.animationClock.state};this.animationClock.pause();
     const saved = {target:this.orbitTarget.clone(),radius:this.orbitRadius,theta:this.orbitTheta,phi:this.orbitPhi};
     const helpers = [...this.scene.children].filter(o => o.type === 'BoxHelper');
     try {
       if(time!==undefined)this.applyAnimation(time);else this.restoreBasePose();
       helpers.forEach(h=>h.visible=false);
-      const angles = {perspective:[0.7,1.05],front:[0,Math.PI/2],side:[Math.PI/2,Math.PI/2],top:[0,0.01]};
+      const angles = {perspective:[0.7,1.05],front:[0,Math.PI/2],side:[Math.PI/2,Math.PI/2],back:[Math.PI,Math.PI/2],left:[-Math.PI/2,Math.PI/2],top:[0,0.01]};
       [this.orbitTheta,this.orbitPhi] = angles[view];
       this.frameScene(targetIds?.length?new Set(targetIds):undefined);
       this.updateOrbitCamera(); this.markDirty(); this.render();
@@ -466,7 +470,7 @@ export class Viewport {
     this.nodeMap.clear();
     // 共享 geometry/material 缓解跨节点复用；文档级重建时一并清理
     for (const [, geo] of this.sharedGeometryCache) geo.dispose();
-    for (const [, mat] of this.materialCache) {mat.map?.dispose();mat.dispose();}
+    for (const [, mat] of this.materialCache) {disposeMaterialTextures(mat);}
     this.sharedGeometryCache.clear();
     this.materialCache.clear();
   }

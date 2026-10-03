@@ -1,3 +1,4 @@
+import {boundsFor} from '../domain/sceneQuality';
 import {focusSceneObjects} from '../scene/focus';
 import {useMemo,useState} from 'react';
 import { Geometry, type SceneDocument, type SceneNode } from '../domain/types';
@@ -34,7 +35,7 @@ export function PropertiesPanel() {
   if(selection.length>1){
     const ids=new Set(selection);const members=doc.nodes.filter(n=>ids.has(n.id));const assembly=node.assemblyId;
     const same=!!assembly&&members.every(n=>n.assemblyId===assembly)&&members.length===doc.nodes.filter(n=>n.assemblyId===assembly).length;
-    return <div className="p-4 bg-[#252A31] text-gray-200 text-sm h-full overflow-auto"><h3>{same?node.assemblyName??'组件':'多选对象'}</h3>{lockNotice}<FocusObject doc={doc} node={node}/><p className="text-xs text-gray-400 my-3">已选 {members.length} 个零件。外观修改只影响所选范围，可撤销。</p>
+    return <div className="p-4 bg-[#252A31] text-gray-200 text-sm h-full overflow-auto"><h3>{same?node.assemblyName??'组件':'多选对象'}</h3>{lockNotice}{status==='previewing'&&<button type="button" className="m-3 rounded bg-blue-600 p-2 text-xs" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</button>}<FocusObject doc={doc} node={node}/><p className="text-xs text-gray-400 my-3">已选 {members.length} 个零件。外观修改只影响所选范围，可撤销。</p>
       <fieldset disabled={locked} className="disabled:opacity-50">{same&&<div className="grid grid-cols-2 gap-2">{([['左移 1m',[-1,0,0]],['右移 1m',[1,0,0]],['前移 1m',[0,0,1]],['后移 1m',[0,0,-1]]] as const).map(([title,value])=><button key={title} className="rounded bg-white/10 p-2 text-xs" onClick={()=>{const r=applyCommandBatch([{op:'translateAssembly',targetId:node.id,value:[...value]}],title);if(!r.ok)window.alert(r.error);}}>{title}</button>)}</div>}
       {same&&<AssemblyTransformEditor nodes={members} wholeAssembly/>}
       <AppearanceEditor key={members.map(n=>n.id+':'+n.materialId).join('|')} doc={doc} nodes={members} wholeAssembly={same}/></fieldset>
@@ -56,7 +57,7 @@ export function PropertiesPanel() {
   return (
     <div className="flex flex-col h-full bg-[#252A31] text-gray-200">
       <div className="px-3 py-2 text-xs font-bold text-gray-400 border-b border-black/30 tracking-wider">属性</div>
-      {lockNotice}
+      {lockNotice}{status==='previewing'&&<button type="button" className="m-3 rounded bg-blue-600 p-2 text-xs" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</button>}
       <FocusObject doc={doc} node={node}/>
       <fieldset disabled={locked} className="flex-1 overflow-auto p-3 space-y-4 text-sm disabled:opacity-50">
         {/* 名称 */}
@@ -105,7 +106,7 @@ export function PropertiesPanel() {
           <div>
             <label className="block text-xs text-gray-400 mb-1">尺寸参数（{geometryNames[g.type]??g.type}）</label>
             <div className="space-y-1">
-              {Object.entries(g.params).map(([k, v]) => (
+              {Object.entries(g.params).filter(([,v])=>typeof v==='number').map(([k, v]) => (
                 <div key={k} className="flex items-center gap-2">
                   <span className="text-xs text-gray-400 w-28">{parameterLabel(k)}</span>
                   <input aria-label={parameterLabel(k)} type="number" step="any" key={`${node.id}:${k}:${v}`} defaultValue={v} className="min-w-0 w-full bg-black/30 border border-white/10 rounded px-2 py-1" onBlur={e=>{const value=Number(e.target.value);if(!e.target.value.trim()||!Number.isFinite(value)){e.target.value=String(v);return;}if(value===v)return;const geometry={...g,params:{...g.params,[k]:value}} as Geometry;const r=applyCommandBatch([{op:'updateParameters',targetId:node.id,geometry}],`修改 ${node.name} ${k}`);if(!r.ok){window.alert(r.error);e.target.value=String(v);}}} onKeyDown={e=>{if(e.key==='Enter')e.currentTarget.blur();}}/>
@@ -115,6 +116,9 @@ export function PropertiesPanel() {
           </div>
         )}
 
+        {g&&(g.type==='loft'||g.type==='sweepTube')&&<p className="text-xs text-gray-400">连续曲面模型；可通过对话调整截面或路径，位置、缩放和材质仍可编辑。</p>}
+        {g&&(g.type==='profile'||g.type==='lathe')&&<p className="text-xs text-gray-400">轮廓包含 {g.params.points.length} 个控制点；可通过对话修改轮廓，位置、缩放和材质仍可直接编辑。</p>}
+        {g?.type==='mesh'&&<p className="text-xs text-gray-400">导入网格：{g.params.positions.length/3} 顶点，{g.params.indices.length/3} 三角形。支持部件移动、旋转、缩放和材质修改；不支持通过尺寸字段重建拓扑。</p>}
         {/* 实际包围尺寸 */}
         {bbox && (
           <div>
@@ -127,7 +131,7 @@ export function PropertiesPanel() {
           </div>
         )}
 
-        <AssemblyTransformEditor nodes={[node]}/>
+        <AssemblyTransformEditor key={node.id} nodes={[node]}/>
         <AppearanceEditor key={node.id+':'+node.materialId} doc={doc} nodes={[node]} wholeAssembly={false}/>
       </fieldset>
     </div>
@@ -176,6 +180,7 @@ function AppearanceEditor({doc,nodes,wholeAssembly}:{doc:SceneDocument;nodes:Sce
 // 各几何类型的局部包围盒（米）
 function geomBbox(g: Geometry): [number, number, number] {
   switch (g.type) {
+    case 'loft':case 'sweepTube':case 'mesh':case 'lathe':case 'profile': {const b=boundsFor(g);return [b.max.x-b.min.x,b.max.y-b.min.y,b.max.z-b.min.z];}
     case 'capsule': return [g.params.radius*2,g.params.length+g.params.radius*2,g.params.radius*2];
     case 'tube': return [g.params.outerRadius*2,g.params.height,g.params.outerRadius*2];
     case 'trapezoid': return [Math.max(g.params.widthTop,g.params.widthBottom),g.params.height,g.params.depth];

@@ -1,3 +1,5 @@
+import {connectionReport} from './connections';
+import {buildPrimitiveGeometry} from '../scene/geometry';
 import {Box3,Matrix4,Quaternion,Vector3} from 'three';
 import type {Geometry,SceneDocument,SceneRole} from './types';
 export interface CompositionPlan {
@@ -13,6 +15,10 @@ interface Component {id:string;name:string;key:string;role?:SceneRole;nodes:numb
 export function boundsFor(g:Geometry):Box3{
  let size:[number,number,number];
  switch(g.type){
+  case 'loft':case 'sweepTube': {const geo=buildPrimitiveGeometry(g);geo.computeBoundingBox();const b=geo.boundingBox!.clone();geo.dispose();return b;}
+  case 'mesh': {const b=new Box3();const p=g.params.positions;for(let i=0;i<p.length;i+=3)b.expandByPoint(new Vector3(p[i],p[i+1],p[i+2]));return b;}
+  case 'lathe': {const r=Math.max(...g.params.points.map(p=>p[0]));return new Box3(new Vector3(-r,g.params.points[0][1],-r),new Vector3(r,g.params.points[g.params.points.length-1][1],r));}
+  case 'profile': return new Box3(new Vector3(Math.min(...g.params.points.map(p=>p[0])),Math.min(...g.params.points.map(p=>p[1])),-g.params.depth/2),new Vector3(Math.max(...g.params.points.map(p=>p[0])),Math.max(...g.params.points.map(p=>p[1])),g.params.depth/2));
   case 'box':case 'roundedPlate':case 'frame':size=[g.params.width,g.params.height,g.params.depth];break;
   case 'trapezoid':size=[Math.max(g.params.widthTop,g.params.widthBottom),g.params.height,g.params.depth];break;
   case 'capsule':size=[g.params.radius*2,g.params.length+g.params.radius*2,g.params.radius*2];break;
@@ -49,10 +55,18 @@ export function inspectSceneQuality(doc:SceneDocument,plan?:QualityPlan):Quality
    if(maxGap>1)issues.push(`输送连接间距线索：${link.from} → ${link.to}，部分对象与${link.via}的水平包围盒距离约${maxGap.toFixed(2)}m，请检查是否缺少连接段`);
   }
  }
+ const membersByGroup=new Map<string,SceneDocument['nodes']>();for(const n of doc.nodes){if(!n.visible)continue;const key=n.assemblyId??n.id;const group=membersByGroup.get(key)??[];group.push(n);membersByGroup.set(key,group);}
  const allMachines=components.filter(c=>c.role==='equipment'),machines=allMachines.slice(0,200);
  for(const c of components){
   const size=c.bounds.getSize(new Vector3());
   if(c.role==='equipment'&&c.nodes<=3)issues.push(`${c.name}只有${c.nodes}个可见部件，可能仍是占位形体，请近景核对结构`);
+  const members=membersByGroup.get(c.id)??[];
+  if(c.role==='equipment'&&c.nodes>=4&&c.materials.size===1)issues.push(`${c.name}仅使用一种材质；核对壳体、玻璃、裸金属和操作部位的层次，不要为凑数任意改色`);
+  if(c.role==='person'){
+    const torso=members.find(n=>/躯干|胸部|身体|body|torso/i.test(n.name));
+    if(torso?.geometry?.type==='box')issues.push(`${c.name}躯干仍为矩形块；请核对肩、胸腰、骨盆轮廓与肢体连接，避免积木人`);
+    if(!members.some(n=>/手|hand/i.test(n.name)))issues.push(`${c.name}未识别到手部；请检查手与作业台/控制器的实际关系`);
+  }
   if(c.role==='person'&&(size.y<1.3||size.y>2.2))issues.push(`${c.name}高度约${size.y.toFixed(2)}m；若为站立成年人，需核对比例（坐姿等可能合理）`);
  }
  // Bounding boxes are conservative candidates, never claims of exact collision.
@@ -64,5 +78,6 @@ export function inspectSceneQuality(doc:SceneDocument,plan?:QualityPlan):Quality
  for(const c of components.filter(c=>c.role==='floor'||c.role==='building')){
   if([...c.materials].some(id=>(doc.materials.find(m=>m.id===id)?.metalness??0)>.7))issues.push(`${c.name}使用高金属度材质，请确认墙地面是否确实需要金属表面`);
  }
+ for(const c of connectionReport(doc))if(c.status!=='within_tolerance')issues.push(`连接关系待修正：${c.purpose}，当前距离${c.distance?.toFixed(3)??'未知'}m，允许${c.maxDistance}m；需确认接触面与穿插`);
  return {revision:doc.revision,componentCount:components.length,roles,coverage,layout:components.slice(0,200).map(c=>({id:c.id,name:c.name,planKey:c.key,role:c.role,min:c.bounds.min.toArray(),max:c.bounds.max.toArray()})),issues:[...new Set(issues)].slice(0,24),notes:[...(components.length>200?['布局坐标仅列前200个组件，其他组件需按区域读取']:[]),...(allMachines.length>200?['包围盒交叠检查仅覆盖前200台设备，较大场景需要分区复核']:[]),'清单匹配依赖组件planKey；缺标注不一定代表缺模型','包围盒交叠只是检查线索，不等于实际几何碰撞','连接检查核对对象及输送包围盒间距，不证明接口相接或工艺正确','仍需近景与全景检查结构、人员动作、疏密和统一观感']};
 }
