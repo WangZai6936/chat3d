@@ -1,3 +1,4 @@
+import {progressOnlyChange} from './domain/workspaceSavePolicy';
 import { create } from 'zustand';
 import { useEditorStore, setWorkspacePersistenceActive, createInitialDoc, type EditorState } from './store';
 import { parseProject, serializeProject } from './domain/project';
@@ -30,13 +31,14 @@ function capture(){
   const w=useWorkspaceStore.getState();const snap=snapshot();
   useWorkspaceStore.setState({sessions:w.sessions.map(s=>s.id===w.activeId?{...s,snapshot:snap,updatedAt:Date.now(),title:s.autoTitle&&snap.messages.some(m=>m.role==='user')?(snap.messages.find(m=>m.role==='user')!.text.slice(0,24)||'图片建模'):s.title}:s)});
 }
-function schedule(){
+function schedule(progressOnly=false){
   if(hydrating||blocked||!useWorkspaceStore.getState().ready)return;
   capture();pending=true;useWorkspaceStore.setState({saving:true});
-  if(timer)clearTimeout(timer);timer=setTimeout(()=>void flushWorkspace(),250);
+  if(progressOnly&&timer)return;
+  if(timer)clearTimeout(timer);timer=setTimeout(()=>void flushWorkspace(),progressOnly?5000:250);
 }
 export async function flushWorkspace():Promise<void>{
-  if(timer)clearTimeout(timer);
+  if(timer)clearTimeout(timer);timer=undefined;
   if(saving)return new Promise<void>(resolve=>waiters.push(resolve));
   if(blocked||!pending)return;
   saving=true;pending=false;
@@ -97,7 +99,7 @@ export function restoreSession(id:string):void{
   if(blocked)return;useWorkspaceStore.setState(w=>({sessions:w.sessions.map(s=>s.id===id?{...s,deletedAt:null}:s)}));schedule();
 }
 useEditorStore.subscribe((s,prev)=>{
-  if(s.doc!==prev.doc||s.messages!==prev.messages||s.past!==prev.past||s.future!==prev.future||s.dirty!==prev.dirty||s.composerText!==prev.composerText||s.composerImages!==prev.composerImages||s.lastRun!==prev.lastRun||s.aiStatus!==prev.aiStatus||s.pendingBatch!==prev.pendingBatch||s.pendingResult!==prev.pendingResult)schedule();
+  if(s.doc!==prev.doc||s.messages!==prev.messages||s.past!==prev.past||s.future!==prev.future||s.dirty!==prev.dirty||s.composerText!==prev.composerText||s.composerImages!==prev.composerImages||s.lastRun!==prev.lastRun||s.aiStatus!==prev.aiStatus||s.pendingBatch!==prev.pendingBatch||s.pendingResult!==prev.pendingResult)schedule(progressOnlyChange(s,prev));
 });
 
 /** Portable local backup. No model configuration or browser credentials are included. */

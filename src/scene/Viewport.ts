@@ -412,7 +412,7 @@ export class Viewport {
     this.selectionHelpers = [];
   }
 
-  async captureDocument(doc: SceneDocument, view: 'perspective' | 'front' | 'side' | 'back' | 'left' | 'top', targetIds?:string[],time?:number): Promise<string> {
+  async captureDocument(doc: SceneDocument, view: 'perspective' | 'front' | 'side' | 'back' | 'left' | 'top' | 'bottom' | 'underside', targetIds?:string[],time?:number): Promise<string> {
     if(this.renderer.getContext().isContextLost())throw new Error('WebGL 上下文丢失，无法截图');
     if(this.host.clientWidth<=0 || this.host.clientHeight<=0)throw new Error('视口不可见，无法截图');
     this.sync(doc);await Promise.all([...this.materialCache.values()].map(m=>materialReady.get(m)??Promise.resolve()));if(this.lastSyncedDoc!==doc)throw Error('贴图加载期间场景已变化，请重新截图');
@@ -422,7 +422,7 @@ export class Viewport {
     try {
       if(time!==undefined)this.applyAnimation(time);else this.restoreBasePose();
       helpers.forEach(h=>h.visible=false);
-      const angles = {perspective:[0.7,1.05],front:[0,Math.PI/2],side:[Math.PI/2,Math.PI/2],back:[Math.PI,Math.PI/2],left:[-Math.PI/2,Math.PI/2],top:[0,0.01]};
+      const angles = {perspective:[0.7,1.05],front:[0,Math.PI/2],side:[Math.PI/2,Math.PI/2],back:[Math.PI,Math.PI/2],left:[-Math.PI/2,Math.PI/2],top:[0,0.01],bottom:[0,Math.PI-0.01],underside:[Math.PI/4,Math.PI-Math.atan(Math.SQRT1_2)]};
       [this.orbitTheta,this.orbitPhi] = angles[view];
       this.frameScene(targetIds?.length?new Set(targetIds):undefined);
       this.updateOrbitCamera(); this.markDirty(); this.render();

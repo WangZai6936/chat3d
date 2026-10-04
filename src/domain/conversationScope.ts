@@ -17,3 +17,22 @@ export function conversationScope(text:string,doc:SceneDocument,selection:string
  if(/这台|(?:选中的?|该)设备|组件/.test(text))for(const n of doc.nodes)if(ids.has(n.id)&&n.assemblyId)for(const member of doc.nodes)if(member.assemblyId===n.assemblyId)ids.add(member.id);
  if(ids.size){scope.nodeIds=[...ids];scope.allowAssemblyAdditions=true;}return scope;
 }
+
+// Ignore explicitly excluded scene clauses, while retaining positive scene requests.
+export function requestsFullScene(text:string):boolean {
+ return text.split(/[，,。；;\n]|但是|但|\bbut\b/i).some(clause=> {
+  const mention=/车间|产线|仓库|工厂|workshop|factory|warehouse|production line/i;
+  if(!mention.test(clause))return false;
+  const excluded=/(?:不要|不用|无需|不需要|不必|禁止|不能|别|不)(?:再|额外)?(?:创建|生成|建立|添加|制作|建造|做|建|画)|(?:do not|don't|without|no|not|never)\s+(?:(?:create|generate|build|add)\s+)?(?:a\s+|an\s+|any\s+)?(?:workshop|factory|warehouse|production line)/i;
+  return !excluded.test(clause);
+ });
+}
+
+// The explicit UI boundary is enforced independently of language interpretation.
+export function userEditScope(text:string,doc:SceneDocument,selection:string[],mode:'scene'|'selection',lockPlacement=false,history:{role:string;text:string}[]=[]):EditScope {
+ const inferred=conversationScope(text,doc,selection,lockPlacement,history);
+ if(mode==='scene')return inferred;
+ const ids=[...new Set(selection)];
+ if(!ids.length||ids.some(id=>!doc.nodes.some(n=>n.id===id)))throw Error('请先选择要修改的对象，或将修改范围切换为全场景');
+ return {...inferred,nodeIds:ids,allowAssemblyAdditions:true};
+}

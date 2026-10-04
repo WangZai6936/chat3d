@@ -42,6 +42,7 @@ export function sceneChanges(before:SceneDocument,after:SceneDocument):SceneChan
   if(!same(before.materials.find(m=>m.id===a.materialId),after.materials.find(m=>m.id===n.materialId)))fields.push('颜色/材质');
   if(a.visible!==n.visible)fields.push('显示状态');if(a.name!==n.name)fields.push('名称');
   if(a.sceneRole!==n.sceneRole||a.planKey!==n.planKey||a.zone!==n.zone||a.label!==n.label)fields.push('区域/分类/标注');
+  if(!same(a.modelStructure,n.modelStructure))fields.push('结构关联');
   if(a.assemblyId!==n.assemblyId||a.parentId!==n.parentId||a.assemblyName!==n.assemblyName)fields.push('分组');
   if(fields.length)out.push(entry(n,'modified',fields));
  }

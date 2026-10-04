@@ -38,14 +38,25 @@ function numeral(text:string):number{
  if(text.includes('点')){const [whole,fraction]=text.split('点');return numeral(whole)+Number('0.'+[...fraction].map(c=>digit[c]??c).join(''));}
  let total=0,current=0;for(const c of text){if(c in digit)current=digit[c];else {total+=(current||1)*({'十':10,'百':100,'千':1000}[c]??NaN);current=0;}}return total+current;
 }
+// Expand only contiguous, explicitly labelled dimensions with a shared trailing unit.
+// No propagation across sentences or unrelated counts; preserve the original evidence quote.
+function dimensionQuote(quote:string):string{
+ const label='(?:总长|长度?|总宽|宽度?|总高|高度?|深度?|纵深|length|width|height|depth)';
+ const number='[0-9零〇一二两三四五六七八九十百千]+(?:[.点][0-9零〇一二两三四五六七八九]+)?';
+ const unit='(?:毫米|厘米|mm|cm|米|m)';
+ const field=label+'\\s*(?:约为|大约|约|为|是|:|：|=)?\\s*'+number;
+ const chain=new RegExp(field+'\\s*'+unit+'?(?:\\s*[、，,]\\s*'+field+'\\s*'+unit+'?){1,5}','gi');
+ return quote.replace(chain,block=>{const trailing=block.match(new RegExp('('+unit+')\\s*$','i'));if(!trailing)return block;return block.replace(new RegExp('('+field+')\\s*('+unit+')?','gi'),(_all,value,u)=>value+(u??trailing[1]));});
+}
 function quotedNumbers(r:Requirement):number[]{
  const n='([0-9零〇一二两三四五六七八九十百千]+(?:[.点][0-9零〇一二两三四五六七八九]+)?)';
  if(r.kind!=='count'){
   const label={length:'(?:总长|长度?|length)',height:'(?:总高|高度?|height)',width:'(?:总宽|宽度?|width)',depth:'(?:深度?|纵深|depth)'}[r.kind as 'length'|'height'|'width'|'depth'];
   if(!label)return [];
   const unit='(毫米|厘米|mm|cm|米|m)';
-  const expressions=[new RegExp(label+'\\s*(?:为|是|:|：|=)?\\s*'+n+'\\s*'+unit,'gi'),new RegExp(n+'\\s*'+unit+'\\s*'+label+'(?!\\s*(?:为|是|:|：|=)?\\s*[0-9零〇一二两三四五六七八九十百千])','gi')];
-  return expressions.flatMap(expression=>[...r.quote.matchAll(expression)].map(m=>numeral(m[1])*(['毫米','mm'].includes(m[2].toLowerCase())?.001:['厘米','cm'].includes(m[2].toLowerCase())?.01:1)));
+  const quote=dimensionQuote(r.quote);
+  const expressions=[new RegExp(label+'\\s*(?:约为|大约|约|为|是|:|：|=)?\\s*'+n+'\\s*'+unit,'gi'),new RegExp(n+'\\s*'+unit+'\\s*'+label+'(?!\\s*(?:约为|大约|约|为|是|:|：|=)?\\s*[0-9零〇一二两三四五六七八九十百千])','gi')];
+  return expressions.flatMap(expression=>[...quote.matchAll(expression)].map(m=>numeral(m[1])*(['毫米','mm'].includes(m[2].toLowerCase())?.001:['厘米','cm'].includes(m[2].toLowerCase())?.01:1)));
  }
  const expression=new RegExp(n+'\\s*(?:个|台|组|套|座|架|排|列|条|根|张)','g');
  const matches=[...r.quote.matchAll(expression)];
@@ -54,7 +65,7 @@ function quotedNumbers(r:Requirement):number[]{
 }
 export function mergeRequirements(previous:Requirement[],incoming:Requirement[],userTexts:string[]):Requirement[]{
  const source=userTexts.join('\n');
- for(const r of incoming){if(!r.quote.trim()||!source.includes(r.quote)||!r.target.trim()||!source.includes(r.target))throw new Error('需求原文和目标名称必须来自用户实际指令，不能用模型假设代替');if(['count','length','height','width','depth'].includes(r.kind)&&!quotedNumbers(r).some(n=>Math.abs(n-Number(r.expected))<1e-8))throw new Error('期望数值必须对应引用原文的同一维度或数量（尺寸换算为米）；不确定时用other标为待核对');}
+ for(const r of incoming){if(!r.quote.trim()||!source.includes(r.quote)||!r.target.trim()||!source.includes(r.target))throw new Error('需求原文和目标名称必须来自用户实际指令，不能用模型假设代替');if(['count','length','height','width','depth'].includes(r.kind)&&!quotedNumbers(r).some(n=>Math.abs(n-Number(r.expected))<1e-8))throw new Error(`期望数值必须对应引用原文的同一维度或数量（尺寸换算为米）：${r.target}/${r.kind}=${r.expected}；该维度解析值为[${quotedNumbers(r).join(',')}]。不确定时用other标为待核对`);}
  const result=[...previous];for(const original of incoming){
   const r={...original};
   if(['length','width','depth','height'].includes(r.kind)){

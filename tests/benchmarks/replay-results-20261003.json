@@ -1,0 +1,65 @@
+{
+  "generatedAt": "2026-10-03T19:33:14.225Z",
+  "kind": "offline_historical_scene_replay",
+  "results": [
+    {
+      "caseId": "machining-workshop-full-v1",
+      "sourceVersion": "v57",
+      "sourceSha256": "cbcf27272bdbf7b3cad508942268ba13b20925814d86001e2e5f6b297cbc80a4",
+      "nodes": 763,
+      "groups": 22,
+      "allComponentsAssetRoundtrip": true,
+      "render": {
+        "width": 640,
+        "height": 480,
+        "degraded": false
+      },
+      "dataIssueCount": 5,
+      "occupancyCandidates": 5,
+      "elapsedMs": 3092,
+      "visualQuality": "not_accepted",
+      "generationPerformanceComparable": false,
+      "modelCalls": 0
+    },
+    {
+      "caseId": "warehouse-full-v1",
+      "sourceVersion": "v62",
+      "sourceSha256": "0d8c5603014014443e8bd055efdff07013b07a1dea84c994cf4ae2b7e94c5066",
+      "nodes": 561,
+      "groups": 29,
+      "allComponentsAssetRoundtrip": true,
+      "render": {
+        "width": 640,
+        "height": 480,
+        "degraded": false
+      },
+      "dataIssueCount": 15,
+      "occupancyCandidates": 15,
+      "elapsedMs": 2280,
+      "visualQuality": "not_accepted",
+      "generationPerformanceComparable": false,
+      "modelCalls": 0
+    },
+    {
+      "caseId": "assembly-line-full-v1",
+      "sourceVersion": "v66-recovery",
+      "sourceSha256": "1818bce916533efb02bc45eb9acb9926687dbcb648cb7d937c9b6018217be56f",
+      "nodes": 391,
+      "groups": 14,
+      "allComponentsAssetRoundtrip": true,
+      "render": {
+        "width": 640,
+        "height": 480,
+        "degraded": false
+      },
+      "dataIssueCount": 8,
+      "occupancyCandidates": 2,
+      "elapsedMs": 1082,
+      "visualQuality": "not_accepted",
+      "generationPerformanceComparable": false,
+      "modelCalls": 0
+    }
+  ],
+  "limitations": "No new model generation, no model-token efficiency conclusion, no PBR/texture/shadow or semantic visual acceptance. Data and geometry replay only.",
+  "productSourceCommit": "baabfcd6c9961b26b12273be28ba6ab6f9ad1aa7"
+}

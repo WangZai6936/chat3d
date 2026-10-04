@@ -14,6 +14,13 @@ try{
  await test('only user-sourced requirements are accepted and newer values replace the same target kind',()=>{const a={quote:'四个货架',target:'货架',kind:'count',expected:'4'};const b={...a,quote:'六个货架',expected:'6'};assert.equal(mergeRequirements([a],[b],['四个货架','六个货架']).length,1);assert.equal(mergeRequirements([a],[b],['四个货架','六个货架'])[0].expected,'6');assert.throws(()=>mergeRequirements([],[a],['一个桌子']),/用户实际指令/);});
  await test('expected values must agree with quoted quantities and convert centimetres to metres',()=>{const a={quote:'四个货架',target:'货架',kind:'count',expected:'1'};assert.throws(()=>mergeRequirements([],[a],['四个货架']),/期望数值/);const b={quote:'货架高800厘米',target:'货架',kind:'height',expected:'8'};assert.equal(mergeRequirements([],[b],[b.quote])[0].expected,'8');});
  await test('diagnostics allowlist cannot leak credentials, scene text, URLs or raw tool errors',()=>{const secret='secret-value';const a={turn:2,toolCalls:1,inputTokens:10,outputTokens:20,title:secret,events:[secret],timings:[{kind:'tool',label:secret,detail:secret,startedAt:1,endedAt:2,failed:true}]};const json=JSON.stringify(runDiagnostics('error',a,'HTTP 401 '+secret+' https://private.example'));assert.ok(!json.includes(secret));assert.ok(!json.includes('private.example'));assert.match(json,/401/);});
+ await test('shared trailing units and approximate dimensions keep evidence axis specific',()=>{
+  for(const [quote,values] of [['桌子长1.2、宽0.8、高0.75米',[1.2,.8,.75]],['桌子长120、宽80、高75厘米',[1.2,.8,.75]],['桌子长约1.2、宽约0.8、高约0.75米',[1.2,.8,.75]]]){
+   for(const [i,kind] of ['length','width','height'].entries())assert.equal(mergeRequirements([],[{quote,target:'桌子',kind,expected:String(values[i])}],[quote])[0].expected,String(values[i]));
+   assert.throws(()=>mergeRequirements([],[{quote,target:'桌子',kind:'height',expected:'1.2'}],[quote]),/期望数值/);
+  }
+  for(const quote of ['桌子宽2，另有3米布','桌子宽2、高3','桌子宽2。高3米'])assert.throws(()=>mergeRequirements([],[{quote,target:'桌子',kind:'width',expected:'2'}],[quote]),/期望数值/);
+ });
  await test('dimension evidence binds width height and depth, never a different number from the same quote',()=>{
  for(const quote of ['货架宽2米高3米深1米','货架宽2米、高3米、深1米','货架宽200厘米，高300厘米，深100厘米','货架2米宽、3米高、1米深']){
   const req={quote,target:'货架',kind:'height',expected:'2'};assert.throws(()=>mergeRequirements([],[req],[quote]),/期望数值/);

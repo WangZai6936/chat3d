@@ -1,0 +1,4 @@
+export const OPTIONAL_TOOL_GROUPS={animation:['configure_animation','configure_process_route','preview_animation'],surfaces:['set_surface_detail','set_surfaces_batch','prepare_surface_uv'],interaction:['create_hand_pose','pose_arm_interaction','pose_bimanual_interaction']} as const;
+export type OptionalToolGroup=keyof typeof OPTIONAL_TOOL_GROUPS;
+export function toolGroupNeeded(group:OptionalToolGroup,text:string){if(group==='interaction')return /人物|人员|手部|手掌|手臂|握持|按压|搬运|承托|支撑|操作员|工人|worker|person|hand|grip|press/i.test(text);return group==='animation'?/动画|动作|动起来|运动|animation|motion|animate/i.test(text):/贴图|纹理|UV|texture|surface detail/i.test(text);}
+export function exposeTools<T extends {name:string}>(tools:T[],enabled:Set<OptionalToolGroup>){return tools.filter(t=>!Object.entries(OPTIONAL_TOOL_GROUPS).some(([group,names])=>(names as readonly string[]).includes(t.name)&&!enabled.has(group as OptionalToolGroup)));}

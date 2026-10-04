@@ -1,3 +1,4 @@
+import type {TaskBudget} from './taskBudget';
 import type {EditScope} from '../domain/editScope';
 import type {AnimationProgram} from '../domain/animation';
 import {createBrowserProxyFetch} from './transport';
@@ -18,6 +19,8 @@ export interface ModelConfig {
   apiKey: string;
   model: string; // 如 gpt-4o-mini
   agentMode?: 'pi' | 'single';
+  taskBudget?: Partial<TaskBudget>;
+  parallelDrafts?: boolean; // 实验：最多两个隔离子草稿，默认关闭
   stream?: boolean; // 默认流式；不支持 SSE 的服务可关闭
   useMock?: boolean; // 仅识别旧配置；true 时要求重新配置真实模型
 }
@@ -185,8 +188,8 @@ duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id�
      trapezoid: widthTop,widthBottom,height,depth。XY梯形沿Z拉伸；上窄下宽或上宽下窄，适合斜面机罩、底座、人体躯干。组合局部旋转可改变斜面方向。
      loft: rings=[{center:[x,y,z],radiusX, radiusZ},...]，2–32个椭圆截面，Y严格递增、半径>0，segments=8–64。连续封闭放样，支持偏心和宽深独立变化，用于收腰躯干、曲面外壳、软垫、渐变形体；不要再用箱体冒充曲面。
      sweepTube: points=[[x,y,z],...]为2–32个连续曲线控制点，radius为圆管半径，segments=8–128，radialSegments=8–32；沿真实路径生成连续曲线管，用于软管、线缆、弯曲扶手/枝条。两端开放，按用途加接头，不等于流体仿真。
-     lathe: points=[[半径,高度],...]为Y轴旋转剖面，2–32点，高度严格递增，半径非负；segments=8–64。用于渐变壳体、人体躯干/肢体等，非均匀缩放可形成椭圆截面。轮廓不是自动居中。
-     profile: points=[[x,y],...]为3–32点有序凸多边形，depth沿Z对称挤出。用于斜切机壳、护罩、人体轮廓，禁止自交；真实开口仍用frame/tube，不能实心覆盖。
+     lathe: smooth=true可将径向控制剖面做保形三次平滑插值，适合陶瓷、圆滑壳体和有机收分；保留直线/台阶设计时不启用。points=[[半径,高度],...]为Y轴旋转剖面，2–32点，高度严格递增，半径非负；segments=8–64。用于连续旋转曲面，非均匀缩放可形成椭圆截面。默认两端不封口；实心底座必须明确capStart:true,capEnd:true，避免中心意外开洞。薄壁灯罩/漏斗用wallThickness（正且小于所有半径）生成真实内外壁与端缘，保持两端开口，不能与端盖同用。禁止用多层tube环堆成锥形罩；连续收分用一个lathe。轮廓不是自动居中。示例实心底座points:[[.14,0],[.15,.01],[.14,.035],[.02,.045]],segments:64,capStart:true,capEnd:true；薄壳points:[[.08,0],[.07,.035],[.045,.08],[.018,.11]],segments:64,wallThickness:.002。
+     profile: points=[[x,y],...]为3–64点有序简单凹或凸多边形，depth沿Z对称挤出；holes可选，为最多8个内部多边形孔（每孔3–64点），孔严格位于外轮廓内且不接触、相交或嵌套。cornerRadius可选为二维轮廓圆角控制距离（非恒定半径/非厚度方向倒角），需不超过最短边或轮廓间距的24%；窄缝避免大圆角。edgeRadius可选，为厚度边缘的内收倒圆，严格小于depth一半，且edgeRadius+cornerRadius不超过上述安全间距；保持整体外边界与总厚度，不封闭内部孔。无需重复首点。用于任意连续板件、支撑剪影、建筑轮廓与贯通开口；禁止自交。圆孔用适量圆周采样点描述；不以深色贴片冒充开孔。
      roundedPlate: width,height,depth,cornerRadius,holeRadius(可选，默认0)。水平 XZ 圆角轮廓，厚度沿Y，中心圆孔沿Y贯穿。cornerRadius>0且<=短边/2；holeRadius>=0且<短边/2。
      box: width,height,depth
      cylinder: radiusTop,radiusBottom,height,radialSegments(建议 16-32)
@@ -272,9 +275,9 @@ export function parseModelResponse(raw: string): GeneratedBatch {
       warns.push(`跳过不支持的命令「${opType || '(空)'}」`);
       continue;
     }
-    const cleaned = cleanCommand(opType, op);
+    const diagnostics:string[]=[];const cleaned = cleanCommand(opType, op,diagnostics);
     if (cleaned) operations.push(cleaned);
-    else warns.push(`跳过参数不合法的命令「${opType}」`);
+    else warns.push(`跳过参数不合法的命令「${opType}」${diagnostics.length?'：'+diagnostics.join('；'):''}`);
   }
 
   if (operations.length === 0 && (obj.operations.length > 0 || !obj.summary || typeof obj.summary !== 'string')) {
@@ -368,13 +371,13 @@ function cleanTargetId(op: Record<string, unknown>): string | null {
   return typeof t === 'string' && t.trim() ? t.trim() : null;
 }
 
-function cleanCommand(opType: string, op: Record<string, unknown>): Command | null {
+function cleanCommand(opType: string, op: Record<string, unknown>,diagnostics:string[]=[]): Command | null {
   switch (opType) {
     case 'createAssembly': {
       if(!Array.isArray(op.parts))return null;const position=op.position===undefined?[0,0,0] as [number,number,number]:toVec3(op.position),yaw=op.yaw===undefined?0:toNum(op.yaw);if(!position||yaw===null||typeof op.name!=='string')return null;
       const parts:AssemblyPart[]=[];for(const value of op.parts){if(!value||typeof value!=='object')return null;const p=value as Record<string,unknown>,geometry=cleanGeometry(p.geometry);if(!geometry||typeof p.name!=='string')return null;let repeat:AssemblyPart['repeat'];if(p.repeat!==undefined){const r=p.repeat as {count?:unknown;step?:unknown};if(!r||typeof r!=='object')return null;const count=toNum(r.count),step=toVec3(r.step);if(count===null||!step)return null;repeat={count,step};}if(p.label!==undefined&&(typeof p.label!=='string'||p.label.length>80))return null;parts.push({name:p.name,...(typeof p.label==='string'?{label:p.label}:{}),geometry,transform:cleanTransform(p.transform),materialId:typeof p.materialId==='string'&&KNOWN_MATERIALS.has(p.materialId)?p.materialId:(p.materialId===undefined&&typeof op.sceneRole==='string'?SCENE_ROLE_MATERIALS[op.sceneRole as SceneRole]??'mat_gray':'mat_gray'),...(repeat?{repeat}:{})});}
       if(op.sceneRole!==undefined&&(typeof op.sceneRole!=='string'||!SCENE_ROLES.includes(op.sceneRole as SceneRole)))return null;
-      const definition={name:op.name,position,yaw,parts,...(typeof op.sceneRole==='string'?{sceneRole:op.sceneRole as SceneRole}:{}),...(typeof op.planKey==='string'?{planKey:op.planKey}:{}),...(typeof op.zone==='string'?{zone:op.zone}:{} )};try{buildAssembly(definition);}catch{return null;}return {op:'createAssembly',...definition,tempId:typeof op.tempId==='string'?op.tempId:undefined};
+      const definition={name:op.name,position,yaw,parts,...(typeof op.sceneRole==='string'?{sceneRole:op.sceneRole as SceneRole}:{}),...(typeof op.planKey==='string'?{planKey:op.planKey}:{}),...(typeof op.zone==='string'?{zone:op.zone}:{} )};try{buildAssembly(definition);}catch(error){diagnostics.push(error instanceof Error?error.message:'组合参数无效');return null;}return {op:'createAssembly',...definition,tempId:typeof op.tempId==='string'?op.tempId:undefined};
     }
     case 'transformAssembly': {
       const targetId=cleanTargetId(op);if(!targetId)return null;

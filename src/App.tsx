@@ -1,3 +1,4 @@
+import {AssetLibrary} from './ui/AssetLibrary';
 import {probeServerRenderer} from './scene/serverCapture';
 import {importGlb} from './scene/importGlb';
 import {WorkspaceTools} from './ui/WorkspaceTools';
@@ -83,6 +84,7 @@ export default function App() {
 
   const workspace=useWorkspaceStore();
   const active=workspace.sessions.find(s=>s.id===workspace.activeId);
+  const [showAssets,setShowAssets]=useState(false);
   const [sidebarOpen,setSidebarOpen]=useState(false);
   const [inspectorOpen,setInspectorOpen]=useState(false);
   const [assistantTab,setAssistantTab]=useState<'chat'|'tasks'>('chat');
@@ -100,12 +102,15 @@ export default function App() {
           <div className="project-heading"><span>建模工作台 <ChevronRightIcon/></span><strong>{active?.title??'正在恢复工作台…'}</strong></div>
           <Badge color={workspace.error?'red':workspace.saving?'amber':'gray'} variant="soft" className="save-badge">{workspace.error?'保存异常':workspace.saving?'正在保存':'会话已自动保存到本浏览器'}</Badge>
           <div className="header-spacer"/><Button variant="ghost" color="gray" aria-pressed={focusScene} onClick={()=>setFocusScene(!focusScene)}>{focusScene?'恢复工作台':'专注场景'}</Button>
+          <Button disabled={locked||!workspace.ready} variant="soft" onClick={()=>setShowAssets(true)}>模型资产库</Button>
           <Button aria-label="模型配置" variant="soft" color="gray" onClick={()=>setShowSettings(true)}><GearIcon/><span className="config-label">模型配置</span></Button>
           <DropdownMenu.Root><DropdownMenu.Trigger><Button variant="solid" disabled={locked||!workspace.ready}>项目 <ChevronDownIcon/></Button></DropdownMenu.Trigger><DropdownMenu.Content>
             <DropdownMenu.Item onSelect={()=>setShowTools(true)}>工作台检查与备份</DropdownMenu.Item>
             <DropdownMenu.Item onSelect={()=>fileRef.current?.click()}><UploadIcon/>导入项目到新会话</DropdownMenu.Item>
             <DropdownMenu.Item onSelect={()=>modelFileRef.current?.click()}>导入网格模型 GLB（静态）</DropdownMenu.Item>
+            <DropdownMenu.Label>保存工程：可重新打开编辑（JSON）</DropdownMenu.Label>
             <DropdownMenu.Item onSelect={saveProject}><DownloadIcon/>下载项目 JSON</DropdownMenu.Item>
+            <DropdownMenu.Label>交付模型：供其他三维工具使用（GLB，无动画）</DropdownMenu.Label>
             <DropdownMenu.Item disabled={exporting||nodeCount===0} onSelect={()=>void downloadGlb()}><CubeIcon/>{exporting?'导出中…':'导出模型 GLB'}</DropdownMenu.Item>
           </DropdownMenu.Content></DropdownMenu.Root>
           <input ref={fileRef} type="file" accept=".json,.chat3d.json" className="hidden" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void openProject(file);}}/>
@@ -118,9 +123,10 @@ export default function App() {
             <div className={`scene-stage ${inspectorOpen?'with-inspector':''}`}><ViewportPanel/>{inspectorOpen&&<aside className="inspector-panel"><Tabs.Root defaultValue="objects"><Tabs.List><Tabs.Trigger value="objects">对象列表</Tabs.Trigger><Tabs.Trigger value="properties">选中属性</Tabs.Trigger></Tabs.List><Tabs.Content value="objects"><ObjectTree/></Tabs.Content><Tabs.Content value="properties"><PropertiesPanel/></Tabs.Content></Tabs.Root><IconButton className="inspector-close" size="1" variant="ghost" color="gray" aria-label="关闭属性面板" onClick={()=>setInspectorOpen(false)}><Cross1Icon/></IconButton></aside>}</div>
             <footer className="scene-footer"><span><span className="status-dot"/>{previewing?'预览尚未提交':locked?'正在处理草稿':'可编辑场景'}</span><span>单位 m · Y 轴向上</span><span>{dirty?'当前修改尚未导出备份':'项目文件无待导出修改'}</span></footer>
           </main>
-          <aside className="conversation-region"><div className="conversation-heading"><div className="assistant-tabs" role="tablist" aria-label="助手工作区" onKeyDown={e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const next=e.key==='Home'?'chat':e.key==='End'?'tasks':assistantTab==='chat'?'tasks':'chat';setAssistantTab(next);document.getElementById(next==='chat'?'chat-tab':'task-tab')?.focus();}}}><button role="tab" id="chat-tab" tabIndex={assistantTab==='chat'?0:-1} aria-controls="chat-content" aria-selected={assistantTab==='chat'} onClick={()=>setAssistantTab('chat')}><ChatBubbleIcon/>对话</button><button role="tab" id="task-tab" tabIndex={assistantTab==='tasks'?0:-1} aria-controls="task-content" aria-selected={assistantTab==='tasks'} onClick={()=>setAssistantTab('tasks')}>任务记录{locked&&<span className="tab-activity"/>}</button></div><Badge color="gray" variant="soft">{!aiConfig||aiConfig.useMock?'未连接模型':aiConfig?.agentMode==='single'?'单次生成':'Pi Agent'}</Badge></div><div role="tabpanel" id="chat-content" aria-labelledby="chat-tab" hidden={assistantTab!=='chat'} className="assistant-content"><ChatPanel key={workspace.activeId} executionDetails={false} onConfigure={()=>setShowSettings(true)}/></div><div role="tabpanel" id="task-content" aria-labelledby="task-tab" hidden={assistantTab!=='tasks'} className="assistant-content"><TaskPanel onConversation={()=>setAssistantTab('chat')}/></div></aside>
+          <aside className="conversation-region"><div className="conversation-heading"><div className="assistant-tabs" role="tablist" aria-label="助手工作区" onKeyDown={e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const next=e.key==='Home'?'chat':e.key==='End'?'tasks':assistantTab==='chat'?'tasks':'chat';setAssistantTab(next);document.getElementById(next==='chat'?'chat-tab':'task-tab')?.focus();}}}><button role="tab" id="chat-tab" tabIndex={assistantTab==='chat'?0:-1} aria-controls="chat-content" aria-selected={assistantTab==='chat'} onClick={()=>setAssistantTab('chat')}><ChatBubbleIcon/>对话</button><button role="tab" id="task-tab" tabIndex={assistantTab==='tasks'?0:-1} aria-controls="task-content" aria-selected={assistantTab==='tasks'} onClick={()=>setAssistantTab('tasks')}>任务记录{locked&&<span className="tab-activity"/>}</button></div><Badge color="gray" variant="soft">{!aiConfig||aiConfig.useMock?'未连接模型':aiConfig?.agentMode==='single'?'单次生成':'Pi Agent'}</Badge></div><div role="tabpanel" id="chat-content" aria-labelledby="chat-tab" hidden={assistantTab!=='chat'} className="assistant-content"><ChatPanel key={workspace.activeId} executionDetails={false} onAssets={()=>setShowAssets(true)} onConfigure={()=>setShowSettings(true)}/></div><div role="tabpanel" id="task-content" aria-labelledby="task-tab" hidden={assistantTab!=='tasks'} className="assistant-content"><TaskPanel onConversation={()=>setAssistantTab('chat')}/></div></aside>
         </div>}
       </section>
+      {showAssets&&<AssetLibrary onClose={()=>setShowAssets(false)}/>}
       {showTools&&<WorkspaceTools onClose={()=>setShowTools(false)}/>}
       {showSettings&&<SettingsDialog onClose={()=>setShowSettings(false)}/>}
     </div>

@@ -12,5 +12,9 @@ test('colloquial explicit movement unlocks while negatives quotes questions and 
  for(const text of ['创建挪威风格的车间','不要向左挪两米','保持位置，只改颜色','是否向左挪两米？','标注“向左挪两米”','只改颜色'])assert.equal(conversationScope(text,before,[],true,[{role:'user',text:'向左挪两米'}]).lockPlacement,true,text);
  const scope=conversationScope('只挪选中对象向左两米',before,[before.nodes[0].id],true);assert.deepEqual(scope.nodeIds,[before.nodes[0].id]);assert.equal(scope.lockPlacement,undefined);
 });
+ const {userEditScope}=await server.ssrLoadModule('/src/domain/conversationScope.ts');
+ test('explicit UI selection boundary cannot be widened by prompt or inferred component expansion',()=>{const selected=[before.nodes[0].id];for(const text of ['修改全场景','不要只修改选中对象，其他也要改','只修改这台设备'])assert.deepEqual(userEditScope(text,before,selected,'selection').nodeIds,selected);});
+ test('empty or stale explicit selection fails closed instead of reverting to whole scene',()=>{assert.throws(()=>userEditScope('创建模型',before,[],'selection'),/选择/);assert.throws(()=>userEditScope('改颜色',before,['stale'],'selection'),/选择/);});
+ test('whole-scene mode keeps literal user restrictions and selected edits retain placement intent',()=>{assert.deepEqual(userEditScope('改全部',before,[],'scene'),{});assert.deepEqual(userEditScope('只修改选中对象',before,[before.nodes[0].id],'scene').nodeIds,[before.nodes[0].id]);assert.equal(userEditScope('不要移动，只改颜色',before,[before.nodes[0].id],'selection',true).lockPlacement,true);});
  console.log(`${passed} scope and diff checks passed`);
 }finally{await server.close()}

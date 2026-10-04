@@ -5,7 +5,7 @@ const server=await createServer({server:{middlewareMode:true},appType:'custom'})
 let passed=0;let forceTransportError=false;
 const test=async(name,fn)=>{await fn();passed++;console.log('PASS',name)};
 try{
- const {runModelingAgent,compactAgentContext}=await server.ssrLoadModule('/src/ai/modelingAgent.ts');
+ const {runModelingAgent,compactAgentContext,agentSceneContext}=await server.ssrLoadModule('/src/ai/modelingAgent.ts');
  const {normalizeModelingRequestText,normalizeModelingRequestMessages}=await server.ssrLoadModule('/src/ai/modelingRequest.ts');
  const {createInitialDoc,useEditorStore:store}=await server.ssrLoadModule('/src/store.ts');
  const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');
@@ -21,6 +21,94 @@ try{
  const picture='data:image/jpeg;base64,YWJj';
  const fake=(steps)=>{let n=0;const contexts=[];const fn=async(model,context)=>{contexts.push(structuredClone(context));const step=steps[n++]??'done';const actions=typeof step==='function'?step(context):step;const content=Array.isArray(actions)?actions.map((a,i)=>({type:'toolCall',id:`call_${n}_${i}`,name:a.name,arguments:a.args})):[{type:'text',text:actions}];const message={role:'assistant',content,api:'openai-completions',provider:'mock',model:'mock',stopReason:Array.isArray(actions)?'toolUse':'stop',timestamp:Date.now(),usage:{input:20,output:10,cacheRead:0,cacheWrite:0,totalTokens:30,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};const stream=createAssistantMessageEventStream();queueMicrotask(()=>{stream.push({type:'start',partial:message});stream.push({type:'done',reason:message.stopReason,message})});return stream};return {fn,contexts,get calls(){return n}}};
  const opts=(transport,document=createInitialDoc())=>({text:'按参考图建模',config:cfg,document,selection:[],images:[picture],streamFn:transport.fn,capture:async()=>picture});
+ await test('task budgets normalize invalid input and preserve bounded defaults',async()=>{
+  const {normalizeTaskBudget,taskBudgetReason}=await server.ssrLoadModule('/src/ai/taskBudget.ts');
+  assert.deepEqual(normalizeTaskBudget(),{maxMinutes:30,maxRounds:80,maxReportedTokens:3000000});
+  assert.deepEqual(normalizeTaskBudget({maxMinutes:Infinity,maxRounds:0,maxReportedTokens:NaN}),{maxMinutes:30,maxRounds:1,maxReportedTokens:3000000});
+  assert.match(taskBudgetReason(normalizeTaskBudget(),1800000,0,0),/分钟上限/);
+ });
+ await test('productive task stops at configured round cap and keeps an incomplete atomic draft',async()=>{
+  const f=fake([[edit],[{name:'edit_scene',args:{summary:'second',operations:[{...create,name:'second',tempId:'second'}]}}],[edit]]);
+  const o=opts(f);o.config={...cfg,taskBudget:{maxRounds:2}};const r=await runModelingAgent(o);
+  assert.equal(f.calls,2);assert.equal(r.result.doc.nodes.length,2);assert.equal(r.batch.incomplete,true);assert.match(r.batch.summary,/2 轮上限/);
+ });
+ await test('reported token cap blocks returned tools and the next request without losing earlier work',async()=>{
+  const f=fake([[edit],[{name:'edit_scene',args:{summary:'second',operations:[{...create,name:'second',tempId:'second'}]}}]]);
+  const o=opts(f);o.config={...cfg,taskBudget:{maxReportedTokens:60}};const r=await runModelingAgent(o);
+  assert.equal(f.calls,2);assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.inputTokens+r.activity.outputTokens,60);assert.match(r.batch.summary,/Token 上限/);assert.equal(r.batch.incomplete,true);
+ });
+ await test('elapsed deadline retains a previous edit and prevents further model calls',async()=>{
+  const realNow=Date.now;let advanced=false;const f=fake([[edit],[edit]]);const o=opts(f);o.config={...cfg,taskBudget:{maxMinutes:1}};o.onPreview=()=>{advanced=true;};
+  Date.now=()=>realNow()+(advanced?61000:0);
+  try{const r=await runModelingAgent(o);assert.equal(f.calls,1);assert.equal(r.result.doc.nodes.length,1);assert.match(r.batch.summary,/分钟上限/);}finally{Date.now=realNow;}
+ });
+ await test('budget exhaustion before any edit is explicit and does not invent a preview',async()=>{
+  const f=fake([[edit]]);const o=opts(f);o.config={...cfg,taskBudget:{maxReportedTokens:1}};
+  await assert.rejects(()=>runModelingAgent(o),/Token 上限/);assert.equal(f.calls,1);
+ });
+ await test('wall-clock timer aborts an in-flight request and preserves earlier draft with incomplete usage',async()=>{
+  const originalTimeout=globalThis.setTimeout;let deadlineCallback;globalThis.setTimeout=(fn,ms,...args)=>{if(ms>59000&&ms<=60000){deadlineCallback=fn;return originalTimeout(()=>{},120000);}return originalTimeout(fn,ms,...args);};
+  let first=true;const f=fake([[edit]]);const o=opts(f);o.config={...cfg,taskBudget:{maxMinutes:1}};o.streamFn=(m,context,streamOptions)=>{if(first){first=false;return f.fn(m,context,streamOptions);}const stream=createAssistantMessageEventStream();queueMicrotask(()=>{deadlineCallback();const error={role:'assistant',content:[],api:'openai-completions',provider:'mock',model:'mock',stopReason:'aborted',errorMessage:'cancelled',timestamp:Date.now(),usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}}};stream.push({type:'error',reason:'aborted',error});});return stream;};
+  try{const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.usageIncomplete,true);assert.equal(r.batch.incomplete,true);assert.match(r.batch.summary,/分钟上限/);}finally{globalThis.setTimeout=originalTimeout;}
+ });
+ await test('parallel child requests share one parent round budget rather than multiplying it',async()=>{
+  const items=[{name:'one',brief:'独立柜体',position:[0,0,0],sceneRole:'equipment'},{name:'two',brief:'独立柜体',position:[2,0,0],sceneRole:'equipment'}];
+  const f=fake([[edit,{name:'build_components_parallel',args:{style:'统一',items}}],[edit]]),children=[];const o=opts(f);o.captureAvailable=()=>false;o.config={...cfg,parallelDrafts:true,taskBudget:{maxRounds:2}};
+  o.workerStreamFn=name=>{const child=fake([[{name:'edit_scene',args:{summary:'独立部件',operations:[{...create,name}]}},{name:'submit_data_preview',args:{summary:'数据未验收'}}]]);children.push(child);return child.fn;};
+  const r=await runModelingAgent(o);assert.equal(f.calls+children.reduce((n,c)=>n+c.calls,0),2);assert.equal(r.batch.incomplete,true);assert.match(r.batch.summary,/轮上限/);
+ });
+ await test('incremental agent audit preserves unchanged shape evidence and accepts only missing relationship checks',async()=>{
+ const base=createInitialDoc(),doc=applyBatch(base,{operations:[{...create,name:'A',tempId:'a'},{...create,name:'B',tempId:'b',transform:{...create.transform,position:[3,0,0]}}]}).doc;const a=doc.nodes[0],b=doc.nodes[1];const checks=['silhouette','structure','connections','materials','details','context'].map(criterion=>({criterion,status:'pass',evidence:'当前两张测试图和真实部件共同支持',nodeIds:[a.id]}));const f=fake([[{name:'capture_multiview',args:{componentId:a.id,views:['front','back']}}],[{name:'audit_model_detail',args:{componentId:a.id,checks}}],[{name:'edit_scene',args:{summary:'move unrelated B',operations:[{op:'translateAssembly',targetId:b.id,value:[1,0,0]}]}}],[{name:'audit_model_detail',args:{componentId:a.id,checks:checks.filter(c=>['connections','context'].includes(c.criterion)).map(c=>({...c,status:'unknown',evidence:'邻接布局发生变化，仍需当前图片复查'}))}}],'仍需关系检查']);const r=await runModelingAgent({...opts(f,doc),qualityBaseline:base});const audit=r.activity.detailAcceptance.reviews.find(x=>x.componentId===a.id);assert.ok(audit);assert.equal(audit.visualEvidence,false);assert.equal(audit.evidenceRevision,doc.revision);assert.equal(audit.checks.find(c=>c.criterion==='structure').status,'pass');assert.equal(audit.checks.find(c=>c.criterion==='context').status,'unknown');assert.equal(audit.reusedCriteria.length,4);
+ });
+ await test('failed geometry batch is repaired by one field correction without partial application',async()=>{
+ const invalid={name:'edit_scene',args:{summary:'two parts',operations:[create,{...create,name:'pipe',tempId:'pipe',geometry:{type:'sweepTube',params:{points:[[0,0,0],[0,.3,.1]],radius:.01,segments:16,radialSegments:4}}}]}};
+ const f=fake([[invalid],context=>{const error=context.messages.find(m=>m.role==='toolResult'&&m.isError);assert.match(JSON.stringify(error),/radialSegments/);assert.match(JSON.stringify(error),/失败批次ID=call_1_0/);return [{name:'retry_scene_edit',args:{failedId:'call_1_0',patches:[{path:['operations',1,'geometry','params','radialSegments'],value:12}]}}];},'已修复数据草稿']);let sizes=[];const r=await runModelingAgent({...opts(f),onPreview:d=>sizes.push(d.nodes.length)});assert.deepEqual(sizes,[2]);assert.equal(r.result.doc.nodes.length,2);assert.equal(r.result.doc.nodes.find(n=>n.name==='pipe').geometry.params.radialSegments,12);
+ });
+ await test('failed batch patches reject stale tasks, prototype paths and excessive retries',async()=>{
+ const {FailedEditBuffer}=await server.ssrLoadModule('/src/ai/failedEdit.ts');const b=new FailedEditBuffer(),payload={summary:'x',operations:[{op:'createPrimitive',geometry:{type:'box',params:{width:1}}}]};b.remember('e',1,'goal',payload);assert.throws(()=>b.correct('e',2,'goal',[{path:['operations',0,'geometry','params','width'],value:2}]),/变化/);assert.throws(()=>b.correct('e',1,'new goal',[{path:['operations',0,'geometry','params','width'],value:2}]),/变化/);assert.throws(()=>b.correct('e',1,'goal',[{path:['operations',0,'__proto__','x'],value:1}]),/无效/);const patch=[{path:['operations',0,'geometry','params','width'],value:2}];assert.equal(b.correct('e',1,'goal',patch).operations[0].geometry.params.width,2);assert.equal(payload.operations[0].geometry.params.width,1);b.correct('e',1,'goal',patch);assert.throws(()=>b.correct('e',1,'goal',patch),/上限/);
+ });
+ await test('automatic closeup frames only its target while retaining all scene geometry for occlusion',async()=>{
+ const baseline=createInitialDoc(),doc=applyBatch(baseline,{operations:[{op:'createAssembly',name:'small object',parts:[{name:'detail',geometry:{type:'box',params:{width:.1,height:.1,depth:.1}},transform:{position:[0,0,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}]},{op:'createAssembly',name:'large adjacent object',parts:[{name:'large',geometry:{type:'box',params:{width:5,height:5,depth:5}},transform:{position:[0,0,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}]}]}).doc;let captures=[];const f=fake([[{name:'capture_quality_review',args:{}}],'图已取得待验']);await runModelingAgent({...opts(f,doc),qualityBaseline:baseline,capture:async(d,v,ids)=>{captures.push({nodes:d.nodes.length,ids});return picture;}});assert.equal(captures.length,6);assert.ok(captures.slice(0,4).every(c=>c.nodes===2&&c.ids.length===1));assert.ok(captures.slice(4).every(c=>c.nodes===2&&c.ids===undefined));
+ });
+ await test('batch detail review validates all entries before recording and never invents passes',async()=>{
+  const baseline=createInitialDoc(),doc=applyBatch(baseline,{operations:[{...create,name:'one'},{...create,name:'two',tempId:'two'}]}).doc;
+  const checks=node=>['silhouette','structure','connections','materials','details','context'].map(criterion=>({criterion,status:'unknown',evidence:'当前证据不足，明确保留待核对',nodeIds:[node.id]}));
+  const rows=doc.nodes.map(n=>({componentId:n.id,checks:checks(n)}));
+  const bad=fake([[{name:'detail_quality_standard',args:{}},{name:'audit_model_details_batch',args:{reviews:[rows[0],{...rows[1],componentId:'missing'}]}}],'检查未通过']);const badResult=await runModelingAgent({...opts(bad,doc),qualityBaseline:baseline});assert.equal(badResult.activity.detailAcceptance.reviews.length,0);
+  const good=fake([[{name:'audit_model_details_batch',args:{reviews:rows}}],'已记录待核对']);const result=await runModelingAgent({...opts(good,doc),qualityBaseline:baseline});assert.equal(result.activity.detailAcceptance.reviews.length,2);assert.equal(result.activity.detailAcceptance.status,'pending');
+ });
+ await test('multi-component image packet stays until all sibling targets are audited',()=>{
+  const image={type:'image',data:'a'.repeat(100),mimeType:'image/png'};const packet={role:'toolResult',toolCallId:'captureAB',toolName:'capture_quality_review',isError:false,details:{revision:3},content:[{type:'text',text:'revision=3 scope=A view=front'},image,{type:'text',text:'revision=3 scope=B view=front'},image],timestamp:0};
+  const audit=id=>({role:'toolResult',toolCallId:'audit'+id,toolName:'audit_model_detail',isError:false,details:{revision:3,componentId:id},content:[{type:'text',text:'recorded'}],timestamp:0});const newer={...packet,toolCallId:'captureC',content:[{type:'text',text:'revision=3 scope=C view=front'},image]};
+  let messages=compactAgentContext([packet,audit('A'),newer]);assert.equal(messages[0].content.filter(c=>c.type==='image').length,2);messages=compactAgentContext([packet,audit('A'),audit('B'),newer]);assert.equal(messages[0].content.filter(c=>c.type==='image').length,0);const fresh={...packet,content:packet.content.map(c=>c.type==='text'?{...c,text:c.text.replace('revision=3','revision=4')}:c)};const freshC={...newer,content:newer.content.map(c=>c.type==='text'?{...c,text:c.text.replace('revision=3','revision=4')}:c)};messages=compactAgentContext([audit('A'),audit('B'),fresh,freshC]);assert.equal(messages[2].content.filter(c=>c.type==='image').length,2);
+ });
+ await test('isolated diagnostic capture hides occluders without modifying scene or granting review evidence',async()=>{
+  const initial=applyBatch(createInitialDoc(),{operations:[{op:'createAssembly',name:'人物',sceneRole:'person',parts:[{name:'hand',geometry:{type:'sphere',params:{radius:.04}},materialId:'mat_gray',transform:{position:[0,1,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}]},{op:'createAssembly',name:'occluder',sceneRole:'equipment',parts:[{name:'wall',geometry:{type:'box',params:{width:1,height:2,depth:.1}},materialId:'mat_gray',transform:{position:[0,1,1],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}]}]}).doc;
+  const id=initial.nodes[0].id;let seen=[];const f=fake([[{name:'capture_detail_diagnostic',args:{targetIds:[id],views:['front','side']}}],[{name:'review_model',args:{summary:'isolated view',issues:[]}}],'诊断完成，仍待完整场景检查']);
+  const r=await runModelingAgent({...opts(f,initial),text:'检查人物手部遮挡',capture:async(doc)=>{seen.push(doc.nodes.map(n=>n.id));return picture;}});
+  assert.deepEqual(seen,[[id],[id]]);assert.deepEqual(r.result.doc.nodes,initial.nodes);const result=f.contexts.flatMap(c=>c.messages).filter(m=>m.role==='toolResult'&&m.toolName==='review_model');assert.ok(result.some(m=>m.isError));
+ });
+ await test('generic hand tool replaces only explicit hand parts and schedules real hand closeups',async()=>{
+  const initial=applyBatch(createInitialDoc(),{operations:[{op:'createAssembly',name:'任意人员',sceneRole:'person',parts:[{name:'hand',geometry:{type:'sphere',params:{radius:.04}},materialId:'mat_gray',transform:{position:[0,1,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}},{name:'torso',geometry:{type:'box',params:{width:.3,height:.5,depth:.2}},materialId:'mat_gray',transform:{position:[0,1,.3],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}]}]}).doc;
+  const hand=initial.nodes[0],body=initial.nodes[1];let images=0;
+  const f=fake([[{name:'create_hand_pose',args:{name:'右手',assemblyId:hand.assemblyId,materialId:hand.materialId,wrist:[0,1,0],forward:[0,0,-1],dorsal:[0,1,0],handedness:'right',pose:'point',replaceIds:[hand.id]}}],[{name:'capture_quality_review',args:{}}],'完成局部检查但尚未记录验收']);
+  const r=await runModelingAgent({...opts(f,initial),text:'只调整这个人物的手部',capture:async()=>{images++;return picture;}});
+  assert.equal(r.result.doc.nodes.length,2);assert.deepEqual(r.result.doc.nodes.find(n=>n.id===body.id),body);assert.equal(r.result.doc.nodes.find(n=>n.name.includes('articulated hand')).assemblyId,hand.assemblyId);assert.equal(images,6);assert.ok(r.batch.incomplete);
+ });
+ await test('unified quality packet is reused until geometry or evidence changes',async()=>{
+  const packet={name:'inspect_model_quality',args:{}};
+  const f=fake([[edit,packet],[packet],context=>{
+    const results=context.messages.filter(m=>m.role==='toolResult'&&m.toolName==='inspect_model_quality');
+    assert.ok(JSON.stringify(results).includes('repeated'));assert.ok(JSON.stringify(results).includes('accepted\\":false')||JSON.stringify(results).includes('accepted'));
+    return [{name:'edit_scene',args:{summary:'second generic solid',operations:[{...create,name:'second',transform:{...create.transform,position:[2,0,0]}}]}},packet];
+  },context=>{const result=context.messages.filter(m=>m.role==='toolResult'&&m.toolName==='inspect_model_quality').at(-1);assert.ok(!JSON.stringify(result).includes('repeated'));return [{name:'submit_data_preview',args:{summary:'两件数据草稿，无视觉验收'}}]}]);
+  const o=opts(f);o.captureAvailable=()=>false;const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,2);assert.equal(r.activity.quality.revision,r.result.doc.revision);assert.equal(r.activity.detailAcceptance.status,'pending');
+ });
+ await test('repeat scene inspections are compact and invalid geometry reports the failing part',async()=>{
+  const bad={name:'edit_scene',args:{summary:'invalid lathe',operations:[{op:'createAssembly',name:'lamp',parts:[{name:'shade',geometry:{type:'lathe',params:{points:[[.1,0],[.05,.1]],segments:64,wallThickness:.2}}}]}]}};
+  const f=fake([[edit,inspect],[inspect,bad],context=>{const raw=JSON.stringify(context);assert.ok(raw.includes('repeated'));assert.ok(raw.includes('操作1部件1 shade'));assert.ok(raw.includes('壁厚'));return [{name:'submit_data_preview',args:{summary:'保留未视觉验收模型'}}]}]);
+  const o=opts(f);o.captureAvailable=()=>false;const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.dataDraftSubmitted,true);
+ });
  await test('real Pi loop plans, edits, receives screenshot, reviews on later turn and submits only preview',async()=>{const f=fake([[plan,edit,capture],[review,submit]]);const o=opts(f);let previews=0;o.onPreview=()=>previews++;const before=JSON.stringify(o.document);const result=await runModelingAgent(o);assert.equal(f.calls,2);assert.equal(previews,1);assert.equal(result.result.doc.nodes.length,1);assert.equal(JSON.stringify(o.document),before);assert.equal(result.activity.timings.filter(t=>t.kind==='model').length,2);assert.ok(result.activity.timings.every(t=>t.endedAt>=t.startedAt));assert.equal(result.activity.inputTokens,40);assert.equal(result.activity.outputTokens,20);assert.ok(f.contexts[1].messages.some(m=>m.role==='toolResult'&&m.content.some(c=>c.type==='image')));assert.ok(result.activity.events.some(e=>e.includes('等待你确认')))});
  await test('steering skips stale tool calls and delivers text plus reference before next model turn',async()=>{
    let control,received=[];
@@ -92,6 +180,19 @@ try{
   const f=fake([[edit,multi],()=>[audit('fail'),{name:'edit_scene',args:{summary:'修正比例',operations:[{op:'setTransform',targetId:d.nodes[0].id,transform:{scale:[1,.8,1]}}]}},audit('pass')],context=>{assert.ok(context.messages.some(m=>m.role==='toolResult'&&m.isError&&JSON.stringify(m.content).includes('近景')));return [multi]},()=>[audit('pass'),review,submit]]);
   const o=opts(f);o.onPreview=x=>d=x;const captures=[];o.capture=async(doc,view)=>{captures.push([doc.revision,view]);return picture};
   const r=await runModelingAgent(o);assert.equal(r.activity.detailAcceptance.status,'self_reviewed');assert.equal(r.batch.incomplete,undefined);assert.equal(captures.length,4);assert.notEqual(captures[0][0],captures[2][0]);assert.equal(r.result.doc.nodes[0].transform.scale[1],.8);
+ });
+ await test('parallel experiment isolates child context, merges once and counts all model usage',async()=>{
+  const items=['设备甲','设备乙'].map((name,i)=>({name,brief:'创建一个尺寸准确并且包含真实主体结构的独立测试设备',position:[i*2,0,0]}));
+  const f=fake([[{name:'build_components_parallel',args:{style:'统一米制尺度',items}}],[{name:'submit_data_preview',args:{summary:'两组件数据完成，视觉检查待做'}}]]);const children=[];const o=opts(f);o.captureAvailable=()=>false;o.config={...cfg,parallelDrafts:true};o.history=[{role:'user',text:'只属于主代理的历史上下文标记'}];o.workerStreamFn=name=>{const child=fake([ctx=>{assert.ok(!JSON.stringify(ctx).includes('只属于主代理的历史上下文标记'));const tools=ctx.messages.filter(m=>m.role==='system').flatMap(m=>m.toolsAdded??[]);assert.ok(!tools.some(t=>t.name==='build_components_parallel'));return [{name:'edit_scene',args:{summary:'独立部件',operations:[{...create,name}]}},{name:'submit_data_preview',args:{summary:'独立数据已完成，未视觉验收'}}]}]);children.push(child);return child.fn};let previews=0;o.onPreview=()=>previews++;const r=await runModelingAgent(o);assert.equal(children.length,2);assert.equal(previews,1);assert.equal(r.result.doc.nodes.length,2);assert.equal(r.result.doc.nodes[1].transform.position[0],2);assert.equal(r.activity.inputTokens+r.activity.outputTokens,120);assert.equal(r.activity.parallelRuns.length,2);assert.ok(r.activity.parallelRuns.every(x=>x.status==='done'&&x.rounds===1&&x.toolCalls===2));assert.equal(r.activity.usageIncomplete,false);assert.equal(r.activity.detailAcceptance.status,'pending');assert.equal(r.batch.incomplete,true);
+ });
+ await test('parallel tool remains absent by default, in workers and in restricted edit scopes',async()=>{
+  for(const variant of [{config:cfg},{config:{...cfg,parallelDrafts:true},workerTask:true},{config:{...cfg,parallelDrafts:true},editScope:{nodeIds:[]}}]){const f=fake([ctx=>{const tools=ctx.messages.filter(m=>m.role==='system').flatMap(m=>m.toolsAdded??[]);assert.ok(!tools.some(t=>t.name==='build_components_parallel'));return '仅回答'}]);const o={...opts(f),...variant};await runModelingAgent(o);}
+ });
+ await test('failed child never masquerades as merged data and reported token totals are retained',async()=>{
+  const items=['成功组件','失败组件'].map((name,i)=>({name,brief:'创建具有明确比例及真实结构细节的独立测试组件',position:[i*2,0,0]}));const f=fake([[{name:'build_components_parallel',args:{style:'统一风格',items}}],'一个子任务尚未完成']);const o=opts(f);o.config={...cfg,parallelDrafts:true};o.captureAvailable=()=>false;o.workerStreamFn=name=>fake([name==='成功组件'?[edit,{name:'submit_data_preview',args:{summary:'数据已完成'}}]:'未生成组件']).fn;const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,1);assert.equal(r.activity.parallelRuns[1].status,'failed');assert.equal(r.activity.inputTokens+r.activity.outputTokens,120);assert.equal(r.activity.usageIncomplete,true);assert.ok(r.batch.incomplete);
+ });
+ await test('stopping parallel generation never merges late child drafts',async()=>{
+  const items=['甲','乙'].map((name,i)=>({name,brief:'创建具有明确比例及真实结构细节的独立测试组件',position:[i*2,0,0]}));const f=fake([[{name:'build_components_parallel',args:{style:'统一风格',items}}]]),c=new AbortController();const o=opts(f);o.config={...cfg,parallelDrafts:true};o.signal=c.signal;o.workerStreamFn=()=>fake([[edit,{name:'submit_data_preview',args:{summary:'数据已完成'}}]]).fn;let previews=0;o.onPreview=()=>previews++;o.onActivity=a=>{if(a.parallelRuns?.some(r=>r.status==='running'))c.abort()};await assert.rejects(()=>runModelingAgent(o));assert.equal(previews,0);assert.equal(o.document.nodes.length,0);
  });
  await test('batch detailed placement creates both components in one atomic preview and targeted reads stay compact',async()=>{
  const fs=await import('node:fs'),old=globalThis.fetch;globalThis.fetch=async url=>new Response(fs.readFileSync('public'+url));try{const f=fake([[plan,{name:'add_mesh_components',args:{items:[{key:'vmc',name:'立加',position:[0,0,0]},{key:'production-worker',name:'生产人员',position:[1.45,0,1.5]}]}}],[{name:'find_scene_parts',args:{terms:['pendant','hand'],limit:4}},{name:'submit_data_preview',args:{summary:'已建立两组件，未视觉验收'}}]]);const o=opts(f);o.captureAvailable=()=>false;let previews=0;o.onPreview=()=>previews++;const r=await runModelingAgent(o);assert.equal(previews,1);assert.equal(new Set(r.result.doc.nodes.map(n=>n.assemblyId)).size,2);assert.equal(r.batch.operations.length,2);const context=f.contexts[1];assert.ok(!JSON.stringify(context).includes('"uvs"'));assert.ok(r.batch.incomplete);}finally{globalThis.fetch=old;}
@@ -169,6 +270,13 @@ try{
    const result=(id,isError=false)=>({role:'toolResult',toolName:'edit_scene',toolCallId:id,isError,content:[{type:'text',text:'真实ID与场景'}],timestamp:0});
    const messages=[assistant('old'),result('old'),assistant('failed'),result('failed',true),assistant('latest'),result('latest')];const before=JSON.stringify(messages),pruned=compactAgentContext(messages);
    assert.equal(JSON.stringify(messages),before);assert.ok(pruned[0].content[0].text.includes('已成功'));assert.ok(!pruned.some(m=>m.role==='toolResult'&&m.toolCallId==='old'));assert.ok(pruned.some(m=>m.role==='toolResult'&&m.toolCallId==='failed'));assert.ok(pruned.some(m=>m.role==='assistant'&&m.content.some(c=>c.type==='toolCall'&&c.id==='latest')));assert.ok(JSON.stringify(pruned).length<before.length*.75);
+ });
+ await test('overview omits unrelated part materials but scoped reads preserve exact material values',()=>{
+ const initial=applyBatch(createInitialDoc(),{operations:[{op:'createAssembly',name:'generic equipment',parts:['anchor','inner part'].map(name=>({name,geometry:{type:'box',params:{width:1,height:1,depth:1}},materialId:'mat_gray',transform:{position:[0,1,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]}}))}]}).doc;
+ const doc={...initial,materials:[...initial.materials,{id:'inner-special',baseColor:'#fe0123',roughness:.73,metalness:.61}],nodes:initial.nodes.map((n,i)=>i?{...n,materialId:'inner-special'}:n)};const before=JSON.stringify(doc),overview=agentSceneContext(doc,[]),detail=agentSceneContext(doc,[],doc.nodes[0].assemblyId);assert.equal(overview.nodes.length,1);assert.ok(!overview.materials.some(m=>m.id==='inner-special'));assert.ok(detail.materials.some(m=>m.id==='inner-special'&&m.roughness===.73));assert.equal(JSON.stringify(doc),before);
+ });
+ await test('empty optional assembly ID remains a whole-scene capture and does not loop on submission',async()=>{
+ const f=fake([[plan,edit,{name:'capture_view',args:{view:'perspective',scope:'scene',assemblyId:''}}],[review,submit]]);const r=await runModelingAgent(opts(f));assert.equal(f.calls,2);assert.ok(r.activity.events.some(e=>e.includes('全场景 / perspective')));assert.ok(!r.activity.events.some(e=>e.includes('工具失败：submit_preview')));
  });
  await test('focused capture uses real assembly IDs and cannot replace final whole-scene review',async()=>{
    const document=applyBatch(createInitialDoc(),{operations:[{op:'createAssembly',name:'自定义架体',parts:[{name:'框',geometry:{type:'frame',params:{width:1,height:1,depth:.1,thickness:.05}},transform:{position:[0,.5,0],scale:[1,1,1],rotationQuaternion:[0,0,0,1]}}]}]}).doc;
@@ -268,5 +376,17 @@ await test('renderer recovery on the next task restores required capture and lat
  const unavailable=fake([[edit,capture]]);const o=opts(unavailable);o.captureAvailable=()=>false;const stage=await runModelingAgent(o);
  const next=fake([[{name:'edit_scene',args:{summary:'recolor',operations:[{op:'setAppearance',targetId:stage.result.doc.nodes[0].id,baseColor:'#ff0000'}]}},capture],[review,submit]]);const ready=opts(next,stage.result.doc);ready.captureAvailable=()=>true;const r=await runModelingAgent(ready);assert.equal(next.calls,2);assert.equal(r.batch.incomplete,undefined);assert.ok(r.activity.events.some(e=>e.startsWith('视觉检查')));
 });
+
+ await test('automatic quality capture provides current whole and closeup evidence before later-turn review',async()=>{
+  const f=fake([[edit,{name:'capture_quality_review',args:{}},review],[review,submit]]);const o=opts(f);const frames=[];o.capture=async(d,v,ids)=>{frames.push({revision:d.revision,v,ids});return picture;};const r=await runModelingAgent(o);
+  assert.equal(frames.length,4);assert.deepEqual(frames.map(x=>x.v),['front','back','perspective','top']);assert.ok(frames[0].ids.length);assert.equal(frames[2].ids,undefined);assert.ok(r.activity.timings.some(t=>t.label==='记录视觉检查'&&t.failed));assert.ok(r.activity.timings.some(t=>t.label==='记录视觉检查'&&!t.failed));assert.equal(r.batch.incomplete,true);assert.equal(r.activity.detailAcceptance.status,'pending');
+ });
+ await test('failed automatic capture cannot certify partial images as complete evidence',async()=>{
+  const f=fake([[edit,{name:'capture_quality_review',args:{}}]]);const o=opts(f);let frames=0;o.capture=async()=>{if(++frames===2)throw Error('renderer failed');return picture;};const r=await runModelingAgent(o);assert.ok(r.batch.incomplete);assert.notEqual(r.activity.detailAcceptance.status,'self_reviewed');assert.ok(!r.activity.events.some(e=>e.startsWith('视觉检查')));
+ });
+ await test('request footprint records numeric payload counts and optional tools restore next turn',async()=>{
+  const f=fake([context=>{const tools=context.messages.find(m=>m.role==='system').toolsAdded;assert.ok(!tools.some(t=>t.name==='set_surfaces_batch'));return [{name:'enable_modeling_tools',args:{group:'surfaces'}}];},context=>{assert.ok(context.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='set_surfaces_batch'));return '工具已准备';}]);const o=opts(f);const r=await runModelingAgent(o);const times=r.activity.timings.filter(t=>t.kind==='model');assert.equal(times.length,2);assert.ok(times.every(t=>t.requestFootprint.totalSerializedChars>0));assert.ok(times[1].requestFootprint.toolSchemaChars>times[0].requestFootprint.toolSchemaChars);
+ });
+ await test('unavailable renderer never exposes automatic capture or invents captured evidence',async()=>{const f=fake([context=>{assert.ok(!context.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='capture_quality_review'));return 'no capture';}]);const o=opts(f);o.captureAvailable=()=>false;await runModelingAgent(o);});
  console.log(`${passed} Pi agent loop checks passed; model and rendering mocked`);
 }finally{await server.close()}

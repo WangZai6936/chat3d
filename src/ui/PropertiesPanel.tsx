@@ -10,7 +10,7 @@ import { useDisplayDoc, useEditorStore } from '../store';
 const geometryNames:Record<string,string>={box:'长方体',sphere:'球体',cylinder:'圆柱体',cone:'圆锥体',plane:'平面',roundedPlate:'圆角板',capsule:'胶囊体',frame:'框架',tube:'空心管',trapezoid:'梯形体'};
 const parameterNames:Record<string,string>={width:'宽度',height:'高度',depth:'深度',length:'长度',radius:'半径',radiusTop:'顶部半径',radiusBottom:'底部半径',outerRadius:'外半径',innerRadius:'内半径',widthTop:'顶部宽度',widthBottom:'底部宽度',thickness:'厚度',bevelRadius:'倒角半径',cornerRadius:'圆角半径',holeRadius:'孔半径',widthSegments:'横向分段数',heightSegments:'纵向分段数',depthSegments:'深度分段数',radialSegments:'圆周分段数'};
 const parameterLabel=(key:string)=>(parameterNames[key]??key)+(key.endsWith('Segments')?'':'（米）');
-function FocusObject({doc,node}:{doc:SceneDocument;node:SceneNode}){return <button type="button" className="m-3 rounded bg-blue-500/15 px-3 py-2 text-xs text-blue-200" onClick={()=>focusSceneObjects(node.assemblyId?doc.nodes.filter(n=>n.assemblyId===node.assemblyId).map(n=>n.id):[node.id])}>{node.assemblyId?'聚焦当前设备':'聚焦选中对象'}</button>;}
+function FocusObject({doc,node}:{doc:SceneDocument;node:SceneNode}){const ready=useEditorStore(s=>s.viewportStatus==='ready');return <button disabled={!ready} title={ready?undefined:'三维未就绪，请使用软件检查的选中近景'} type="button" className="m-3 rounded bg-blue-500/15 px-3 py-2 text-xs text-blue-200" onClick={()=>focusSceneObjects(node.assemblyId?doc.nodes.filter(n=>n.assemblyId===node.assemblyId).map(n=>n.id):[node.id])}>{node.assemblyId?'聚焦当前设备':'聚焦选中对象'}</button>;}
 
 // 属性面板：精确尺寸、位置。空值/非法输入不能提交（方案第 8 节）
 export function PropertiesPanel() {
@@ -19,7 +19,7 @@ export function PropertiesPanel() {
   const applyCommandBatch = useEditorStore((s) => s.applyCommandBatch);
   const status=useEditorStore(s=>s.aiStatus);
   const locked=['capturing','context','generating','validating','applying','previewing'].includes(status);
-  const lockNotice=locked?<p role="status" className="m-3 rounded border border-amber-400/30 p-2 text-xs text-amber-200">{status==='previewing'?'当前是待确认预览。请先在对话区点击“确认应用”或“保留此阶段”，再修改属性；也可以放弃预览。':'模型正在生成，请先等待完成或停止生成，再修改属性。'}</p>:null;
+  const lockNotice=locked?<p role="status" className="m-3 rounded border border-amber-400/30 p-2 text-xs text-amber-200">{status==='previewing'?'当前是待确认预览。请先在对话区点击“应用修改”，再修改属性；也可以放弃预览。':'模型正在生成，请先等待完成或停止生成，再修改属性。'}</p>:null;
 
   const node = selection.length > 0 ? doc.nodes.find((n) => n.id === selection[0]) : undefined;
 
@@ -140,7 +140,7 @@ export function PropertiesPanel() {
 
 function AssemblyTransformEditor({nodes,wholeAssembly=false}:{nodes:SceneNode[];wholeAssembly?:boolean}){
  const [angles,setAngles]=useState(['0','0','0']),[factor,setFactor]=useState('1'),[error,setError]=useState('');
- const size=useMemo(()=>assemblyBounds(nodes).getSize(new Vector3()),[nodes]);
+ const bounds=useMemo(()=>assemblyBounds(nodes),[nodes]);const size=bounds.getSize(new Vector3());
  const apply=()=>{
   if(angles.some(v=>!v.trim()||!Number.isFinite(Number(v)))||!factor.trim()||!Number.isFinite(Number(factor))){setError('请输入有效的角度和缩放倍数');return;}
   const rotationDegrees=angles.map(Number) as [number,number,number],scaleFactor=Number(factor);
@@ -149,7 +149,7 @@ function AssemblyTransformEditor({nodes,wholeAssembly=false}:{nodes:SceneNode[];
   const result=useEditorStore.getState().applyCommandBatch([command],'旋转/等比缩放选中对象');
   if(!result.ok){setError(result.error??'变换失败');return;}setAngles(['0','0','0']);setFactor('1');setError('');
  };
- return <section className="mt-4 space-y-2"><h4 className="text-xs">{wholeAssembly?'整机旋转与等比缩放':'零件旋转与等比缩放'}</h4><p className="text-xs text-gray-400">当前外包尺寸 {size.x.toFixed(2)} × {size.y.toFixed(2)} × {size.z.toFixed(2)} m，以底部中心为支点</p><div className="grid grid-cols-3 gap-1">{['X','Y','Z'].map((axis,i)=><label key={axis} className="text-xs">{axis} 旋转角<input aria-label={`整体旋转 ${axis}`} type="number" step="15" value={angles[i]} onChange={e=>setAngles(old=>old.map((v,j)=>i===j?e.target.value:v))} className="block w-full min-w-0 rounded bg-black/30 p-1"/></label>)}</div><label className="block text-xs">等比缩放倍数<input aria-label="整体等比缩放倍数" type="number" min="0.001" max="1000" step="0.1" value={factor} onChange={e=>setFactor(e.target.value)} className="block w-full rounded bg-black/30 p-1"/></label><button onClick={apply} className="rounded bg-white/10 px-2 py-1 text-xs">应用整体变换</button>{error&&<p role="status" className="text-xs text-amber-200">{error}</p>}</section>;
+ return <section className="mt-4 space-y-2"><h4 className="text-xs">{wholeAssembly?'整机旋转与等比缩放':'零件旋转与等比缩放'}</h4><p className="text-xs text-gray-400">世界外包尺寸：X {size.x.toFixed(3)} · Y {size.y.toFixed(3)} · Z {size.z.toFixed(3)} m。底部 Y {bounds.min.y.toFixed(3)} m；以底部中心为变换支点</p><div className="grid grid-cols-3 gap-1">{['X','Y','Z'].map((axis,i)=><label key={axis} className="text-xs">{axis} 旋转角<input aria-label={`整体旋转 ${axis}`} type="number" step="15" value={angles[i]} onChange={e=>setAngles(old=>old.map((v,j)=>i===j?e.target.value:v))} className="block w-full min-w-0 rounded bg-black/30 p-1"/></label>)}</div><label className="block text-xs">等比缩放倍数<input aria-label="整体等比缩放倍数" type="number" min="0.001" max="1000" step="0.1" value={factor} onChange={e=>setFactor(e.target.value)} className="block w-full rounded bg-black/30 p-1"/></label><button onClick={apply} className="rounded bg-white/10 px-2 py-1 text-xs">应用整体变换</button>{error&&<p role="status" className="text-xs text-amber-200">{error}</p>}</section>;
 }
 
 function AppearanceEditor({doc,nodes,wholeAssembly}:{doc:SceneDocument;nodes:SceneNode[];wholeAssembly:boolean}){
@@ -167,8 +167,9 @@ function AppearanceEditor({doc,nodes,wholeAssembly}:{doc:SceneDocument;nodes:Sce
     const result=useEditorStore.getState().applyCommandBatch(operations,label);setNotice(result.ok?'已修改，可撤销':result.error??'修改失败');
   };
   return <section className="mt-4 space-y-3"><h4 className="text-xs text-gray-300">颜色与材质</h4>
-    {nodes.length>1&&<label className="block text-xs">修改范围<select aria-label="外观修改范围" value={sourceId} onChange={e=>setSourceId(e.target.value)} className="block mt-1 bg-[#20252b] border border-white/10 p-1 w-full"><option value="all">全部选中零件（{nodes.length}）</option>{originals.map(id=><option key={id} value={id}>原材质 {doc.materials.find(m=>m.id===id)?.baseColor??id}（{nodes.filter(n=>n.materialId===id).length}）</option>)}</select></label>}
+    {nodes.length>1&&<label className="block text-xs">修改范围<select aria-label="外观修改范围" value={sourceId} onChange={e=>setSourceId(e.target.value)} className="block mt-1 bg-[#20252b] border border-white/10 p-1 w-full"><option value="all">全部选中零件（{nodes.length}）</option>{originals.map(id=><option key={id} value={id}>{nodes.filter(n=>n.materialId===id).slice(0,2).map(n=>n.name).join('、')} · {doc.materials.find(m=>m.id===id)?.baseColor??id}（{nodes.filter(n=>n.materialId===id).length}）</option>)}</select></label>}
     <p className="text-xs text-gray-400">本次影响 {targets.length} 个零件；修改颜色会保留各零件原有的粗糙度、金属度和透明度。</p>
+    {nodes.length>1&&sourceId==='all'&&<p className="text-xs text-amber-200">将统一所有选中零件的颜色，包括轮子、外壳等。只改部分时请先选择上方范围。</p>}
     <div className="flex gap-2 items-center"><input aria-label="选择颜色" type="color" value={/^#[0-9a-f]{6}$/i.test(color)?color:'#9099a4'} onChange={e=>setColor(e.target.value)} className="w-9 h-8 shrink-0"/><input aria-label="颜色十六进制" value={color} onChange={e=>setColor(e.target.value)} className="w-24 min-w-0 bg-black/30 rounded px-2 py-1 text-xs"/><button className="bg-blue-600 rounded px-2 py-1 text-xs" onClick={()=>{if(!/^#[0-9a-f]{6}$/i.test(color)){setNotice('请输入 #RRGGBB 颜色');return;}apply({baseColor:color},'修改选中对象颜色')}}>应用颜色</button></div>
     <div className="grid grid-cols-3 gap-2">{([['粗糙度',roughness,setRoughness],['金属度',metalness,setMetalness],['不透明度',opacity,setOpacity]] as const).map(([label,value,set])=><label key={label} className="text-xs">{label}<input aria-label={label} type="number" min="0" max="1" step="0.05" value={value} onChange={e=>set(e.target.value)} className="block w-full min-w-0 rounded bg-black/30 p-1 mt-1"/></label>)}</div>
     <button className="bg-white/10 rounded px-2 py-1 text-xs" onClick={()=>{const values=[roughness,metalness,opacity];if(values.some(v=>!v.trim()||!Number.isFinite(Number(v))||Number(v)<0||Number(v)>1)){setNotice('材质参数需为0–1');return;}apply({roughness:Number(roughness),metalness:Number(metalness),opacity:Number(opacity)},'修改选中对象材质参数')}}>应用材质参数</button>

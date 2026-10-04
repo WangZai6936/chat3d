@@ -1,10 +1,11 @@
+import {isSoftwareCaptureAvailable} from '../scene/softwareCapture';
 import {isServerCaptureAvailable} from '../scene/serverCapture';
 import {evaluateDetailAcceptance} from '../domain/detailAcceptance';
 import {SiteAccessRecovery} from './SiteAccessRecovery';
 import {ConversationRun} from './ConversationRun';
 import {MessageText} from './MessageText';
 import {continueDraft,type DraftBaseline} from '../domain/draftContinuation';
-import {conversationScope} from '../domain/conversationScope';
+import {userEditScope} from '../domain/conversationScope';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { buildSceneContext, generateBatch } from '../ai/provider';
 import { GenerationProgress } from '../ai/stream';
@@ -33,7 +34,7 @@ async function compressImage(file: File | Blob): Promise<string> {
   return canvas.toDataURL('image/jpeg', 0.8);
 }
 
-export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:()=>void}={}) {
+export function ChatPanel({onConfigure,onAssets}:{executionDetails?:boolean;onConfigure?:()=>void;onAssets?:()=>void}={}) {
   const { messages, aiStatus, aiError, pendingBatch, pendingResult, aiConfig, selection, doc } = useEditorStore();
   const store = useEditorStore.getState;
   const input=useEditorStore(s=>s.composerText);
@@ -41,6 +42,8 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
   const attachments=useEditorStore(s=>s.composerImages);
   const setAttachments=(value:string[]|((previous:string[])=>string[]))=>store().setComposerImages(typeof value==='function'?value(store().composerImages):value);
   const [lockPlacement,setLockPlacement]=useState(false);
+  const [scopeMode,setScopeMode]=useState<'scene'|'selection'>('scene');
+  useEffect(()=>{setScopeMode('scene');setLockPlacement(false);},[doc.projectId]);
   const [compareBefore,setCompareBefore]=useState(false);
   const [imageBusy, setImageBusy] = useState(false);
   const [notice, setNotice] = useState('');
@@ -123,7 +126,7 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
     store().setAiError(null);
     if (!batch.operations.length) { store().setPreviewDoc(null); store().setAiStatus('idle'); finishRun('completed'); store().addAssistantMessage(batch.summary); return; }
     const detail=evaluateDetailAcceptance(store().doc,result.doc,store().lastRun?.detailAcceptance?.reviews??[]);
-    if(detail.issues.length){batch={...batch,incomplete:true,continuation:batch.continuation??'继续按通用六项细节标准检查并修正当前模型',summary:batch.summary+(batch.summary.includes('细节验收')?'':'\n细节验收未完成：'+detail.issues.slice(0,8).join('；'))};}
+    if(detail.issues.length){batch={...batch,qualityIssues:detail.issues,incomplete:true,continuation:batch.continuation??'继续按通用六项细节标准检查并修正当前模型'};}
     if(parentDraft.current&&batch.requestId!==parentDraft.current.batch.requestId){const priorId=parentDraft.current.batch.requestId;useEditorStore.setState(state=>({messages:state.messages.map(m=>m.batch?.requestId===priorId?{...m,outcome:'superseded' as const}:m)}));}
     store().setPendingBatch(batch); store().setPendingResult(result); store().setPreviewDoc(result.doc);
     store().setAiStatus('previewing'); finishRun('preview'); store().addAssistantMessage(batch.summary, batch);
@@ -152,6 +155,9 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
     }
     const usePi = cfg.agentMode !== 'single';
     if(usePi && cfg.stream === false) { setNotice('Pi 分步建模需要流式输出，请在模型配置中开启；也可选择单次生成兼容模式'); return; }
+    let requestedScope:EditScope;
+    try{requestedScope=userEditScope(text,store().pendingResult?.doc??store().doc,[...store().selection],scopeMode,lockPlacement,messages.filter(m=>m.role==='user'));}
+    catch(error){setNotice(error instanceof Error?error.message:'修改范围无效');return;}
     let lastActivitySave=0;
     const parent=store().aiStatus==='previewing'&&store().pendingBatch&&store().pendingResult?{batch:store().pendingBatch!,result:store().pendingResult!}:null;
     parentDraft.current=parent;
@@ -175,7 +181,7 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
     const baseRevision = working.revision;
     const projectId = working.projectId;
     const selectedIds = [...store().selection];
-    const editScope:EditScope=conversationScope(text,working,selectedIds,lockPlacement,history);
+    const editScope:EditScope=requestedScope;
     if(lockPlacement&&!editScope.lockPlacement)setNotice('本次指令明确要求移动或旋转，临时按指令解除位置锁；默认开关未修改');
     const controller = new AbortController(); abortRef.current = controller;
     const armTimeout = () => {
@@ -199,7 +205,7 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
       if(usePi) {
         const {runModelingAgent} = await import('../ai/modelingAgent');
         if(!alive()) return;
-        const generated = await runModelingAgent({text,config:cfg,document:working,qualityBaseline:parent?original:working,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:()=>store().viewportStatus==='ready'||isServerCaptureAvailable(),
+        const generated = await runModelingAgent({text,config:cfg,document:working,qualityBaseline:parent?original:working,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:()=>store().viewportStatus==='ready'||isServerCaptureAvailable()||isSoftwareCaptureAvailable(),
           onControl:control=>{if(alive()){controlRef.current=control;setCanSteer(!!control);if(!control)clearControl();}},
           onSteeringApplied:id=>{if(alive()){markSteering(id,'received');setNotice('补充要求已送入模型上下文');}},
           onCheckpoint:cp=>{if(alive()){const combined=continueDraft(original,parent,cp.batch,cp.result);checkpointRef.current={...cp,...combined};useEditorStore.setState({pendingBatch:combined.batch,pendingResult:combined.result});}},
@@ -234,14 +240,16 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
     setInput(lastRequest.text); setAttachments(lastRequest.images); setNotice('已恢复，请按需修改后发送'); inputRef.current?.focus();
   };
 
-  const commit = () => {const continuation=store().pendingBatch?.continuation;store().confirmPending();if(store().aiStatus==='idle' && continuation){if(!store().composerText.trim()){setInput(continuation);setNotice('阶段已保留，继续指令已填入；点击发送才会继续调用模型');}else setNotice('阶段已保留；当前输入草稿未改动，可以发送指令继续完善');}checkpointRef.current=null;parentDraft.current=null; inputRef.current?.focus();};
+  const commit = () => {store().confirmPending();if(store().aiStatus==='idle')setNotice('修改已应用到当前项目；可撤销。不会继续调用模型。');checkpointRef.current=null;parentDraft.current=null;inputRef.current?.focus();};
   const discard = () => {checkpointRef.current=null;parentDraft.current=null;store().discardPending(); setNotice('已放弃预览，原场景保持不变'); inputRef.current?.focus();};
   const previewCard=(previewing && pendingBatch && <div className="mx-3 mb-2 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5">
-      <div className="text-emerald-300 text-sm font-medium">{viewportStatus!=='ready'?'草稿已生成 · 三维画面不可用':pendingBatch.incomplete?'阶段草稿 · 未完成复核':'预览已就绪'} · {pendingBatch.operations.length} 项操作</div>
-      <p className="text-xs text-gray-400 mt-1">{viewportStatus!=='ready'?'尚未完成画面检查。可查看对象与属性、继续调整、应用或放弃草稿；请恢复三维视图后进行视觉验收。':pendingBatch.incomplete?'这不是完整交付。可旋转检查，可直接发送指令继续完成，也可先保留此阶段；原场景仍未修改。':'可旋转、缩放查看。可以直接发送下一条继续调整当前预览，满意后再应用。'}</p>
+      <div className="text-emerald-300 text-sm font-medium">{pendingBatch.taskStatus==='partial'?'本次任务中断 · 已保留部分修改':'本次修改已生成 · 等待应用'} · {pendingBatch.operations.length} 项操作</div>
+      <p className="text-xs text-gray-300 mt-1">应用后写入当前项目，可撤销；继续调整会在当前预览上修改。</p>
+      {(pendingBatch.incomplete||viewportStatus!=='ready')&&<details className="mt-2 text-xs text-amber-200"><summary>模型质量：尚有待核对项（不等于本次修改失败）</summary><p className="mt-2">{viewportStatus!=='ready'?'实时三维画面不可用，尚不能完成真实材质与交互验收。':''}应用修改不会将模型质量标为通过。</p>{!!pendingBatch.qualityIssues?.length&&<ul className="mt-2 space-y-1">{[...new Set(pendingBatch.qualityIssues)].map((issue,i)=><li key={i}>{issue}</li>)}</ul>}</details>}
+
       {pendingResult&&<div className="mt-3 border-t border-white/10 pt-2 text-xs text-gray-300"><p>修改对比：新增 {changes.filter(c=>c.kind==='added').length} · 修改 {changes.filter(c=>c.kind==='modified').length} · 移除 {changes.filter(c=>c.kind==='removed').length}</p><details className="mt-2"><summary className="cursor-pointer">查看受影响对象</summary><ul className="max-h-40 overflow-auto mt-1 space-y-1">{changes.map(c=><li key={c.id}><button className="text-left hover:text-blue-200 disabled:opacity-50" disabled={!pendingResult.doc.nodes.some(n=>n.id===c.id)} onClick={()=>store().select([c.id])}>{c.group} / {c.name}：{c.fields.join('、')}</button></li>)}</ul></details><button className="mt-2 rounded bg-white/10 px-2 py-1" onClick={()=>{const before=!compareBefore;setCompareBefore(before);store().setPreviewDoc(before?doc:pendingResult.doc);}}>{compareBefore?'查看修改后':'查看修改前'}</button>{compareBefore&&<p className="mt-1 text-amber-200">当前显示修改前，请切回修改后再确认应用</p>}</div>}
-      <button className="mt-3 text-xs text-blue-300" onClick={()=>{if(!input.trim()&&pendingBatch.continuation)setInput(pendingBatch.continuation);inputRef.current?.focus();}}>{pendingBatch.incomplete?'继续完成':'继续调整'}</button>
-      <div className="flex gap-2 mt-3"><button disabled={compareBefore} onClick={commit} className="flex-1 bg-emerald-600 hover:bg-emerald-500 rounded py-2 text-sm">{pendingBatch.incomplete?'保留此阶段':'确认应用'}</button><button onClick={discard} className="px-3 bg-white/10 rounded text-sm">放弃预览</button></div>
+      <button className="mt-3 text-xs text-blue-300" onClick={()=>{if(!input.trim()&&pendingBatch.continuation)setInput(pendingBatch.continuation);inputRef.current?.focus();}}>继续调整</button>
+      <div className="flex gap-2 mt-3"><button disabled={compareBefore} onClick={commit} className="flex-1 bg-emerald-600 hover:bg-emerald-500 rounded py-2 text-sm">应用修改</button><button onClick={discard} className="px-3 bg-white/10 rounded text-sm">放弃修改</button></div>
     </div>);
   return <div className="chat-panel flex flex-col h-full min-w-0 bg-[#20242b] text-gray-200">
     <div title="会话在本浏览器保存；请下载项目文件长期备份" className="px-3 py-2 border-b border-white/10 text-xs text-gray-400 flex justify-between gap-2">
@@ -250,10 +258,12 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
     </div>
     <div ref={scrollRef} onScroll={() => {const el=scrollRef.current; if(el) {stickRef.current=el.scrollHeight-el.scrollTop-el.clientHeight<64;if(stickRef.current)setNewMessages(false);}}} className="chat-transcript flex-1 overflow-auto p-3 space-y-4 min-h-0">
       {!messages.length && <div className="chat-welcome text-sm text-gray-400 py-5 leading-relaxed">
-        <p className="text-gray-200 font-medium mb-2">从一个想法开始</p>
+        <p className="text-gray-200 font-medium mb-2">{doc.nodes.length?'从现有模型继续':'从一个想法开始'}</p>
 
-        <p>可以附参考图，说明尺寸、用途和需要保留的细节。也可以通过对话给现有场景添加运动，先播放预览，再决定应用。</p>
+        <p>{doc.nodes.length?'可以选择对象后修改尺寸、颜色和位置，或描述要追加的模型。修改会先预览，应用后可撤销。':'先创建单个模型，也可以从已有资产组合场景。说明用途、尺寸和需要保留的细节。'}</p>
         <button className="mt-3 text-blue-300 text-left" onClick={()=>setInput('创建一个长 1.2 米、宽 0.8 米、高 0.75 米的工作台')}>试试：创建一个有明确尺寸的工作台 ↗</button>
+        {!doc.nodes.length&&<button className="mt-2 text-blue-300 text-left" onClick={()=>setInput('创建一个小型仓储场景，包含货架、周转箱和一条清晰通道；先给出布局和尺寸假设，再生成可编辑模型')}>组合一个场景 ↗</button>}
+        {onAssets&&<button className="mt-2 text-blue-300 text-left" onClick={onAssets}>从资产库开始 ↗</button>}
         <p className="mt-3 text-xs">图片建模是可编辑的近似重建，单张图无法确定背面与真实尺寸。</p>
       </div>}
       {(!aiConfig || aiConfig.useMock)&&<p className="text-xs text-amber-200 p-2">请连接真实模型后生成。已有项目仍可打开、手动编辑、保存和导出。<button onClick={onConfigure} className="ml-2 underline">连接模型</button></p>}
@@ -279,7 +289,7 @@ export function ChatPanel({onConfigure}:{executionDetails?:boolean;onConfigure?:
     {notice && <div role="status" className="px-3 py-2 text-xs text-amber-200">{notice}</div>}
     {busy && agentActivity && (agentActivity.inputTokens+agentActivity.outputTokens>=100000 || elapsed>=300) && <p role="status" className="px-3 pb-2 text-xs text-amber-300">任务耗时较长，详情见任务记录。可随时停止并保留已生成草稿。</p>}
     {!!attachments.length && <div className="flex gap-2 p-2 flex-wrap">{attachments.map((src,i)=><div key={i} className="relative"><button onClick={()=>setImageView(src)}><img src={src} alt={`待发送参考图 ${i+1}`} className="w-16 h-14 rounded object-cover"/></button><button aria-label={`移除参考图 ${i+1}`} onClick={()=>setAttachments(prev=>prev.filter((_,j)=>i!==j))} className="absolute -top-1 -right-1 rounded-full bg-red-600 w-5 h-5 text-xs">×</button></div>)}</div>}
-    {doc.nodes.length>0&&<details className="mx-3 text-xs text-gray-400"><summary className="cursor-pointer">修改选项</summary><fieldset disabled={busy} className="edit-scope-controls mx-3 mb-2 space-y-1 text-xs text-gray-300 disabled:opacity-50"><p>对话可编辑全场景，选中对象仅用于指代；局部修改请在指令中说明</p><label className="flex gap-2 items-center"><input type="checkbox" checked={lockPlacement} onChange={e=>setLockPlacement(e.target.checked)}/>锁定已有对象的位置与朝向</label></fieldset></details>}
+    {doc.nodes.length>0&&<fieldset disabled={busy} className="edit-scope-controls mx-3 mb-2 space-y-2 text-xs text-gray-200 disabled:opacity-50"><label className="flex items-center justify-between gap-2">修改范围<select aria-label="对话修改范围" value={scopeMode} onChange={e=>setScopeMode(e.target.value as 'scene'|'selection')} className="rounded bg-[#252A31] border border-white/20 px-2 py-1"><option value="scene">全场景</option><option value="selection">仅选中对象（{selection.length}）</option></select></label><p>{scopeMode==='selection'?(selection.length?`仅允许修改选中的 ${selection.length} 个零件；其他对象受保护。`:'请先在对象列表中选择对象，再发送指令。'):'可以修改全场景；选中对象仅用于指代，仍遵守指令中的局部限制。'}</p><details><summary>更多修改选项</summary><label className="flex gap-2 items-center mt-2"><input type="checkbox" checked={lockPlacement} onChange={e=>setLockPlacement(e.target.checked)}/>锁定已有对象的位置与朝向</label></details></fieldset>}
     <div className="chat-composer p-3 border-t border-white/10 bg-[#252A31]">
       {busy&&runPi&&<label className="mb-2 flex items-center gap-2 text-xs text-gray-300">这条消息<select aria-label="执行中消息用途" value={sendMode} onChange={e=>setSendMode(e.target.value as 'guide'|'question'|'later')} className="bg-[#252A31] rounded border border-white/20 p-1"><option value="guide">引导当前任务</option><option value="question">先回答问题，不修改</option><option value="later">记为后续任务</option></select></label>}
       <textarea ref={inputRef} value={input} onChange={e=>setInput(e.target.value)} aria-label="建模指令" rows={3}

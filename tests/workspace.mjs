@@ -10,6 +10,10 @@ try{
  const w=await server.ssrLoadModule('/src/workspace.ts');
  const storage=await server.ssrLoadModule('/src/domain/workspaceStorage.ts');
  editor.setState({doc:createInitialDoc(),messages:[],composerText:'',composerImages:[],past:[],future:[],aiStatus:'idle',aiConfig:{baseURL:'https://example.test',apiKey:'MUST-NOT-PERSIST',model:'mock',useMock:true}});
+ await test('progress saving is coalesced without delaying edits, user messages or checkpoints',async()=>{const {progressOnlyChange}=await server.ssrLoadModule('/src/domain/workspaceSavePolicy.ts');const msg={id:'a',text:'task',run:{status:'running',startedAt:1,activity:{turn:1}}};const old={aiStatus:'generating',doc:{},pendingBatch:null,pendingResult:null,past:[],future:[],dirty:false,composerText:'',composerImages:[],messages:[msg],lastRun:{turn:1}};
+ assert.equal(progressOnlyChange({...old,lastRun:{turn:2}},old),true);assert.equal(progressOnlyChange({...old,messages:[{...msg,run:{...msg.run,activity:{turn:2}}}]},old),true);
+ for(const patch of [{doc:{}},{pendingResult:{}},{composerText:'new instruction'},{messages:[msg,{id:'b',text:'change'}]},{messages:[{...msg,text:'changed'}]},{aiStatus:'previewing'},{messages:[{...msg,run:{...msg.run,status:'stopped'}}]}])assert.equal(progressOnlyChange({...old,...patch},old),false);
+ });
  await test('workspace initialization preserves current scene and excludes credentials from durable data',async()=>{await w.initializeWorkspace();await w.flushWorkspace();const saved=await storage.readWorkspace();assert.ok(saved.sessions.length);assert.ok(!JSON.stringify(saved).includes('MUST-NOT-PERSIST'));assert.equal(w.useWorkspaceStore.getState().ready,true)});
  const first=w.useWorkspaceStore.getState().activeId;
  await test('sessions isolate conversation, reference image, composer draft and geometry',async()=>{

@@ -1,3 +1,4 @@
+import {normalizeTaskBudget} from '../ai/taskBudget';
 import {SiteAccessRecovery} from './SiteAccessRecovery';
 import {AGENT_LIMITS} from '../ai/agentPolicy';
 import {Dialog} from '@radix-ui/themes';
@@ -11,6 +12,8 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [apiKey, setApiKey] = useState(config?.apiKey ?? '');
   const [model, setModel] = useState(config?.model ?? '');
   const [agentMode, setAgentMode] = useState<'pi'|'single'>(config?.agentMode ?? 'pi');
+  const [taskBudget,setTaskBudget]=useState(()=>normalizeTaskBudget(config?.taskBudget));
+  const [parallelDrafts,setParallelDrafts]=useState(config?.parallelDrafts===true);
   const [stream, setStream] = useState(config?.agentMode === 'single' ? config.stream !== false : true);
   const [models, setModels] = useState<string[] | null>(null);
   const [query, setQuery] = useState('');
@@ -64,7 +67,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   };
   const save = () => {
     if (!valid) return;
-    const cfg: ModelConfig = {baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode};
+    const cfg: ModelConfig = {taskBudget:normalizeTaskBudget(taskBudget),baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode,parallelDrafts:agentMode==='pi'&&parallelDrafts};
     useEditorStore.getState().setAiConfig(cfg); onClose();
   };
   const shown = (models ?? []).filter((id) => id.toLowerCase().includes(query.toLowerCase()));
@@ -92,7 +95,14 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           {!fetching && models !== null && !models.length && !originBlocked && !manual && <button className="text-sm text-blue-300 underline" onClick={()=>setManual(true)}>服务不提供列表？手动填写模型名</button>}
           {manual && <label className="block text-sm space-y-1"><span>手动模型名（请以服务文档为准）</span><input className={inputClass} value={model} onChange={(e)=>{sequence.current++;controller.current?.abort();setTesting(false);setResult(null);setModel(e.target.value)}} placeholder="服务实际支持的模型 ID" /></label>}
         </div>
-        <details className="rounded border border-white/10 p-3 text-sm"><summary className="cursor-pointer">高级设置 · 执行方式与流式输出</summary><div className="mt-3 space-y-3">        <label className="block text-sm space-y-1"><span>建模执行方式</span><select aria-label="建模执行方式" className={inputClass} value={agentMode} onChange={e=>{setAgentMode(e.target.value as 'pi'|'single');if(e.target.value==='pi')setStream(true);}}><option value="pi">连续建模（推荐）</option><option value="single">单次生成（兼容模式）</option></select><span className="block text-xs text-gray-400">连续建模需要模型支持图片、工具调用与流式输出；有有效进展就继续，不固定总轮数或总时长。连续 {AGENT_LIMITS.noProgressTurns} 轮无进展或 {AGENT_LIMITS.consecutiveErrorTurns} 轮工具失败且无进展会暂停；连续 {AGENT_LIMITS.idleTimeoutMs/60000} 分钟无活动会停止。每轮最多 {AGENT_LIMITS.outputPerTurn} 输出 Token。会将场景截图发送至你配置的同一接口，实际费用以网关为准。</span></label>
+        <details className="rounded border border-white/10 p-3 text-sm"><summary className="cursor-pointer">高级设置 · 执行方式与流式输出</summary><div className="mt-3 space-y-3">        <label className="block text-sm space-y-1"><span>建模执行方式</span><select aria-label="建模执行方式" className={inputClass} value={agentMode} onChange={e=>{setAgentMode(e.target.value as 'pi'|'single');if(e.target.value==='pi')setStream(true);}}><option value="pi">连续建模（推荐）</option><option value="single">单次生成（兼容模式）</option></select><span className="block text-xs text-gray-400">连续建模需要模型支持图片、工具调用与流式输出；在任务预算内有有效进展就继续，到限后保留未验收草稿。连续 {AGENT_LIMITS.noProgressTurns} 轮无进展或 {AGENT_LIMITS.consecutiveErrorTurns} 轮工具失败且无进展会暂停；连续 {AGENT_LIMITS.idleTimeoutMs/60000} 分钟无活动会停止。每轮最多 {AGENT_LIMITS.outputPerTurn} 输出 Token。会将场景截图发送至你配置的同一接口，实际费用以网关为准。</span></label>
+        <fieldset disabled={agentMode!=='pi'} className="space-y-2 rounded border border-white/10 p-3"><legend>每次建模任务预算</legend>
+          <label className="block">时间上限（分钟）<input aria-label="任务时间上限（分钟）" type="number" min="1" max="120" className={inputClass} value={taskBudget.maxMinutes} onChange={e=>setTaskBudget(b=>({...b,maxMinutes:Number(e.target.value)}))}/></label>
+          <label className="block">模型请求轮数上限<input aria-label="任务轮数上限" type="number" min="1" max="200" className={inputClass} value={taskBudget.maxRounds} onChange={e=>setTaskBudget(b=>({...b,maxRounds:Number(e.target.value)}))}/></label>
+          <label className="block">已报告 Token 上限<input aria-label="任务已报告Token上限" type="number" min="1" max="20000000" className={inputClass} value={taskBudget.maxReportedTokens} onChange={e=>setTaskBudget(b=>({...b,maxReportedTokens:Number(e.target.value)}))}/></label>
+          <p className="text-xs text-gray-400">含实验并行子任务。每次发送或继续生成使用一份新预算，执行中补充要求不重置；修改配置从下一次任务生效。Token 在服务返回用量后检查，可能超过阈值一个在途请求（并行时为多个），不是费用硬上限；未报告用量时依靠时间和轮数限制。到限会停止接收并保留草稿，不代表验收通过，服务端仍可能计费。</p>
+        </fieldset>
+        <label className="flex gap-2 text-sm"><input type="checkbox" disabled={agentMode!=='pi'} checked={parallelDrafts} onChange={e=>setParallelDrafts(e.target.checked)}/><span>实验：独立组件并行建模<span className="block text-xs text-gray-400">最多两个子代理，仅接收组件任务；主代理合并后统一验收。总 Token 包含子代理，可能增加用量；简单任务仍串行。</span></span></label>
         <label className="flex gap-2 text-sm"><input type="checkbox" disabled={agentMode==='pi'} checked={stream} onChange={e=>setStream(e.target.checked)}/><span>实时接收模型输出<span className="block text-xs text-gray-400">显示实际接收进度；服务不支持流式时可关闭，仍保留计时和超时保护</span></span></label>
 </div></details>
         {result && <p role="status" data-testid="test-result" className={`text-sm rounded p-3 ${result.ok?'bg-emerald-950 text-emerald-200':'bg-red-950 text-red-200'}`}>{result.text}</p>}

@@ -1,0 +1,43 @@
+{
+  "sourceCommit": "d2c2fdd3e4047a856d5b1047b0b9960d87742ccb",
+  "startedAt": "2026-10-04T10:03:45Z",
+  "terminalObservedAt": "2026-10-04T10:16:09Z",
+  "status": "stopped_reported_token_budget",
+  "model": "gpt-6.1-sol",
+  "budget": {
+    "minutes": 20,
+    "rounds": 40,
+    "reportedTokens": 1200000
+  },
+  "rounds": 34,
+  "toolCalls": 48,
+  "reportedTokens": 1242386,
+  "nodes": 102,
+  "groups": 3,
+  "revision": 32,
+  "operations": 32,
+  "qualityAccepted": false,
+  "renderer": "software",
+  "structuredMetadataNodes": 0,
+  "performanceComparable": false,
+  "issues": [
+    "人体握持接触未充分验收",
+    "泵内部流道及管口接合未充分验收",
+    "推车轮架内侧接触未充分验收",
+    "PBR材质未验收",
+    "结构生成工具失败后转普通编辑，未持久化结构元数据"
+  ],
+  "uiAssetCheck": {
+    "saved": "双层工具推车 · 单体验证草稿",
+    "version": 1,
+    "parts": 31,
+    "insertYaw": 90,
+    "insertPosition": [
+      0,
+      0,
+      3
+    ],
+    "nodeCountAfterInsert": 133,
+    "nodeCountAfterUndo": 102
+  }
+}

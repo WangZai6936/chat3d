@@ -1,3 +1,5 @@
+import {validateBlueprints,type ObjectBlueprint} from './objectBlueprint';
+import {validateProfile,profileCornerLimit} from './profileValidation';
 import {validateTextureMaps,validateSurface,type TextureMaps,type SurfaceDetail} from './textures';
 import type {Connection} from './connections';
 import {validateAnimation,type AnimationProgram} from './animation';
@@ -56,8 +58,8 @@ export type Geometry =
   | {type:'loft';params:{rings:{center:Vec3;radiusX:number;radiusZ:number}[];segments:number}}
   | {type:'sweepTube';params:{points:Vec3[];radius:number;segments:number;radialSegments:number}}
   | {type:'mesh';params:{positions:number[];indices:number[];normals?:number[];uvs?:number[]}}
-  | {type:'lathe';params:{points:[number,number][];segments:number}}
-  | {type:'profile';params:{points:[number,number][];depth:number}}
+  | {type:'lathe';params:{points:[number,number][];segments:number;smooth?:boolean;wallThickness?:number;capStart?:boolean;capEnd?:boolean}}
+  | {type:'profile';params:{points:[number,number][];depth:number;holes?:[number,number][][];cornerRadius?:number;edgeRadius?:number}}
   | {type:'capsule';params:{radius:number;length:number}}
   | {type:'frame';params:{width:number;height:number;depth:number;thickness:number}}
   | {type:'tube';params:{outerRadius:number;innerRadius:number;height:number}}
@@ -103,6 +105,8 @@ export type SceneRole=typeof SCENE_ROLES[number];
 export type SceneNodeKind = 'primitive' | 'asset' | 'group';
 
 export interface SceneNode {
+  modelStructure?:{blueprintKey:string;featureKeys:string[];localTransform?:Transform;blueprint?:ObjectBlueprint};
+  modelAsset?:{id:string;version:number;instanceId:string;sourceNodeId?:string};
   connection?:Connection;
   id: string; // 全项目唯一且稳定；名称不承担身份
   parentId: string | null;
@@ -180,7 +184,13 @@ export function validateGeometry(g: Geometry): Error[] {
     if(p.rings.some((r,i)=>!r||validateVec3(r.center,'截面中心').length||r.center.some(v=>Math.abs(v)>100)||!Number.isFinite(r.radiusX)||!Number.isFinite(r.radiusZ)||r.radiusX<=0||r.radiusZ<=0||r.radiusX>100||r.radiusZ>100||i>0&&r.center[1]<=p.rings[i-1].center[1]))return [new Error('截面中心需有限米制坐标，Y严格递增，半径0–100米')];return [];
   }
   if(g?.type==='sweepTube'){
-    const p=g.params;if(!p||!Array.isArray(p.points)||p.points.length<2||p.points.length>32||p.points.some((v,i)=>validateVec3(v,'管线控制点').length||v.some(x=>Math.abs(x)>100)||i>0&&v.every((x,j)=>Math.abs(x-p.points[i-1][j])<1e-6))||!Number.isFinite(p.radius)||p.radius<=0||p.radius>10||!Number.isInteger(p.segments)||p.segments<8||p.segments>128||!Number.isInteger(p.radialSegments)||p.radialSegments<8||p.radialSegments>32)return [new Error('曲线管需2–32个不同相邻控制点、半径0–10米、路径8–128分段和环向8–32分段')];return [];
+    const p=g.params;if(!p)return [new Error('sweepTube.params缺失')];const errors:Error[]=[];
+    if(!Array.isArray(p.points)||p.points.length<2||p.points.length>32)errors.push(new Error('sweepTube.points需要2–32个三维控制点'));
+    else for(let i=0;i<p.points.length;i++){const v=p.points[i];if(validateVec3(v,'管线控制点').length||v.some(x=>Math.abs(x)>100))errors.push(new Error('sweepTube.points['+i+']必须是范围±100米内的有限三维坐标'));else if(i>0&&Array.isArray(p.points[i-1])&&v.every((x,j)=>Math.abs(x-p.points[i-1][j])<1e-6))errors.push(new Error('sweepTube.points['+i+']与上一控制点重合'));}
+    if(!Number.isFinite(p.radius)||p.radius<=0||p.radius>10)errors.push(new Error('sweepTube.radius需要大于0且不超过10米'));
+    if(!Number.isInteger(p.segments)||p.segments<8||p.segments>128)errors.push(new Error('sweepTube.segments必须是8–128整数；可用32，不是tubularSegments字段'));
+    if(!Number.isInteger(p.radialSegments)||p.radialSegments<8||p.radialSegments>32)errors.push(new Error('sweepTube.radialSegments必须是8–32整数；可用12'));
+    return errors;
   }
   if(g?.type==='mesh'){
     const p=g.params;if(!p||!Array.isArray(p.positions)||p.positions.length<9||p.positions.length>600000||p.positions.length%3||p.positions.some(v=>typeof v!=='number'||!Number.isFinite(v)||Math.abs(v)>10000))return [new Error('网格坐标无效或超过20万顶点预算')];
@@ -191,15 +201,20 @@ export function validateGeometry(g: Geometry): Error[] {
   }
   if(g?.type==='lathe'||g?.type==='profile'){
     const p=g.params?.points;
-    if(!Array.isArray(p)||p.length<(g.type==='lathe'?2:3)||p.length>32||p.some(v=>!Array.isArray(v)||v.length!==2||v.some(n=>typeof n!=='number'||!Number.isFinite(n)||Math.abs(n)>100)))return [new Error('轮廓需2–32个有限米制二维坐标，绝对值不超过100')];
+    if(!Array.isArray(p)||p.length<(g.type==='lathe'?2:3)||p.length>(g.type==='profile'?64:32)||p.some(v=>!Array.isArray(v)||v.length!==2||v.some(n=>typeof n!=='number'||!Number.isFinite(n)||Math.abs(n)>100)))return [new Error('旋转轮廓需2–32点，挤出轮廓需3–64点；有限米制二维坐标绝对值不超过100')];
     if(g.type==='lathe'){
       if(p.some(v=>v[0]<0)||!p.some(v=>v[0]>0)||p.some((v,i)=>i>0&&v[1]<=p[i-1][1])||!Number.isInteger(g.params.segments)||g.params.segments<8||g.params.segments>64)errs.push(new Error('旋转轮廓半径非负、高度严格递增，分段8–64'));
+      for(const key of ['capStart','capEnd','smooth'] as const)if(g.params[key]!==undefined&&typeof g.params[key]!=='boolean')errs.push(new Error('旋转体端盖与平滑开关必须为布尔值'));
+      const wall=g.params.wallThickness;if(wall!==undefined&&(!Number.isFinite(wall)||wall<=0||p.some(v=>v[0]<=wall)))errs.push(new Error('旋转壳壁厚必须为正且小于每个轮廓半径'));
+      if(wall!==undefined&&(g.params.capStart||g.params.capEnd))errs.push(new Error('旋转薄壳两端保留开口并自动连接壁厚端缘，不能同时填实心端盖'));
     }else{
       if(!Number.isFinite(g.params.depth)||g.params.depth<=0||g.params.depth>100)errs.push(new Error('轮廓挤出深度需0–100米'));
-      let sign=0;for(let i=0;i<p.length;i++){const a=p[i],b=p[(i+1)%p.length],c=p[(i+2)%p.length];const cross=(b[0]-a[0])*(c[1]-b[1])-(b[1]-a[1])*(c[0]-b[0]);if(Math.abs(cross)<1e-10){errs.push(new Error('轮廓存在重复点或共线边'));break;}if(sign&&Math.sign(cross)!==sign){errs.push(new Error('轮廓须为有序凸多边形'));break;}sign=Math.sign(cross);}
-      // Reject non-adjacent intersections, including winding star polygons.
-      const cross=(a:number[],b:number[],c:number[])=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
-      for(let i=0;i<p.length;i++)for(let j=i+2;j<p.length;j++){if(i===0&&j===p.length-1)continue;const a=p[i],b=p[(i+1)%p.length],c=p[j],d=p[(j+1)%p.length];if(cross(a,b,c)*cross(a,b,d)<0&&cross(c,d,a)*cross(c,d,b)<0)errs.push(new Error('轮廓不能自交'));}
+      errs.push(...validateProfile(p,g.params.holes));
+      const radius=g.params.cornerRadius;
+      if(radius!==undefined&&(!Number.isFinite(radius)||radius<0))errs.push(new Error('轮廓圆角需为有限非负值'));
+      if(!errs.length&&radius&&radius>profileCornerLimit([p,...g.params.holes??[]]))errs.push(new Error(`轮廓圆角cornerRadius=${radius}m过大；最大安全值${profileCornerLimit([p,...g.params.holes??[]]).toPrecision(6)}m，避免圆角相交`));
+      const edge=g.params.edgeRadius;if(edge!==undefined&&(!Number.isFinite(edge)||edge<0||edge>=g.params.depth/2))errs.push(new Error(`厚度边缘倒圆edgeRadius需非负且严格小于depth/2=${(g.params.depth/2).toPrecision(6)}m`));
+      if(!errs.length&&edge&&edge+(radius??0)>profileCornerLimit([p,...g.params.holes??[]]))errs.push(new Error(`边缘与轮廓圆角之和超过安全间距：edgeRadius+cornerRadius=${edge+(radius??0)}m，需≤${profileCornerLimit([p,...g.params.holes??[]]).toPrecision(6)}m；可能封闭窄孔或相交，请只减小超限参数或重新设计轮廓`));
     }
     return errs;
   }
@@ -269,6 +284,8 @@ export function validateNode(node: SceneNode): Error[] {
     errs.push(new Error(`节点 id 非法：${node?.id ?? '?'}`));
   }
   for(const key of ['assemblyName','zone','label','planKey'] as const)if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key]!.length>200))errs.push(new Error('场景标注或分组名称无效'));
+  if(node.modelStructure){const s=node.modelStructure;if(typeof s.blueprintKey!=='string'||!s.blueprintKey.trim()||s.blueprintKey.length>80||!Array.isArray(s.featureKeys)||s.featureKeys.length>16||new Set(s.featureKeys).size!==s.featureKeys.length||s.featureKeys.some(k=>typeof k!=='string'||!k.trim()||k.length>80))errs.push(new Error('单体结构关联元数据无效'));if(s.localTransform){errs.push(...validateVec3(s.localTransform.position,'结构局部位置'),...validateVec3(s.localTransform.scale,'结构局部缩放'),...validateQuaternion(s.localTransform.rotationQuaternion,'结构局部旋转'));if(Array.isArray(s.localTransform.scale)&&s.localTransform.scale.some(n=>n<=0))errs.push(new Error('结构局部缩放必须为正'));}if(s.blueprint){try{validateBlueprints([s.blueprint]);if(s.blueprint.key!==s.blueprintKey||s.featureKeys.some(k=>!s.blueprint!.features.some(f=>f.key===k)))throw Error('结构方案引用不匹配');}catch(e){errs.push(e instanceof Error?e:new Error('结构方案无效'));}}}
+  if(node.modelAsset&&(!isValidId(node.modelAsset.id)||!isValidId(node.modelAsset.instanceId)||(node.modelAsset.sourceNodeId!==undefined&&!isValidId(node.modelAsset.sourceNodeId))||!Number.isSafeInteger(node.modelAsset.version)||node.modelAsset.version<1))errs.push(new Error('模型资产来源标识或版本无效'));
   if(node.connection){const c=node.connection;if(!isValidId(c.targetId)||c.targetId===node.id||validateVec3(c.sourcePoint,'连接源点').length||validateVec3(c.targetPoint,'连接目标点').length||!Number.isFinite(c.maxDistance)||c.maxDistance<=0||c.maxDistance>10||typeof c.purpose!=='string'||!c.purpose.trim()||c.purpose.length>160)errs.push(new Error('连接关系无效'));}
   if(node.sceneRole!==undefined&&!SCENE_ROLES.includes(node.sceneRole))errs.push(new Error('场景角色无效'));
   if(node.assemblyId!==undefined&&!isValidId(node.assemblyId))errs.push(new Error('设备组件标识无效'));

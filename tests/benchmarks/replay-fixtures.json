@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "purpose": "Historical full-scene data and rendering replay; not a new-generation quality or Token benchmark.",
+  "fixtures": [
+    {
+      "caseId": "machining-workshop-full-v1",
+      "file": "fixtures/machining-workshop-full-v1.json.gz",
+      "sha256": "cbcf27272bdbf7b3cad508942268ba13b20925814d86001e2e5f6b297cbc80a4",
+      "nodes": 763,
+      "sourceVersion": "v57",
+      "sourceQuality": "unreviewed"
+    },
+    {
+      "caseId": "warehouse-full-v1",
+      "file": "fixtures/warehouse-full-v1.json.gz",
+      "sha256": "0d8c5603014014443e8bd055efdff07013b07a1dea84c994cf4ae2b7e94c5066",
+      "nodes": 561,
+      "sourceVersion": "v62",
+      "sourceQuality": "unreviewed"
+    },
+    {
+      "caseId": "assembly-line-full-v1",
+      "file": "fixtures/assembly-line-full-v1.json.gz",
+      "sha256": "1818bce916533efb02bc45eb9acb9926687dbcb648cb7d937c9b6018217be56f",
+      "nodes": 391,
+      "sourceVersion": "v66-recovery",
+      "sourceQuality": "unreviewed"
+    }
+  ]
+}

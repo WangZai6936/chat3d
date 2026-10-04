@@ -1,5 +1,7 @@
+import {smoothRadialProfile} from '../domain/radialProfile';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import {mergeGeometries} from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Geometry } from '../domain/types';
 
 // 视口与导出共享几何构建，避免下载模型与画面不一致。
@@ -17,8 +19,32 @@ export function buildPrimitiveGeometry(g: Geometry): THREE.BufferGeometry {
     }
     case 'sweepTube':return new THREE.TubeGeometry(new THREE.CatmullRomCurve3(g.params.points.map(p=>new THREE.Vector3(...p)),false,'centripetal'),g.params.segments,g.params.radius,g.params.radialSegments,false);
     case 'mesh': {const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(g.params.positions,3));geo.setIndex(g.params.indices);if(g.params.uvs)geo.setAttribute('uv',new THREE.Float32BufferAttribute(g.params.uvs,2));if(g.params.normals)geo.setAttribute('normal',new THREE.Float32BufferAttribute(g.params.normals,3));else geo.computeVertexNormals();return geo;}
-    case 'lathe': {const geo=new THREE.LatheGeometry(g.params.points.map(p=>new THREE.Vector2(...p)),g.params.segments);geo.computeVertexNormals();return geo;}
-    case 'profile': {const shape=new THREE.Shape(g.params.points.map(p=>new THREE.Vector2(...p)));shape.closePath();const geo=new THREE.ExtrudeGeometry(shape,{depth:g.params.depth,bevelEnabled:false,steps:1});geo.translate(0,0,-g.params.depth/2);return geo;}
+    case 'lathe': {
+      const {segments,wallThickness,capStart,capEnd}=g.params;const points=g.params.smooth?smoothRadialProfile(g.params.points):g.params.points;
+      const surfaces:THREE.BufferGeometry[]=[new THREE.LatheGeometry(points.map(p=>new THREE.Vector2(...p)),segments)];
+      if(wallThickness!==undefined)surfaces.push(new THREE.LatheGeometry([...points].reverse().map(([r,y])=>new THREE.Vector2(r-wallThickness,y)),segments));
+      const end=(p:number[],upper:boolean,inner:number)=>{if(p[0]===0)return;const cap=new THREE.RingGeometry(inner,p[0],segments);cap.rotateX(upper?-Math.PI/2:Math.PI/2);cap.translate(0,p[1],0);surfaces.push(cap);};
+      if(wallThickness!==undefined){end(points[0],false,points[0][0]-wallThickness);end(points[points.length-1],true,points[points.length-1][0]-wallThickness);}
+      else {if(capStart)end(points[0],false,0);if(capEnd)end(points[points.length-1],true,0);}
+      // Separate cap vertices keep sharp rims; revolved sides retain continuous normals.
+      const merged=mergeGeometries(surfaces)!;for(const surface of surfaces)surface.dispose();return merged;
+    }
+    case 'profile': {
+      const radius=g.params.cornerRadius??0;
+      const contour=(points:[number,number][],path:THREE.Path)=>{
+        if(!radius){points.forEach(([x,y],i)=>i?path.lineTo(x,y):path.moveTo(x,y));path.closePath();return;}
+        for(let i=0;i<points.length;i++){
+          const p=new THREE.Vector2(...points[i]),prev=new THREE.Vector2(...points[(i+points.length-1)%points.length]),next=new THREE.Vector2(...points[(i+1)%points.length]);
+          const a=prev.sub(p).normalize().multiplyScalar(radius).add(p),b=next.sub(p).normalize().multiplyScalar(radius).add(p);
+          if(i===0)path.moveTo(a.x,a.y);else path.lineTo(a.x,a.y);
+          path.quadraticCurveTo(p.x,p.y,b.x,b.y);
+        }path.closePath();
+      };
+      const shape=new THREE.Shape();contour(g.params.points,shape);
+      for(const ring of g.params.holes??[]){const hole=new THREE.Path();contour(ring,hole);shape.holes.push(hole);}
+      const edge=g.params.edgeRadius??0;
+      const geo=new THREE.ExtrudeGeometry(shape,{depth:g.params.depth-2*edge,bevelEnabled:edge>0,bevelThickness:edge,bevelSize:edge,bevelOffset:-edge,bevelSegments:3,steps:1,curveSegments:8});geo.translate(0,0,-g.params.depth/2+edge);return geo;
+    }
     case 'capsule':return new THREE.CapsuleGeometry(g.params.radius,g.params.length,8,24);
     case 'frame': {
       const {width:w,height:h,depth:d,thickness:t}=g.params;
@@ -28,8 +54,7 @@ export function buildPrimitiveGeometry(g: Geometry): THREE.BufferGeometry {
     }
     case 'tube': {
       const {outerRadius:r,innerRadius:i,height:h}=g.params;
-      const shape=new THREE.Shape();shape.absarc(0,0,r,0,Math.PI*2,false);const hole=new THREE.Path();hole.absarc(0,0,i,0,Math.PI*2,true);shape.holes.push(hole);
-      const geo=new THREE.ExtrudeGeometry(shape,{depth:h,bevelEnabled:false,steps:1,curveSegments:32});geo.translate(0,0,-h/2);geo.rotateX(-Math.PI/2);return geo;
+      return buildPrimitiveGeometry({type:'lathe',params:{points:[[r,-h/2],[r,h/2]],segments:64,wallThickness:r-i}});
     }
     case 'trapezoid': {
       const {widthTop:t,widthBottom:b,height:h,depth:d}=g.params;

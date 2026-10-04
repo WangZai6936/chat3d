@@ -1,3 +1,5 @@
+import {inspectSpatialOccupancy,type SpatialPart} from './spatialQuality';
+import {inspectGeometryQuality} from './geometryQuality';
 import {connectionReport} from './connections';
 import {buildPrimitiveGeometry} from '../scene/geometry';
 import {Box3,Matrix4,Quaternion,Vector3} from 'three';
@@ -10,8 +12,8 @@ export interface CompositionPlan {
  presentation:string;
 }
 export interface QualityPlan {equipment:{name:string;count:number;features:string[]}[];composition?:CompositionPlan}
-export interface QualityReport {revision:number;componentCount:number;roles:Record<string,number>;coverage:{name:string;expected:number;actual:number}[];layout:{id:string;name:string;planKey:string;role?:SceneRole;min:number[];max:number[]}[];issues:string[];notes:string[]}
-interface Component {id:string;name:string;key:string;role?:SceneRole;nodes:number;bounds:Box3;materials:Set<string>}
+export interface QualityReport {revision:number;componentCount:number;roles:Record<string,number>;coverage:{name:string;expected:number;actual:number}[];layout:{id:string;name:string;planKey:string;role?:SceneRole;min:number[];max:number[]}[];issues:string[];notes:string[];spatial:ReturnType<typeof inspectSpatialOccupancy>}
+interface Component {id:string;name:string;key:string;role?:SceneRole;nodes:number;bounds:Box3;materials:Set<string>;parts:SpatialPart[]}
 export function boundsFor(g:Geometry):Box3{
  let size:[number,number,number];
  switch(g.type){
@@ -35,12 +37,12 @@ export function inspectSceneQuality(doc:SceneDocument,plan?:QualityPlan):Quality
  for(const node of doc.nodes){
   if(!node.visible||!node.geometry)continue;
   const id=node.assemblyId??node.id;let group=groups.get(id);
-  if(!group){group={id,name:node.assemblyName??node.name,key:node.planKey??node.assemblyName??node.name,role:node.sceneRole,nodes:0,bounds:new Box3(),materials:new Set()};groups.set(id,group);}
+  if(!group){group={id,name:node.assemblyName??node.name,key:node.planKey??node.assemblyName??node.name,role:node.sceneRole,nodes:0,bounds:new Box3(),materials:new Set(),parts:[]};groups.set(id,group);}
   group.nodes++;if(node.materialId)group.materials.add(node.materialId);
   const key=JSON.stringify(node.geometry);let local=cache.get(key);if(!local){local=boundsFor(node.geometry);cache.set(key,local);}
-  const matrix=new Matrix4().compose(new Vector3(...node.transform.position),new Quaternion(...node.transform.rotationQuaternion),new Vector3(...node.transform.scale));group.bounds.union(local.clone().applyMatrix4(matrix));
+  const matrix=new Matrix4().compose(new Vector3(...node.transform.position),new Quaternion(...node.transform.rotationQuaternion),new Vector3(...node.transform.scale));const world=local.clone().applyMatrix4(matrix);group.bounds.union(world);group.parts.push({id:node.id,name:node.name,bounds:world});
  }
- const components=[...groups.values()],issues:string[]=[],roles:Record<string,number>={};
+ const components=[...groups.values()],spatial=inspectSpatialOccupancy([...groups.values()]),issues:string[]=[],roles:Record<string,number>={};
  for(const c of components)roles[c.role??'unclassified']=(roles[c.role??'unclassified']??0)+1;
  const expected=[...(plan?.equipment??[]).map(e=>({name:e.name,count:e.count})),...(plan?.composition?.support??[]).map(e=>({name:e.name,count:e.count}))];
  const coverage=expected.map(e=>({name:e.name,expected:e.count,actual:components.filter(c=>c.key===e.name).length}));
@@ -79,5 +81,5 @@ export function inspectSceneQuality(doc:SceneDocument,plan?:QualityPlan):Quality
   if([...c.materials].some(id=>(doc.materials.find(m=>m.id===id)?.metalness??0)>.7))issues.push(`${c.name}使用高金属度材质，请确认墙地面是否确实需要金属表面`);
  }
  for(const c of connectionReport(doc))if(c.status!=='within_tolerance')issues.push(`连接关系待修正：${c.purpose}，当前距离${c.distance?.toFixed(3)??'未知'}m，允许${c.maxDistance}m；需确认接触面与穿插`);
- return {revision:doc.revision,componentCount:components.length,roles,coverage,layout:components.slice(0,200).map(c=>({id:c.id,name:c.name,planKey:c.key,role:c.role,min:c.bounds.min.toArray(),max:c.bounds.max.toArray()})),issues:[...new Set(issues)].slice(0,24),notes:[...(components.length>200?['布局坐标仅列前200个组件，其他组件需按区域读取']:[]),...(allMachines.length>200?['包围盒交叠检查仅覆盖前200台设备，较大场景需要分区复核']:[]),'清单匹配依赖组件planKey；缺标注不一定代表缺模型','包围盒交叠只是检查线索，不等于实际几何碰撞','连接检查核对对象及输送包围盒间距，不证明接口相接或工艺正确','仍需近景与全景检查结构、人员动作、疏密和统一观感']};
+ return {revision:doc.revision,componentCount:components.length,roles,coverage,layout:components.slice(0,200).map(c=>({id:c.id,name:c.name,planKey:c.key,role:c.role,min:c.bounds.min.toArray(),max:c.bounds.max.toArray()})),spatial,issues:[...new Set([...spatial.candidates.map(c=>`${c.relation==='enclosing_space'?'围护内部空间待核对':c.kind==='body_occupancy'?'人员身体占位风险':'跨组件占位待核对'}：${c.aName} / ${c.bName}，交叠范围 ${c.overlap.join('×')}m；${c.partPairs.length?'已有零件包围盒交叠线索':'可能涉及空腔或预留空间'}，需核对实际几何与用途，不可仅凭接触点判通过`),...inspectGeometryQuality(doc),...issues])].slice(0,24),notes:[...(components.length>200?['布局坐标仅列前200个组件，其他组件需按区域读取']:[]),...(allMachines.length>200?['包围盒交叠检查仅覆盖前200台设备，较大场景需要分区复核']:[]),'清单匹配依赖组件planKey；缺标注不一定代表缺模型','包围盒交叠只是检查线索，不等于实际几何碰撞','连接检查核对对象及输送包围盒间距，不证明接口相接或工艺正确','仍需近景与全景检查结构、人员动作、疏密和统一观感']};
 }

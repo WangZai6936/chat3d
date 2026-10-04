@@ -1,3 +1,4 @@
+import {normalizeTaskBudget} from './ai/taskBudget';
 // 编辑器状态 — Zustand（React UI 外壳与 Three.js 视口共享的储物间）
 // - SceneDocument 是唯一可信来源；UI 状态（选择/面板）与项目状态（几何/层级/材质）分开
 // - 一次 AI 批量修改 = 一条历史记录；拖动手柄松开时提交一条
@@ -139,14 +140,14 @@ function pushHistory(past: HistoryEntry[], entry: HistoryEntry): HistoryEntry[] 
 // P3 可升级到系统密钥链 / Tauri Stronghold）
 const CONFIG_KEY = 'chat3d.modelConfig';
 import type { ModelConfig } from './ai/provider';
-function loadConfig(): ModelConfig | null {
+export function loadModelConfig(): ModelConfig | null {
   try {
     const s = localStorage.getItem(CONFIG_KEY);
     if (!s) return null;
     const c = JSON.parse(s) as Partial<ModelConfig>;
     if (c.useMock === true) return null;
     if (typeof c.baseURL !== 'string' || typeof c.apiKey !== 'string' || typeof c.model !== 'string') return null;
-    return { baseURL: c.baseURL, apiKey: c.apiKey, model: c.model, agentMode: c.agentMode === 'single' ? 'single' : 'pi', stream: c.stream !== false, useMock: false };
+    return { taskBudget:normalizeTaskBudget(c.taskBudget), baseURL: c.baseURL, apiKey: c.apiKey, model: c.model, agentMode: c.agentMode === 'single' ? 'single' : 'pi', parallelDrafts: c.parallelDrafts === true, stream: c.stream !== false, useMock: false };
   } catch {
     return null;
   }
@@ -176,7 +177,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   pendingBatch: null,
   pendingResult: null,
   previewDoc: null,
-  aiConfig: loadConfig(),
+  aiConfig: loadModelConfig(),
 
   setAiConfig: (cfg) => {
     set({ aiConfig: cfg });

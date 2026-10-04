@@ -5,14 +5,14 @@ import {connectionReport} from './connections';
 export const DETAIL_CRITERIA=[
  {key:'silhouette',name:'外形与比例',standard:'轮廓、尺度和主要比例应符合对象身份及用户参考，不能只用标签或颜色区分类别。'},
  {key:'structure',name:'功能结构',standard:'按对象用途表达主要结构、开口与工作部位；简单实体无需虚构机械机构，复杂对象不能停在占位外壳。'},
- {key:'connections',name:'连接与接触',standard:'应相接的部件实际连接，避免无依据的悬空/穿插；人物、工具与操作面的关系合理。'},
+ {key:'connections',name:'连接与接触',standard:'应相接的部件实际连接，避免无依据的悬空/穿插；人物、工具与操作面的关系合理；须看清腕掌连续、拇指与四指、实际包握/单指按压、工具朝向与无穿插。登记接触点合格不代表握持合理。'},
  {key:'materials',name:'材质与表面',standard:'按实际材料体现颜色、粗糙度、金属度/透明度；不靠强光或随机换色掩盖形体。'},
  {key:'details',name:'用途相关细节',standard:'根据对象身份补足近景可辨识的必要细节，不能以多边形数、零件数或无用装饰替代。'},
  {key:'context',name:'完整性与环境关系',standard:'独立模型要完整，场景中要核对落地、朝向、操作空间与相邻对象；不强加用户未要求的环境。'},
 ] as const;
 export type DetailCriterion=typeof DETAIL_CRITERIA[number]['key'];
 export interface DetailCheck {criterion:DetailCriterion;status:'pass'|'fail'|'unknown'|'not_applicable';evidence:string;nodeIds:string[]}
-export interface DetailReview {componentId:string;revision:number;checks:DetailCheck[];visualEvidence:boolean}
+export interface DetailReview {componentId:string;revision:number;checks:DetailCheck[];visualEvidence:boolean;isolatedEvidence?:boolean;contextEvidence?:boolean;interactionEvidence?:boolean;geometryOnly?:boolean;evidenceRevision?:number;reusedCriteria?:DetailCriterion[];criterionEvidence?:Partial<Record<DetailCriterion,number>>}
 export interface DetailAcceptance {revision:number;status:'not_required'|'pending'|'needs_work'|'self_reviewed';targets:{id:string;name:string}[];reviews:DetailReview[];issues:string[]}
 /** New geometry must meet the same standard regardless of domain or catalogue membership. */
 export function detailTargets(base:SceneDocument,draft:SceneDocument){
@@ -37,6 +37,8 @@ export function detailTargets(base:SceneDocument,draft:SceneDocument){
 export function validateDetailReview(doc:SceneDocument,review:DetailReview):string[]{
  const errors:string[]=[];const members=doc.nodes.filter(n=>(n.assemblyId??n.id)===review.componentId);if(!members.length)return ['细节检查目标不存在'];
  if(review.revision!==doc.revision)errors.push('细节检查版本已过期');
+ if(review.reusedCriteria?.length&&(!Number.isInteger(review.evidenceRevision)||review.evidenceRevision!>=review.revision||review.reusedCriteria.some(k=>!DETAIL_CRITERIA.some(c=>c.key===k))))errors.push('复用证据来源版本或项目无效');
+ if(review.criterionEvidence&&Object.entries(review.criterionEvidence).some(([key,revision])=>!DETAIL_CRITERIA.some(c=>c.key===key)||!Number.isInteger(revision)||revision<0||revision>review.revision||(review.reusedCriteria?.includes(key as DetailCriterion)&&revision>=review.revision)))errors.push('逐项证据版本无效');
  const keys=review.checks.map(c=>c.criterion);if(keys.length!==DETAIL_CRITERIA.length||new Set(keys).size!==DETAIL_CRITERIA.length||DETAIL_CRITERIA.some(c=>!keys.includes(c.key)))errors.push('每个对象必须覆盖全部六项标准');
  const ids=new Set(members.map(n=>n.id));
  const offSurface=inspectContactSurfaces(doc,doc.nodes.filter(n=>n.connection&&(ids.has(n.id)||ids.has(n.connection.targetId))).map(n=>n.id)).filter(c=>c.status==='off_surface');
@@ -46,10 +48,13 @@ export function validateDetailReview(doc:SceneDocument,review:DetailReview):stri
  for(const c of review.checks){
   if(!['pass','fail','unknown','not_applicable'].includes(c.status)||!c.evidence?.trim()||c.evidence.length>600)errors.push('检查结论或依据无效');
   if(!Array.isArray(c.nodeIds)||c.nodeIds.length>16||c.nodeIds.some(id=>!ids.has(id)))errors.push('依据必须引用当前组件的真实部件');
+  if(review.isolatedEvidence&&['connections','context'].includes(c.criterion)&&['pass','not_applicable'].includes(c.status)&&!(c.criterion==='context'&&review.contextEvidence)&&!review.reusedCriteria?.includes(c.criterion))errors.push('单体隔离图不能通过连接接触或场景关系，需完整上下文画面');
+  if(c.criterion==='materials'&&['pass','not_applicable'].includes(c.status)&&review.geometryOnly)errors.push('软件几何检查图不支持材质验收，请使用真实渲染或保留unknown');
   if(c.criterion==='materials'&&['pass','not_applicable'].includes(c.status)&&badUV.length)errors.push('已使用贴图的部件存在缺失或塌缩UV，材质项需要修正后复核');
+  if(c.criterion==='connections'&&['pass','not_applicable'].includes(c.status)&&members.some(n=>n.sceneRole==='person')&&!review.interactionEvidence&&!review.reusedCriteria?.includes('connections'))errors.push('人物连接项需当前版本手部与工具的两个局部视角，不能用全身或接触点代替');
   if(c.criterion==='connections'&&['pass','not_applicable'].includes(c.status)&&offSurface.length)errors.push('接触点偏离真实表面，不能以重合中心点当作有效接触');
   if(c.criterion==='connections'&&['pass','not_applicable'].includes(c.status)&&brokenConnections.length)errors.push('已登记接触关系存在分离或缺失，连接项不能通过或跳过');
-  if(c.status==='pass'&&(!review.visualEvidence||!c.nodeIds.length))errors.push('没有当前多角度近景或真实部件依据，不能标为通过');
+  if(c.status==='pass'&&((!review.visualEvidence&&!(c.criterion==='context'&&review.contextEvidence)&&!review.reusedCriteria?.includes(c.criterion))||!c.nodeIds.length))errors.push('没有当前多角度近景或真实部件依据，不能标为通过');
   if(c.status==='not_applicable'&&['silhouette','details'].includes(c.criterion))errors.push('外形和用途相关细节始终需要检查；简单实体也应核对边缘/比例/表面，不得跳过');
  }
  return errors;

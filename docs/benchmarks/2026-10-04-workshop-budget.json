@@ -1,0 +1,29 @@
+{
+  "sourceCommit": "8678502668d8337e69ef51eb31657689579782d0",
+  "startedAt": "2026-10-04T00:04:14Z",
+  "terminalObservedAt": "2026-10-04T00:13:30Z",
+  "status": "stopped_reported_token_budget",
+  "budget": {
+    "minutes": 20,
+    "rounds": 40,
+    "reportedTokens": 1200000
+  },
+  "model": "gpt-6.1-sol",
+  "rounds": 32,
+  "toolCalls": 31,
+  "reportedTokens": 1231042,
+  "reportedTokenOvershoot": 31042,
+  "nodes": 654,
+  "groups": 18,
+  "operations": 25,
+  "qualityAccepted": false,
+  "comparablePerformanceResult": false,
+  "renderer": "software",
+  "issues": [
+    "通道边界共面交叠待修正",
+    "人员握持与接触待验收",
+    "纸箱独立表面颜色未设置",
+    "部分关键结构被遮挡",
+    "PBR材质无法由软件图验收"
+  ]
+}
