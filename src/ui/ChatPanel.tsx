@@ -1,3 +1,4 @@
+import {Button,TextArea} from '@radix-ui/themes';
 import {isSoftwareCaptureAvailable} from '../scene/softwareCapture';
 import {isServerCaptureAvailable} from '../scene/serverCapture';
 import {evaluateDetailAcceptance} from '../domain/detailAcceptance';
@@ -50,7 +51,6 @@ export function ChatPanel({onConfigure,onAssets}:{executionDetails?:boolean;onCo
   const [agentActivity, setAgentActivity] = useState<AgentActivity | null>(()=>store().lastRun);
   const controlRef=useRef<AgentControl|null>(null);
   const [canSteer,setCanSteer]=useState(false);
-  const [sendMode,setSendMode]=useState<'guide'|'question'|'later'>('guide');
   const markSteering=(id:string,status:'queued'|'received'|'interrupted')=>useEditorStore.setState(state=>({messages:state.messages.map(m=>m.id===id?{...m,steering:{runId:runMessageId.current??'',status}}:m)}));
   const clearControl=()=>{controlRef.current=null;setCanSteer(false);useEditorStore.setState(state=>({messages:state.messages.map(m=>m.steering?.runId===runMessageId.current&&m.steering.status==='queued'?{...m,steering:{...m.steering,status:'interrupted' as const}}:m)}));};
   const runMessageId=useRef<string|null>(null);
@@ -139,7 +139,7 @@ export function ChatPanel({onConfigure,onAssets}:{executionDetails?:boolean;onCo
     const activity={...cp.activity,timings:cp.activity.timings.map(t=>({...t,endedAt:t.endedAt??Date.now()}))};
     setAgentActivity(activity);store().setLastRun(activity);finalize(batch,cp.result);return true;
   };
-  const send = async () => {
+  const send = async (sendMode:'guide'|'question'|'later'='guide') => {
     const text = input.trim();
     if ((!text && !attachments.length) || imageBusyRef.current) return;
     if(runningRef.current){
@@ -164,7 +164,7 @@ export function ChatPanel({onConfigure,onAssets}:{executionDetails?:boolean;onCo
     const original=store().doc,working=parent?.result.doc??original;
     checkpointRef.current=null;setCompareBefore(false);store().setPreviewDoc(parent?.result.doc??null);
     if(!parent){store().setPendingBatch(null);store().setPendingResult(null);}
-    setRunPi(usePi);setSendMode('guide'); setAgentActivity(null);store().setLastRun(null);
+    setRunPi(usePi); setAgentActivity(null);store().setLastRun(null);
     const sentImages = [...attachments];
     // Current reference stays visible in the conversation; a follow-up may reuse the latest image.
     const reference = sentImages.length ? sentImages : reuseReference ? [...messages].reverse().find(m=>m.role==='user' && !m.queuedTask && m.images?.length)?.images ?? [] : [];
@@ -291,18 +291,18 @@ export function ChatPanel({onConfigure,onAssets}:{executionDetails?:boolean;onCo
     {!!attachments.length && <div className="flex gap-2 p-2 flex-wrap">{attachments.map((src,i)=><div key={i} className="relative"><button onClick={()=>setImageView(src)}><img src={src} alt={`待发送参考图 ${i+1}`} className="w-16 h-14 rounded object-cover"/></button><button aria-label={`移除参考图 ${i+1}`} onClick={()=>setAttachments(prev=>prev.filter((_,j)=>i!==j))} className="absolute -top-1 -right-1 rounded-full bg-red-600 w-5 h-5 text-xs">×</button></div>)}</div>}
     {doc.nodes.length>0&&<fieldset disabled={busy} className="edit-scope-controls mx-3 mb-2 space-y-2 text-xs text-gray-200 disabled:opacity-50"><label className="flex items-center justify-between gap-2">修改范围<select aria-label="对话修改范围" value={scopeMode} onChange={e=>setScopeMode(e.target.value as 'scene'|'selection')} className="rounded bg-[#252A31] border border-white/20 px-2 py-1"><option value="scene">全场景</option><option value="selection">仅选中对象（{selection.length}）</option></select></label><p>{scopeMode==='selection'?(selection.length?`仅允许修改选中的 ${selection.length} 个零件；其他对象受保护。`:'请先在对象列表中选择对象，再发送指令。'):'可以修改全场景；选中对象仅用于指代，仍遵守指令中的局部限制。'}</p><details><summary>更多修改选项</summary><label className="flex gap-2 items-center mt-2"><input type="checkbox" checked={lockPlacement} onChange={e=>setLockPlacement(e.target.checked)}/>锁定已有对象的位置与朝向</label></details></fieldset>}
     <div className="chat-composer p-3 border-t border-white/10 bg-[#252A31]">
-      {busy&&runPi&&<label className="mb-2 flex items-center gap-2 text-xs text-gray-300">这条消息<select aria-label="执行中消息用途" value={sendMode} onChange={e=>setSendMode(e.target.value as 'guide'|'question'|'later')} className="bg-[#252A31] rounded border border-white/20 p-1"><option value="guide">引导当前任务</option><option value="question">先回答问题，不修改</option><option value="later">记为后续任务</option></select></label>}
-      <textarea ref={inputRef} value={input} onChange={e=>setInput(e.target.value)} aria-label="建模指令" rows={3}
+
+      <TextArea ref={inputRef} value={input} onChange={e=>setInput(e.target.value)} aria-label="建模指令" rows={3}
         onPaste={e=>{const items=Array.from(e.clipboardData.items).filter(it=>it.type.startsWith('image/'));if(items.length){e.preventDefault();void addImages(items.map(it=>it.getAsFile()).filter((f): f is File=>!!f));}}}
         onCompositionStart={()=>composingRef.current=true} onCompositionEnd={()=>composingRef.current=false}
-        onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!composingRef.current&&!e.nativeEvent.isComposing){e.preventDefault();if(!busy||canSteer||(runPi&&sendMode==='later'))void send();}}}
+        onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!composingRef.current&&!e.nativeEvent.isComposing){e.preventDefault();if(!busy||canSteer)void send();}}}
         placeholder={busy ? canSteer?'补充要求、纠正方向或提问，当前操作结束后接收…':'正在准备，可先输入补充要求…' : previewing?'继续描述调整要求，将修改当前预览…': '描述结构、尺寸与需要修改的细节…'}
         className="w-full bg-black/20 border border-white/15 rounded-lg p-3 text-sm resize-none focus:outline-none focus:border-blue-400"/>
       <div className="flex items-center justify-between gap-2 mt-2">
         <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e=>{void addImages(Array.from(e.target.files??[]));e.target.value='';}}/>
-        <button disabled={imageBusy||attachments.length>=MAX_IMAGES} onClick={()=>fileRef.current?.click()} className="text-xs text-gray-300 disabled:opacity-40">{imageBusy?'处理图片…':`＋ 参考图 ${attachments.length}/${MAX_IMAGES}`}</button>
-        <span className="text-[10px] text-gray-500">Shift+Enter 换行</span>
-        <button onClick={()=>void send()} disabled={(busy&&!canSteer&&!(runPi&&sendMode==='later'))||imageBusy||(!input.trim()&&!attachments.length)} className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg px-4 py-2 text-sm">{busy?runPi&&sendMode==='later'?'保存后续任务':canSteer?sendMode==='question'?'发送问题':'发送引导':'等待当前请求':'发送'}</button>
+        <Button variant="soft" color="gray" disabled={imageBusy||attachments.length>=MAX_IMAGES} onClick={()=>fileRef.current?.click()} className="text-xs text-gray-300 disabled:opacity-40">{imageBusy?'处理图片…':`＋ 参考图 ${attachments.length}/${MAX_IMAGES}`}</Button>
+        <span className="text-[10px] text-gray-500">{busy&&runPi?'Enter 引导 · Shift+Enter 换行':'Shift+Enter 换行'}</span>
+        {busy&&runPi?<div className="flex flex-wrap justify-end gap-2" aria-label="运行中操作"><Button variant="soft" color="gray" title="当前操作结束后，将补充要求交给模型调整任务" onClick={()=>void send('guide')} disabled={!canSteer||imageBusy||(!input.trim()&&!attachments.length)} className="asset-button">发送引导</Button><Button variant="soft" color="gray" title="交给模型回答，禁止修改场景" onClick={()=>void send('question')} disabled={!canSteer||imageBusy||(!input.trim()&&!attachments.length)} className="asset-button">发送问题</Button><Button variant="soft" color="gray" title="只保存任务，当前任务结束后由你发送" onClick={()=>void send('later')} disabled={imageBusy||(!input.trim()&&!attachments.length)} className="asset-button">保存后续任务</Button></div>:<Button variant="solid" onClick={()=>void send()} disabled={busy||imageBusy||(!input.trim()&&!attachments.length)} className="bg-blue-600 hover:bg-blue-500 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg px-4 py-2 text-sm">{busy?'等待当前请求':'发送'}</Button>}
       </div>
       {!attachments.length && messages.some(m=>m.images?.length) && <label className="flex items-center gap-2 text-[11px] text-gray-400 mt-2"><input type="checkbox" checked={reuseReference} onChange={e=>setReuseReference(e.target.checked)}/>沿用最近参考图（新建无关模型时可取消）</label>}
     </div>

@@ -388,5 +388,23 @@ await test('renderer recovery on the next task restores required capture and lat
   const f=fake([context=>{const tools=context.messages.find(m=>m.role==='system').toolsAdded;assert.ok(!tools.some(t=>t.name==='set_surfaces_batch'));return [{name:'enable_modeling_tools',args:{group:'surfaces'}}];},context=>{assert.ok(context.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='set_surfaces_batch'));return '工具已准备';}]);const o=opts(f);const r=await runModelingAgent(o);const times=r.activity.timings.filter(t=>t.kind==='model');assert.equal(times.length,2);assert.ok(times.every(t=>t.requestFootprint.totalSerializedChars>0));assert.ok(times[1].requestFootprint.toolSchemaChars>times[0].requestFootprint.toolSchemaChars);
  });
  await test('unavailable renderer never exposes automatic capture or invents captured evidence',async()=>{const f=fake([context=>{assert.ok(!context.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='capture_quality_review'));return 'no capture';}]);const o=opts(f);o.captureAvailable=()=>false;await runModelingAgent(o);});
+
+ await test('review completion submits after fresh evidence without a separate model round and keeps unknown quality',async()=>{
+ const f=fake([[edit,capture],[{name:'review_model',args:{observations:'已检查主体外形；材质细节尚未验收',issues:[],completion:{summary:'主体已生成，提交待确认',remainingIssues:['材质待验收']}}}]]);const r=await runModelingAgent(opts(f));assert.equal(f.calls,2);assert.equal(r.batch.taskStatus,'submitted');assert.equal(r.batch.incomplete,true);assert.match(r.batch.summary,/材质待验收/);assert.equal(r.activity.detailAcceptance.status,'pending');
+ });
+ await test('repeated unchanged screenshots reuse evidence without rendering or claiming new progress',async()=>{
+ const f=fake([[edit,capture],[capture],[{name:'review_model',args:{observations:'读取之前当前版本的真实画面',issues:[],completion:{summary:'复核后提交',remainingIssues:[]}}}]]);const o=opts(f);let rendered=0;o.capture=async()=>{rendered++;return picture;};const r=await runModelingAgent(o);assert.equal(rendered,1);assert.equal(r.batch.taskStatus,'submitted');assert.ok(f.contexts.some(c=>JSON.stringify(c).includes('相同目标和视角')));
+ });
+ await test('combined review cannot bypass same-turn screenshot evidence requirement',async()=>{
+ const done={name:'review_model',args:{observations:'不能提前判定刚返回的图片',issues:[],completion:{summary:'提前提交',remainingIssues:[]}}};const f=fake([[edit,capture,done],'保留未完成']);const r=await runModelingAgent(opts(f));assert.equal(r.batch.taskStatus,'partial');assert.ok(r.activity.timings.some(t=>t.failed&&t.label==='记录视觉检查'));
+ });
+
+ await test('single visible object component views satisfy whole scene submission but two objects do not',async()=>{
+  for(const multiple of [false,true]){const build={name:'edit_scene',args:{summary:'build',operations:multiple?[create,{...create,tempId:'other',name:'other',transform:{...create.transform,position:[4,0,0]}}]:[create]}};
+   const f=fake([[build],ctx=>{const node=JSON.parse(ctx.messages.find(m=>m.role==='toolResult'&&m.toolName==='edit_scene').content[0].text).scene.nodes[0];return [{name:'capture_multiview',args:{componentId:node.id,views:['front','side']}}];},[{name:'review_model',args:{observations:'核对当前真实图像后提交；质量仍待验收',issues:[],completion:{summary:'完成本次修改',remainingIssues:[]}}}],'保留未完成']);
+   const r=await runModelingAgent(opts(f));assert.equal(r.batch.taskStatus,multiple?'partial':'submitted');if(!multiple){assert.equal(f.calls,3);assert.ok(!r.activity.timings.some(t=>t.failed));}else assert.ok(r.activity.timings.some(t=>t.failed));
+  }
+ });
+ await test('empty scene omits redundant target-detail lookup but restores it after geometry exists',async()=>{const f=fake([ctx=>{assert.ok(!ctx.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='detail_quality_standard'));return [edit];},ctx=>{assert.ok(ctx.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='detail_quality_standard'));return '阶段草稿';}]);await runModelingAgent(opts(f));});
  console.log(`${passed} Pi agent loop checks passed; model and rendering mocked`);
 }finally{await server.close()}

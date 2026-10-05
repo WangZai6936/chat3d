@@ -73,7 +73,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const shown = (models ?? []).filter((id) => id.toLowerCase().includes(query.toLowerCase()));
   const originBlocked = error.includes('origin not allowed');
   return <Dialog.Root open onOpenChange={open=>{if(!open)onClose();}}>
-    <Dialog.Content aria-describedby={undefined} maxWidth="580px" style={{padding:0,maxHeight:'92vh',overflowY:'auto',background:'#19212c'}} onInteractOutside={e=>e.preventDefault()}>
+    <Dialog.Content aria-describedby={undefined} maxWidth="580px" style={{padding:0,maxHeight:'92vh',overflowY:'auto',background:'var(--color-panel-solid)'}} onInteractOutside={e=>e.preventDefault()}>
       <header className="flex items-center justify-between px-5 py-4 border-b border-black/40">
         <Dialog.Title id="model-settings-title" className="font-bold text-lg" style={{margin:0}}>连接模型服务</Dialog.Title>
         <button aria-label="关闭模型配置" onClick={onClose} className="px-2 py-1">✕</button>
