@@ -44,24 +44,14 @@ jobs:
           $app = Get-ChildItem $destination -Recurse -Filter '*.exe' | Where-Object { $_.Name -ieq 'chat3d.exe' } | Select-Object -First 1
           if (!$app) { throw 'Installed executable missing' }
           "CHAT3D_INSTALLED_EXE=$($app.FullName)" >> $env:GITHUB_ENV
-      - name: Install official Tauri WebDriver
-        run: cargo install tauri-driver --locked
-      - name: Locate Microsoft Edge WebDriver
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $driver = Get-Command msedgedriver -ErrorAction SilentlyContinue
-          if (!$driver) {
-            $driverPath = 'C:\SeleniumWebDrivers\EdgeDriver'
-            if (!(Test-Path "$driverPath\msedgedriver.exe")) { throw 'Microsoft Edge WebDriver not installed on runner' }
-            $driverPath >> $env:GITHUB_PATH
-          }
+      - name: Install locked JavaScript test dependencies
+        run: npm ci --ignore-scripts
       - name: Record native startup and driver versions
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item windows-smoke-results -ItemType Directory -Force | Out-Null
-          & msedgedriver --version | Set-Content windows-smoke-results/edge-driver-version.txt
+          Get-Command msedgedriver -ErrorAction SilentlyContinue | Select-Object Source | Out-String | Set-Content windows-smoke-results/edge-driver-path.txt
           Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft\EdgeWebView\Application\*\msedgewebview2.exe" -ErrorAction SilentlyContinue | ForEach-Object { $_.VersionInfo.FileVersion } | Set-Content windows-smoke-results/webview-versions.txt
           $app = Start-Process $env:CHAT3D_INSTALLED_EXE -PassThru
           Start-Sleep -Seconds 12
