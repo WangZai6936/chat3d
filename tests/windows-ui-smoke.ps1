@@ -30,6 +30,7 @@ function Find-Control($name) {
  throw "UI control not found: $name"
 }
 function Click-Control($name) {
+ Write-Host "Click UI: $name"
  $element=Find-Control $name
  $pattern=$null
  if($element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) { $pattern.Invoke() }
@@ -49,6 +50,9 @@ try {
  for($i=0;$i -lt 30;$i++) { $app.Refresh(); if($app.MainWindowHandle -ne 0){break};Start-Sleep -Seconds 1 }
  if($app.HasExited -or $app.MainWindowHandle -eq 0){throw 'Installed app failed to create window'}
  $window=[System.Windows.Automation.AutomationElement]::FromHandle($app.MainWindowHandle)
+ $windowPattern=$window.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern)
+ $windowPattern.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized)
+ Start-Sleep -Seconds 2
  Start-Sleep -Seconds 4;Shot 'ui-home';Dump-Controls 'ui-home-controls'
  Find-Control '资产库' | Out-Null
  $checks.Add(@{name='installed app home renders with accessible navigation';pass=$true})
