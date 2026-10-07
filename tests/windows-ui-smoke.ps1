@@ -32,13 +32,13 @@ function Find-Control($name) {
 function Click-Control($name) {
  Write-Host "Click UI: $name"
  $element=Find-Control $name
- $pattern=$null
- if($element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) { $pattern.Invoke() }
- else {
-  $point=$element.GetClickablePoint()
-  [SmokeMouse]::SetCursorPos([int]$point.X,[int]$point.Y) | Out-Null
-  [SmokeMouse]::mouse_event(2,0,0,0,[UIntPtr]::Zero);[SmokeMouse]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
- }
+ $point=$element.GetClickablePoint()
+ Write-Host "Pointer target $name at $($point.X),$($point.Y), type $($element.Current.ControlType.ProgrammaticName)"
+ [SmokeMouse]::SetCursorPos([int]$point.X,[int]$point.Y) | Out-Null
+ Start-Sleep -Milliseconds 150
+ [SmokeMouse]::mouse_event(2,0,0,0,[UIntPtr]::Zero)
+ Start-Sleep -Milliseconds 100
+ [SmokeMouse]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
  Start-Sleep -Milliseconds 700
 }
 function Dump-Controls($name) {
@@ -60,7 +60,7 @@ try {
  $checks.Add(@{name='asset library opens';pass=$true})
  Click-Control '新建资产';Find-Control '导出与更多' | Out-Null;Shot 'ui-workbench'
  $checks.Add(@{name='new asset opens workbench';pass=$true})
- Click-Control '导出与更多';Click-Control '检查与备份';Find-Control '下载工作台备份' | Out-Null
+ Click-Control '导出与更多';Shot 'ui-export-menu';Dump-Controls 'ui-export-controls';Click-Control '检查与备份';Shot 'ui-after-menu-selection';Find-Control '下载工作台备份' | Out-Null
  $downloads=(New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path
  $folder=Join-Path $downloads 'Chat3D'
  $before=@(Get-ChildItem $folder -Filter 'chat3d-workspace-*.json' -ErrorAction SilentlyContinue | ForEach-Object FullName)
