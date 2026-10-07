@@ -1,4 +1,4 @@
-import {useState} from 'react';
+import {useEffect,useState} from 'react';
 import {AlertDialog,Button,Dialog,TextField} from '@radix-ui/themes';
 import {ActivityLogIcon,Cross1Icon,ArrowRightIcon} from '@radix-ui/react-icons';
 import {getSessionEditor,switchSession,useWorkspaceStore,type WorkspaceSession} from '../workspace';
@@ -15,9 +15,10 @@ export function taskSummary(session:WorkspaceSession){
  return {group:running?'running':review?'review':'ended',label,visible:running||review||!!s.lastRun||!!run};
 }
 
-export function TaskQueue({onOpen,onHistory,disabled=false}:{onOpen:()=>void;onHistory:()=>void;disabled?:boolean}){
+export function TaskQueue({onOpen,onHistory,disabled=false,openRequest=0}:{onOpen:()=>void;onHistory:()=>void;disabled?:boolean;openRequest?:number}){
  const w=useWorkspaceStore();
  const [open,setOpen]=useState(false),[query,setQuery]=useState(''),[error,setError]=useState('');
+ useEffect(()=>{if(openRequest){setOpen(true);setError('');}},[openRequest]);
  const [stop,setStop]=useState<{id:string;title:string;runId:string|null}|null>(null);
  const tasks=w.sessions.filter(s=>!s.deletedAt).map(s=>({session:s,...taskSummary(s)})).filter(t=>t.visible);
  const running=tasks.filter(t=>t.group==='running').length,review=tasks.filter(t=>t.group==='review').length;

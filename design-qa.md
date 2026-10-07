@@ -1,3 +1,21 @@
+# Current home/task redesign verification — 2026-10-07
+
+final result: blocked
+
+The user approved the revised first homepage design and requested the global task entry remain available in the workbench. A follow-up requested consistent asset/scene category navigation.
+
+Implemented: creation + active task regions, one four-column recent-project gallery, no shortcut cards or duplicate featured preview, shared task drawer, explicit task-button sizing, soft category rows. Actual project thumbnails remain data-driven; concept illustration imagery is not substituted for user models.
+
+Verified locally: 930 regression checks, 3 new CSS-contract checks, TypeScript and frontend/server builds. Two concurrent mocked requests retain execution and drafts when switching through home tasks. These are not visual acceptance.
+
+Local cloud browser preview returned 502 despite the embedded preview server listening; no screenshot pass is claimed. A reproducible isolated browser fixture and CI screenshot workflow now cover 1920×1024, 1100×800, header spacing, task drawer/workbench switching, and category rows. The fixture uses synthetic states explicitly; it does not claim actual model generation.
+
+Remaining: inspect the rendered screenshots against the approved layout, correct material discrepancies, and run the Windows package smoke checks before installer handoff.
+
+---
+
+## Earlier design verification history
+
 # Frosted Studio visual change — 2026-10-05
 
 Reference: user-selected frosted-glass workbench concept. Changes are scoped to App root class and a separate CSS skin; the real model, existing interaction handlers, and saved theme preference remain intact.
