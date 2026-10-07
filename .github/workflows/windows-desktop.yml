@@ -32,7 +32,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if ((Test-Path 'dist/server') -or (Test-Path 'dist/_worker.js')) { throw 'Desktop frontend unexpectedly contains the Sites worker.' }
           $installers = @(Get-ChildItem 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe')
-          if ($installers.Count -eq 0) { throw 'No NSIS installer was produced.' }
+          if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer.' }
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($version -ne '0.1.3' -or $tauriVersion -ne $version) { throw 'Expected consistent 0.1.3 versions.' }
+          if ($installers[0].Name -cne "Chat3D_${version}_x64-setup.exe") { throw 'Unexpected installer version or architecture.' }
           New-Item -ItemType Directory -Path 'windows-artifact' -Force | Out-Null
           $hashes = foreach ($installer in $installers) {
             if ($installer.Length -eq 0) { throw "Empty installer: $($installer.Name)" }
@@ -49,10 +53,15 @@ jobs:
             "repository=$env:GITHUB_REPOSITORY"
             "commit=$env:GITHUB_SHA"
             "run=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
-            'imported_source_commit=b4b908bdecd1c98f8f9adad6b85942bdfce5bbb8'
-            'source_archive_sha256=e532b9ea70169ceff23c340ca579951c52dae4136cf1919c779acc4e55af373b'
+            "version=$version"
+            "build_run_id=$env:GITHUB_RUN_ID"
+            'optimization_source_commit=548b7dccb5c26116c476c1152b6e9c0d0c80d583'
+            'optimization_import_commit=e8db70df473cdfd1013503d0569644aca4fce072'
+            'optimization_patch_sha256=8ff67b39cb80b10638302f3849c750524b45a3c9f36ea9144d81382d0a9f3393'
+            'optimization_tree_manifest_sha256=dcaa48ad8ef06e5999dfaf951752d0e2558ad8a8be5404dfa2fe264ec2757005'
+            'source_transfer=SHA256-verified task-text patch; original Library archive download unavailable'
             'target=x86_64-pc-windows-msvc'
-            'package=unsigned NSIS test installer; installation and GPU behavior not verified'
+            'package=unsigned NSIS installer; see the dependent installed-app job for installation evidence; user GPU not verified'
           ) | Set-Content 'windows-artifact/SOURCE-COMMIT.txt' -Encoding utf8
       - name: Upload installer and provenance
         uses: actions/upload-artifact@v4
@@ -61,3 +70,9 @@ jobs:
           path: windows-artifact/*
           if-no-files-found: error
           retention-days: 30
+
+  installed-app:
+    needs: build-windows
+    uses: ./.github/workflows/windows-smoke.yml
+    permissions:
+      contents: read

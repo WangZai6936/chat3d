@@ -1,20 +1,8 @@
 name: Windows installed app smoke test
 on:
-  push:
-    branches: [main]
-    paths:
-      - tests/windows-native-smoke.mjs
-      - tests/windows-ui-smoke.ps1
-      - .github/workflows/windows-smoke.yml
-  workflow_dispatch:
-    inputs:
-      build_run:
-        description: Successful installer workflow run ID
-        required: true
-        default: '37649044070'
+  workflow_call:
 permissions:
   contents: read
-  actions: read
 jobs:
   installed-app:
     runs-on: windows-latest
@@ -27,23 +15,40 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/download-artifact@v4
         with:
-          github-token: ${{ github.token }}
-          run-id: ${{ inputs.build_run || '37649044070' }}
+          name: chat3d-windows-x64-${{ github.sha }}
           path: installer-artifact
-          merge-multiple: true
       - name: Verify and install the built installer
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $exe = Get-ChildItem installer-artifact -Filter '*setup.exe' | Select-Object -First 1
-          if (!$exe) { throw 'Installer missing' }
-          $expected = (Get-Content installer-artifact/SHA256SUMS.txt).Split(' ')[0].Trim()
-          if ((Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Installer hash mismatch' }
+          New-Item windows-smoke-results -ItemType Directory -Force | Out-Null
+          $source = Get-Content installer-artifact/SOURCE-COMMIT.txt -Raw | ConvertFrom-StringData
+          $checkedOut = (git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $checkedOut -cne $env:GITHUB_SHA) { throw 'Test checkout does not match the workflow commit.' }
+          if ($source.repository -cne $env:GITHUB_REPOSITORY -or $source.commit -cne $checkedOut) { throw 'Installer source commit or repository mismatch.' }
+          if ($source.build_run_id -ne $env:GITHUB_RUN_ID) { throw 'Installer belongs to another workflow run.' }
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          if ($version -ne '0.1.3' -or $source.version -ne $version) { throw 'Expected the 0.1.3 installer.' }
+          if ($source.target -ne 'x86_64-pc-windows-msvc') { throw 'Installer target mismatch.' }
+          $installers = @(Get-ChildItem installer-artifact -Filter '*.exe')
+          if ($installers.Count -ne 1) { throw 'Expected exactly one installer.' }
+          $exe = $installers[0]
+          if ($exe.Name -cne "Chat3D_${version}_x64-setup.exe") { throw 'Installer filename does not match the required version.' }
+          $hashLines = @(Get-Content installer-artifact/SHA256SUMS.txt | Where-Object { $_.Trim() })
+          if ($hashLines.Count -ne 1 -or $hashLines[0] -cnotmatch '^([a-f0-9]{64})  (.+)$') { throw 'Invalid installer hash manifest.' }
+          $expected = $Matches[1]
+          if ($Matches[2] -cne $exe.Name) { throw 'Hash manifest names a different installer.' }
+          $actual = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -cne $expected) { throw 'Installer hash mismatch' }
+          Copy-Item installer-artifact/SOURCE-COMMIT.txt,installer-artifact/SHA256SUMS.txt windows-smoke-results/
           $destination = Join-Path $env:RUNNER_TEMP 'Chat3D-Smoke'
           $p = Start-Process $exe.FullName -ArgumentList @('/S', "/D=$destination") -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Installer exit $($p.ExitCode)" }
           $app = Get-ChildItem $destination -Recurse -Filter '*.exe' | Where-Object { $_.Name -ieq 'chat3d.exe' } | Select-Object -First 1
           if (!$app) { throw 'Installed executable missing' }
+          $installedVersion = $app.VersionInfo.ProductVersion
+          if ($installedVersion -notmatch '^0\.1\.3(?:\.0)?$') { throw "Installed executable version mismatch: $installedVersion" }
+          @{ repository=$env:GITHUB_REPOSITORY; commit=$checkedOut; buildRun=$env:GITHUB_RUN_ID; version=$version; installer=$exe.Name; installerSha256=$actual; installExitCode=$p.ExitCode; installedVersion=$installedVersion; installedExeSha256=(Get-FileHash $app.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json | Set-Content windows-smoke-results/installation.json
           "CHAT3D_INSTALLED_EXE=$($app.FullName)" >> $env:GITHUB_ENV
       - name: Install locked JavaScript test dependencies
         run: npm ci --ignore-scripts
