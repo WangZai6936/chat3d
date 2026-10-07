@@ -1,0 +1,67 @@
+name: Windows installed app smoke test
+on:
+  push:
+    branches: [main]
+    paths:
+      - tests/windows-native-smoke.mjs
+      - .github/workflows/windows-smoke.yml
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: Successful installer workflow run ID
+        required: true
+        default: '37630320192'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  installed-app:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.build_run || '37630320192' }}
+          path: installer-artifact
+          merge-multiple: true
+      - name: Verify and install the built installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem installer-artifact -Filter '*setup.exe' | Select-Object -First 1
+          if (!$exe) { throw 'Installer missing' }
+          $expected = (Get-Content installer-artifact/SHA256SUMS.txt).Split(' ')[0].Trim()
+          if ((Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Installer hash mismatch' }
+          $destination = Join-Path $env:RUNNER_TEMP 'Chat3D-Smoke'
+          $p = Start-Process $exe.FullName -ArgumentList @('/S', "/D=$destination") -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installer exit $($p.ExitCode)" }
+          $app = Get-ChildItem $destination -Recurse -Filter '*.exe' | Where-Object { $_.Name -ieq 'chat3d.exe' } | Select-Object -First 1
+          if (!$app) { throw 'Installed executable missing' }
+          "CHAT3D_INSTALLED_EXE=$($app.FullName)" >> $env:GITHUB_ENV
+      - name: Install official Tauri WebDriver
+        run: cargo install tauri-driver --locked
+      - name: Locate Microsoft Edge WebDriver
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $driver = Get-Command msedgedriver -ErrorAction SilentlyContinue
+          if (!$driver) {
+            $driverPath = 'C:\SeleniumWebDrivers\EdgeDriver'
+            if (!(Test-Path "$driverPath\msedgedriver.exe")) { throw 'Microsoft Edge WebDriver not installed on runner' }
+            $driverPath >> $env:GITHUB_PATH
+          }
+      - name: Exercise installed app and native file saves
+        run: node tests/windows-native-smoke.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-installed-smoke-${{ github.sha }}
+          path: windows-smoke-results/*
+          if-no-files-found: warn
+          retention-days: 14
