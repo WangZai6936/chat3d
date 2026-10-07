@@ -32,7 +32,7 @@ function Find-Control($name) {
 function Click-Control($name) {
  Write-Host "Click UI: $name"
  $element=Find-Control $name
- $point=$element.GetClickablePoint()
+ try { $point=$element.GetClickablePoint() } catch { $element.SetFocus();Start-Sleep -Milliseconds 300;$point=$element.GetClickablePoint() }
  Write-Host "Pointer target $name at $($point.X),$($point.Y), type $($element.Current.ControlType.ProgrammaticName)"
  [SmokeMouse]::SetCursorPos([int]$point.X,[int]$point.Y) | Out-Null
  Start-Sleep -Milliseconds 150
@@ -40,6 +40,13 @@ function Click-Control($name) {
  Start-Sleep -Milliseconds 100
  [SmokeMouse]::mouse_event(4,0,0,0,[UIntPtr]::Zero)
  Start-Sleep -Milliseconds 700
+}
+function Set-Input($name,$value) {
+ $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+ $edit=$all | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and $_.Current.Name.StartsWith($name) } | Select-Object -First 1
+ if(!$edit){throw "Input missing: $name"}
+ $edit.SetFocus();Start-Sleep -Milliseconds 200
+ [System.Windows.Forms.SendKeys]::SendWait('^a');[System.Windows.Forms.SendKeys]::SendWait($value);[System.Windows.Forms.SendKeys]::SendWait('{TAB}');Start-Sleep -Milliseconds 500
 }
 function Dump-Controls($name) {
  $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
@@ -77,9 +84,34 @@ try {
  if($saved[0] -eq $saved[1]){throw 'Repeated export overwrote file'}
  Shot 'ui-backup-saved';Dump-Controls 'ui-backup-controls'
  $checks.Add(@{name='real backup button writes two distinct valid JSON files';pass=$true;files=$saved})
+ [System.Windows.Forms.SendKeys]::SendWait('{ESC}');Start-Sleep -Seconds 1
+ Click-Control '连接模型'
+ Set-Input 'API 根地址' 'https://smoke-test.invalid/v1'
+ Set-Input 'API Key' 'smoke-test-not-a-secret'
+ Click-Control '服务不提供列表？手动填写模型名'
+ Set-Input '手动模型名' 'smoke-test'
+ Click-Control '保存配置'
+ Set-Input '建模指令' 'Create one simple box for the synthetic failure test'
+ Click-Control '发送'
+ Start-Sleep -Seconds 8
+ Click-Control '任务记录'
+ Click-Control '问题排查'
+ Find-Control '下载脱敏诊断记录' | Out-Null
+ $diagnosticBefore=@(Get-ChildItem $folder -Filter 'chat3d-diagnostics-*.json' -ErrorAction SilentlyContinue | ForEach-Object FullName)
+ Click-Control '下载脱敏诊断记录'
+ $diagnostic=$null
+ for($i=0;$i -lt 30;$i++){ $diagnostic=Get-ChildItem $folder -Filter 'chat3d-diagnostics-*.json' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notin $diagnosticBefore } | Select-Object -First 1;if($diagnostic){break};Start-Sleep -Milliseconds 500 }
+ if(!$diagnostic){throw 'Diagnostic button did not save a file'}
+ $diagnosticText=Get-Content $diagnostic.FullName -Raw
+ $diagnosticData=$diagnosticText | ConvertFrom-Json
+ if($diagnosticData.format -ne 'chat3d-diagnostics-v1'){throw 'Wrong diagnostics format'}
+ if($diagnosticText.Contains('smoke-test-not-a-secret')){throw 'Diagnostic export leaked dummy API credential'}
+ Shot 'ui-diagnostics-saved';Dump-Controls 'ui-diagnostics-controls'
+ $checks.Add(@{name='diagnostic download button saves redacted JSON after synthetic network failure';pass=$true;file=$diagnostic.FullName})
+
 } catch { $failure=$_.Exception.Message;try{Shot 'ui-failure';if($window){Dump-Controls 'ui-failure-controls'}}catch{};Write-Host "SMOKE FAILURE: $failure" }
 finally {
- @{pass=($null -eq $failure);checks=$checks;error=$failure;finishedAt=[DateTime]::UtcNow.ToString('o');limitations=@('No real model service request','Diagnostic button after generation not exercised','CI graphics differ from user GPU')} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'ui-result.json')
+ @{pass=($null -eq $failure);checks=$checks;error=$failure;finishedAt=[DateTime]::UtcNow.ToString('o');limitations=@('No real model service request','Diagnostic path uses an intentional .invalid endpoint failure, not successful real generation','CI graphics differ from user GPU')} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'ui-result.json')
  if($app -and !$app.HasExited){$app.CloseMainWindow() | Out-Null;Start-Sleep -Seconds 2;if(!$app.HasExited){$app.Kill()}}
 }
 if($failure){exit 1}
