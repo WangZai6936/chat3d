@@ -67,7 +67,7 @@ try {
  $checks.Add(@{name='asset library opens';pass=$true})
  Click-Control '新建资产';Find-Control '导出与更多' | Out-Null;Shot 'ui-workbench'
  $checks.Add(@{name='new asset opens workbench';pass=$true})
- Click-Control '导出与更多';Shot 'ui-export-menu';Dump-Controls 'ui-export-controls';Click-Control '检查与备份';Shot 'ui-after-menu-selection';Find-Control '下载工作台备份' | Out-Null
+ Click-Control '导出与更多';Shot 'ui-export-menu';Dump-Controls 'ui-export-controls';Click-Control '备份与恢复';Shot 'ui-after-menu-selection';Find-Control '下载工作台备份' | Out-Null
  $downloads=(New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path
  $folder=Join-Path $downloads 'Chat3D'
  $before=@(Get-ChildItem $folder -Filter 'chat3d-workspace-*.json' -ErrorAction SilentlyContinue | ForEach-Object FullName)

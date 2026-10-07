@@ -1,12 +1,12 @@
 # Settings and task badge refresh — 2026-10-07
 
-final result: blocked (browser screenshots of this change pending)
+final result: passed for browser settings/layout scope; Windows installer verification pending
 
 User approved the icon-only task entry with a running-count superscript (hidden at zero), and requested settings plus its nested modules match the existing UI. Work is performed in the current task.
 
 Implemented: grouped general/data settings, shared modal style for model connection, backup, asset management and project history. Removed duplicated asset migration entry from settings (still available in asset library). Simplified backup to export/restore and essential privacy/restore warnings; removed unrelated scene inspection, environment status, review-data copy and tutorial sections. Backup formats and restore semantics remain unchanged.
 
-Verification: focused task-queue 14, model-settings 10, settings-refresh 3 and CSS 3 checks pass; TypeScript and build pass. Aggregate regression: 935 checks passed, plus 3 new settings-refresh checks. Rendered verification pending. No real model throughput or quality claim.
+Verification: focused task-queue 14, model-settings 10, settings-refresh 3 and CSS 3 checks pass; TypeScript and build pass. Aggregate regression: 935 checks passed, plus 3 new settings-refresh checks. Rendered verification passed: GitHub Actions run 37649044139 on 309f44f. Actual screenshots inspected for light/dark settings, 480/700px layouts, model connection, backup and project history. Narrow-screen hidden icon and dark contrast found in first pass were fixed and rechecked. Task switching retains drafts. Controlled fixtures, no real model calls. No real model throughput or quality claim.
 
 ---
 
