@@ -173,7 +173,7 @@ export default function App() {
             <DropdownMenu.Separator/>
             <DropdownMenu.Item title="保存可重新编辑的工程，包含动画" onSelect={saveProject}><DownloadIcon/>下载项目 JSON</DropdownMenu.Item>
 
-            <DropdownMenu.Item title="导出静态模型和材质，不含动画" disabled={exporting||nodeCount===0} onSelect={()=>void downloadGlb()}><CubeIcon/>{exporting?'导出中…':'导出模型 GLB'}</DropdownMenu.Item><DropdownMenu.Separator/><DropdownMenu.Item onSelect={()=>setShowTools(true)}><GearIcon/>检查与备份</DropdownMenu.Item>
+            <DropdownMenu.Item title="导出静态模型和材质，不含动画" disabled={exporting||nodeCount===0} onSelect={()=>void downloadGlb()}><CubeIcon/>{exporting?'导出中…':'导出模型 GLB'}</DropdownMenu.Item><DropdownMenu.Separator/><DropdownMenu.Item onSelect={()=>setShowTools(true)}><GearIcon/>备份与恢复</DropdownMenu.Item>
           </DropdownMenu.Content></DropdownMenu.Root>
           </div>
           <input ref={fileRef} type="file" accept=".json,.chat3d.json" className="hidden" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void openProject(file);}}/>
