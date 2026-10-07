@@ -56,6 +56,28 @@ jobs:
             if (!(Test-Path "$driverPath\msedgedriver.exe")) { throw 'Microsoft Edge WebDriver not installed on runner' }
             $driverPath >> $env:GITHUB_PATH
           }
+      - name: Record native startup and driver versions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item windows-smoke-results -ItemType Directory -Force | Out-Null
+          & msedgedriver --version | Set-Content windows-smoke-results/edge-driver-version.txt
+          Get-ChildItem "${env:ProgramFiles(x86)}\Microsoft\EdgeWebView\Application\*\msedgewebview2.exe" -ErrorAction SilentlyContinue | ForEach-Object { $_.VersionInfo.FileVersion } | Set-Content windows-smoke-results/webview-versions.txt
+          $app = Start-Process $env:CHAT3D_INSTALLED_EXE -PassThru
+          Start-Sleep -Seconds 12
+          $app.Refresh()
+          @{ exited=$app.HasExited; pid=$app.Id; title=$app.MainWindowTitle; window=$app.MainWindowHandle.ToInt64() } | ConvertTo-Json | Set-Content windows-smoke-results/native-startup.json
+          try {
+            Add-Type -AssemblyName System.Windows.Forms
+            Add-Type -AssemblyName System.Drawing
+            $rect = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $bitmap = New-Object System.Drawing.Bitmap($rect.Width, $rect.Height)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $graphics.CopyFromScreen($rect.Location, [System.Drawing.Point]::Empty, $rect.Size)
+            $bitmap.Save("$PWD/windows-smoke-results/native-desktop.png")
+            $graphics.Dispose(); $bitmap.Dispose()
+          } catch { $_ | Out-String | Set-Content windows-smoke-results/screenshot-error.txt }
+          if (!$app.HasExited) { $app.CloseMainWindow() | Out-Null; Start-Sleep -Seconds 3; if (!$app.HasExited) { $app.Kill() } }
       - name: Exercise installed app and native file saves
         run: node tests/windows-native-smoke.mjs
       - uses: actions/upload-artifact@v4

@@ -15,7 +15,7 @@ async function check(name,fn){const detail=await fn();report.checks.push({name,p
 try{
  driver.on('error',e=>{report.driverError=String(e)});
  for(let i=0;i<60;i++){try{await req('GET','/status');break}catch{if(i===59)throw Error('tauri-driver not ready');await sleep(1000)}}
- const created=await req('POST','/session',{capabilities:{alwaysMatch:{browserName:'wry','tauri:options':{application}}}});session=created.sessionId;assert.ok(session);
+ const created=await req('POST','/session',{capabilities:{alwaysMatch:{browserName:'wry','tauri:options':{application,webviewOptions:{}}}}});session=created.sessionId;assert.ok(session);
  await req('POST',`/session/${session}/timeouts`,{script:30000,implicit:1000,pageLoad:60000});
  await check('installed desktop starts and renders home',async()=>{for(let i=0;i<60;i++){const body=await exec('return document.body.innerText');if(/chat3d/i.test(body)&&body.length>100){fs.writeFileSync(path.join(out,'home.txt'),body);return {title:await exec('return document.title'),textLength:body.length}}await sleep(1000)}throw Error('Home never rendered')});
  fs.writeFileSync(path.join(out,'home.png'),Buffer.from(await req('GET',`/session/${session}/screenshot`),'base64'));
