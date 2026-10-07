@@ -52,6 +52,7 @@ import './graphite-controls.css';
 import './workbench-footer.css';
 import './thumbnail-layout.css';
 import './home-command-center.css';
+import './settings-refresh.css';
 import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning} from './workspace';
 import { MAX_PROJECT_BYTES, parseProject, serializeProject } from './domain/project';
 
@@ -209,7 +210,7 @@ export default function App() {
       {advancedOpen&&<Dialog.Root open onOpenChange={setAdvancedOpen}><Dialog.Content className="canvas-advanced-dialog" style={{maxWidth:640,maxHeight:'85vh',overflow:'auto'}}><Dialog.Title>对象与属性</Dialog.Title><Dialog.Description>精确编辑几何参数、外观和组件关系。</Dialog.Description><PropertiesPanel/><Button onClick={()=>setAdvancedOpen(false)}>关闭高级属性</Button></Dialog.Content></Dialog.Root>}
       {showLibrarySave&&<LibraryProjectSaveDialog onClose={()=>setShowLibrarySave(false)} onBusyChange={setLibrarySaving} onSaved={notice=>{setProjectNotice(notice);setLibraryRefresh(v=>v+1);}}/>}
       {showAssets&&<AssetLibrary intent={modulePage==='workbench'?'insert':'manage'} targetName={active?.title} onClose={()=>{setShowAssets(false);setLibraryRefresh(v=>v+1);}}/>}
-      {showHistory&&<Dialog.Root open onOpenChange={setShowHistory}><Dialog.Content style={{maxWidth:430}}><Dialog.Title>旧项目与回收站</Dialog.Title><Dialog.Description>历史项目仍保留，可重命名、恢复或继续编辑。</Dialog.Description><div className="history-management"><SessionSidebar locked={locked} onClose={()=>{setShowHistory(false);setModulePage('workbench');}}/></div><Button onClick={()=>{setShowHistory(false);setModulePage('workbench');}}>进入选中项目</Button></Dialog.Content></Dialog.Root>}
+      {showHistory&&<Dialog.Root open onOpenChange={setShowHistory}><Dialog.Content className="settings-module history-settings-module" style={{maxWidth:600}}><Dialog.Title>项目与回收站</Dialog.Title><Dialog.Description>历史项目仍保留，可重命名、恢复或继续编辑。</Dialog.Description><div className="history-management"><SessionSidebar locked={locked} onClose={()=>{setShowHistory(false);setModulePage('workbench');}}/></div><Button onClick={()=>{setShowHistory(false);setModulePage('workbench');}}>进入选中项目</Button></Dialog.Content></Dialog.Root>}
       {showTools&&<WorkspaceTools onClose={()=>setShowTools(false)}/>}
       {showSettings&&<SettingsDialog onClose={()=>setShowSettings(false)}/>}
     </div>

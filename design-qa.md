@@ -1,3 +1,15 @@
+# Settings and task badge refresh — 2026-10-07
+
+final result: blocked (browser screenshots of this change pending)
+
+User approved the icon-only task entry with a running-count superscript (hidden at zero), and requested settings plus its nested modules match the existing UI. Work is performed in the current task.
+
+Implemented: grouped general/data settings, shared modal style for model connection, backup, asset management and project history. Removed duplicated asset migration entry from settings (still available in asset library). Simplified backup to export/restore and essential privacy/restore warnings; removed unrelated scene inspection, environment status, review-data copy and tutorial sections. Backup formats and restore semantics remain unchanged.
+
+Verification: focused task-queue 14, model-settings 10, settings-refresh 3 and CSS 3 checks pass; TypeScript and build pass. Aggregate regression: 935 checks passed, plus 3 new settings-refresh checks. Rendered verification pending. No real model throughput or quality claim.
+
+---
+
 # Current home/task redesign verification — 2026-10-07
 
 final result: blocked

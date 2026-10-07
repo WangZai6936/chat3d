@@ -24,7 +24,7 @@ export function TaskQueue({onOpen,onHistory,disabled=false,openRequest=0}:{onOpe
  const running=tasks.filter(t=>t.group==='running').length,review=tasks.filter(t=>t.group==='review').length;
  const shown=tasks.filter(t=>t.session.title.toLowerCase().includes(query.trim().toLowerCase()));
  return <><Dialog.Root open={open} onOpenChange={value=>{setOpen(value);setError('');}}>
-  <Dialog.Trigger><Button variant="ghost" color="gray" className="global-task-trigger" aria-label="任务" title={`${running} 个运行中，${review} 个待确认`} disabled={disabled}><ActivityLogIcon/><span>任务</span><span className="global-task-count" aria-label={`${running} 个运行中`}>{running}</span></Button></Dialog.Trigger>
+  <Dialog.Trigger><Button variant="ghost" color="gray" className="global-task-trigger" aria-label="任务" title={`${running} 个运行中，${review} 个待确认`} disabled={disabled}><ActivityLogIcon/>{running>0&&<span className="global-task-count" aria-label={`${running} 个运行中`}>{running}</span>}</Button></Dialog.Trigger>
   <Dialog.Content className="global-task-drawer" aria-label="任务队列">
    <header><div><Dialog.Title>任务队列</Dialog.Title><Dialog.Description>{running} 个运行中 · {review} 个待确认</Dialog.Description></div><Dialog.Close><Button variant="ghost" color="gray" aria-label="关闭任务队列"><Cross1Icon/></Button></Dialog.Close></header>
    <TextField.Root aria-label="搜索任务" placeholder="搜索任务名称" value={query} onChange={e=>setQuery(e.target.value)}/>
