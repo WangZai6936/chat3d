@@ -21,5 +21,16 @@ await test('property names and XYZ inputs have human readable accessible labels 
 await test('preview properties offer explicit atomic confirmation then manual editing and undo',()=>{
  const base=reset(d=>[d.nodes[0].id]);const operations=[{op:'rename',targetId:base.nodes[0].id,name:'预览设备'}];const result=applyBatch(base,{operations});s.setState({aiStatus:'previewing',previewDoc:result.doc,pendingResult:result,pendingBatch:{requestId:'property-preview',projectId:base.projectId,baseRevision:base.revision,summary:'rename',operations}});const ui=mount();fireEvent.click(ui.getByRole('button',{name:'应用当前草稿并编辑属性'}));assert.equal(s.getState().aiStatus,'idle');assert.equal(s.getState().doc.nodes[0].name,'预览设备');const field=ui.getByLabelText('宽度（米）');fireEvent.change(field,{target:{value:'2'}});fireEvent.blur(field);assert.equal(s.getState().doc.nodes[0].geometry.params.width,2);assert.equal(s.getState().past.length,2);act(()=>s.getState().undo());assert.equal(s.getState().doc.nodes[0].geometry.params.width,1);act(()=>s.getState().undo());assert.equal(s.getState().doc.nodes[0].name,base.nodes[0].name);
 });
+await test('advanced 2600-part appearance edits, source filter and material replacement stay atomic and undoable',()=>{
+ const base={...createInitialDoc(),nodes:Array.from({length:2601},(_,i)=>({id:'advanced-'+i,name:'part '+i,kind:'primitive',parentId:null,visible:true,geometry:shape,materialId:i%2?'mat_blue':'mat_gray',assemblyId:i%2?'incomplete':undefined,transform:{...structuredClone(transform),position:[i%100,0,Math.floor(i/100)]}}))};const ids=base.nodes.slice(0,2600).map(n=>n.id);s.setState({doc:base,selection:ids,past:[],future:[],aiStatus:'idle',previewDoc:null,pendingBatch:null,pendingResult:null});const ui=mount();
+ for(const kind of ['color','parameters','material','filtered']){
+  if(kind==='color')color(ui,'#aabbcc');
+  if(kind==='filtered'){fireEvent.change(ui.getByLabelText('外观修改范围'),{target:{value:'mat_gray'}});color(ui,'#ccbbaa');}
+  if(kind==='parameters'){fireEvent.change(ui.getByLabelText('粗糙度'),{target:{value:'0.2'}});fireEvent.click(ui.getByRole('button',{name:'应用材质参数'}));}
+  if(kind==='material')fireEvent.click(ui.getByRole('button',{name:'使用材质 mat_dark'}));
+  const changed=s.getState().doc;assert.equal(s.getState().past.length,1);assert.equal(s.getState().past[0].applied.length,1);assert.deepEqual(changed.nodes[2600],base.nodes[2600]);assert.notEqual(changed.nodes[0].materialId,base.nodes[0].materialId);if(kind==='filtered')assert.equal(changed.nodes[1].materialId,base.nodes[1].materialId);else assert.notEqual(changed.nodes[2599].materialId,base.nodes[2599].materialId);act(()=>s.getState().undo());assert.deepEqual(s.getState().doc.nodes,base.nodes);assert.deepEqual(s.getState().doc.materials,base.materials);act(()=>s.getState().redo());assert.deepEqual(s.getState().doc.nodes,changed.nodes);act(()=>s.getState().undo());
+ }
+ fireEvent.change(ui.getByLabelText('粗糙度'),{target:{value:'9'}});fireEvent.click(ui.getByRole('button',{name:'应用材质参数'}));assert.match(ui.getByRole('status').textContent,/0–1/);assert.equal(s.getState().past.length,0);assert.deepEqual(s.getState().doc.nodes,base.nodes);
+});
  console.log(`${passed} property editing checks passed`);
 }finally{cleanup();await server.close();dom.window.close()}

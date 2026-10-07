@@ -316,6 +316,8 @@ export function validateDocument(doc: SceneDocument): Error[] {
   if (!isFiniteNumber(doc.revision) || doc.revision < 0) errs.push(new Error('revision 非法'));
   if((doc.nodes??[]).reduce((n,x)=>n+(x.geometry?.type==='mesh'?x.geometry.params.positions.length:0),0)>1500000)errs.push(new Error('项目网格总顶点数超过50万预算'));
   if((doc.materials??[]).reduce((sum,m)=>sum+Object.values(m.maps??{}).reduce((n,t)=>n+(t?.dataUrl?.length??0),0),0)>12*1024*1024)errs.push(new Error('项目内嵌贴图总量超过12MB'));
+  const nodesById = new Map((doc.nodes ?? []).map(n => [n.id, n]));
+  const materialsById = new Map((doc.materials ?? []).map(m => [m.id, m]));
   const nodeIds = new Set<string>();
   const materialIds = new Set<string>();
   const assetIds = new Set<string>();
@@ -332,27 +334,27 @@ export function validateDocument(doc: SceneDocument): Error[] {
     if (n.materialId && !materialIds.has(n.materialId)) {
       errs.push(new Error(`节点 ${n.id} 悬空引用材质 ${n.materialId}`));
     }
-    const material=doc.materials.find(m=>m.id===n.materialId);if(n.geometry?.type==='mesh'&&(material?.surface||Object.keys(material?.maps??{}).length)&&!n.geometry.params.uvs)errs.push(new Error(`网格贴图缺少UV：${n.name}`));
+    const material=materialsById.get(n.materialId??'');if(n.geometry?.type==='mesh'&&(material?.surface||Object.keys(material?.maps??{}).length)&&!n.geometry.params.uvs)errs.push(new Error(`网格贴图缺少UV：${n.name}`));
     if (n.assetId && !assetIds.has(n.assetId)) {
       errs.push(new Error(`节点 ${n.id} 悬空引用资产 ${n.assetId}`));
     }
   }
   for(const n of doc.nodes??[])if(n.connection&&!nodeIds.has(n.connection.targetId))errs.push(new Error(`连接目标不存在，请先解除关联：${n.name}`));
-  // 父引用与循环层级
+  // Resolve references once and visit each parent chain once. This remains linear
+  // for flat repeated scenes and deep imported hierarchies, without skipping checks.
+  const checked = new Set<string>();
   for (const n of doc.nodes ?? []) {
     if (n.parentId !== null && !nodeIds.has(n.parentId)) {
       errs.push(new Error(`节点 ${n.id} 悬空引用父节点 ${n.parentId}`));
     }
-    // 循环检测：沿父链上溯，最多 nodes 步
     let cur: string | null = n.id;
     const path = new Set<string>();
-    for (let i = 0; i < (doc.nodes?.length ?? 0) + 1; i++) {
-      if (cur === null) break;
+    while (cur !== null && !checked.has(cur)) {
       if (path.has(cur)) { errs.push(new Error(`检测到循环层级（涉及节点 ${cur}）`)); break; }
       path.add(cur);
-      const node = doc.nodes?.find((x) => x.id === cur);
-      cur = node ? node.parentId : null;
+      cur = nodesById.get(cur)?.parentId ?? null;
     }
+    for (const id of path) checked.add(id);
   }
   errs.push(...validateAnimation(doc.animation,doc.nodes??[]));
   return errs;

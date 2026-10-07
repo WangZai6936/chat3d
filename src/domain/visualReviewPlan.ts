@@ -2,7 +2,7 @@ import {interactionTargets} from './interactionQuality';
 import type {SceneDocument} from './types';import {detailTargets} from './detailAcceptance';import {inspectSceneQuality} from './sceneQuality';
 /** A deterministic capture agenda. It selects evidence, never manufactures verdicts. */
 export function visualReviewPlan(base:SceneDocument,draft:SceneDocument,offset=0){
- if(!Number.isInteger(offset)||offset<0)throw Error('检查偏移无效');
+ if(!Number.isSafeInteger(offset)||offset<0)throw Error('检查偏移无效');
  const targets=detailTargets(base,draft),quality=inspectSceneQuality(draft);
  const priority=new Set(quality.spatial.candidates.filter(c=>c.kind==='body_occupancy').flatMap(c=>[c.a,c.b]));
  const sorted=[...targets].sort((a,b)=>Number(priority.has(b.id))-Number(priority.has(a.id)));

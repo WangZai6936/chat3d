@@ -8,7 +8,7 @@ export function normalizePartQuery(q:PartQuery):PartQuery{return {assemblyId:q.a
 export function findSceneParts(doc:SceneDocument,q:PartQuery){
  if(q.fields&&!['placement','surface','all'].includes(q.fields))throw Error('查询字段无效');
  const surface=q.fields!=='placement';
- const limit=q.limit??16,offset=q.offset??0;if(!Number.isInteger(limit)||limit<1||limit>48||!Number.isInteger(offset)||offset<0||offset>10000||q.terms&&(!Array.isArray(q.terms)||q.terms.length>12||q.terms.some(s=>typeof s!=='string'||s.length>80)))throw Error('查询范围无效');
+ const limit=q.limit??16,offset=q.offset??0;if(!Number.isInteger(limit)||limit<1||limit>48||!Number.isSafeInteger(offset)||offset<0||q.terms&&(!Array.isArray(q.terms)||q.terms.length>12||q.terms.some(s=>typeof s!=='string'||s.length>80)))throw Error('查询范围无效');
  if(q.assemblyId&&!doc.nodes.some(n=>(n.assemblyId??n.id)===q.assemblyId))throw Error('组件不存在');
  const aliases=[['键盘','keyboard','keypad'],['控制面板','control panel','console'],['手指','finger','thumb'],['手掌','palm','hand'],['衣袖','sleeve'],['前臂','forearm'],['握柄','handle','grip'],['门板','door'],['导轨','rail'],['主轴','spindle'],['探头','probe']];
  const requested=(q.terms??[]).map(s=>s.trim().toLowerCase()).filter(Boolean);const terms=[...new Set(requested.flatMap(term=>aliases.find(group=>group.includes(term))??[term]))];const all=doc.nodes.filter(n=>(!q.assemblyId||(n.assemblyId??n.id)===q.assemblyId)&&(!terms.length||terms.some(s=>(n.name+' '+(n.label??'')).toLowerCase().includes(s))));

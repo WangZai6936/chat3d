@@ -91,7 +91,7 @@ const out = await page.evaluate(async (baseUrl) => {
     eq(r.operations[0].name, 'B');
   });
 
-  // 4. 跳过未实现的 op（rotate / delete）
+  // 4. 跳过未实现的 op（rotate / reparent）
   t('未实现命令被丢弃且摘要附警告', () => {
     const r = parse(
       '{"summary":"转一下","operations":[{"op":"rotate","targetId":"n1","euler":[1,0,0]},{"op":"rename","targetId":"n1","name":"C"}]}',
@@ -104,7 +104,7 @@ const out = await page.evaluate(async (baseUrl) => {
   // 5. 全部命令非法 → 抛错
   t('全部命令非法：抛错', () => {
     throwsWith(
-      () => parse('{"summary":"x","operations":[{"op":"delete","targetId":"n1"}]}'),
+      () => parse('{"summary":"x","operations":[{"op":"reparent","targetId":"n1","parentId":null}]}'),
       '没有可执行的命令',
     );
   });

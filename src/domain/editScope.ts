@@ -20,10 +20,10 @@ export function checkEditScope(before:SceneDocument,after:SceneDocument,scope?:E
  }
  if(allowed){
   const animationAllowed=new Set(allowed);for(const n of after.nodes)if(!oldIds.has(n.id)&&n.assemblyId&&fullySelected.has(n.assemblyId))animationAllowed.add(n.id);
-  const unselected=(d:SceneDocument)=>(d.animation?.tracks??[]).filter(t=>t.targetIds.some(id=>!animationAllowed.has(id))).map(t=>structuredClone(t));
+  const unselected=(d:SceneDocument)=>(d.animation?.tracks??[]).filter(t=>t.targetIds.some(id=>!animationAllowed.has(id))).map(t=>({...structuredClone(t),targetIds:t.targetIds.filter(id=>!animationAllowed.has(id))}));
   if(!same(unselected(before),unselected(after)))errors.push('动画修改超出选中范围，必须保留其他对象的动画轨道');
   const changed=new Set<string>();
-  const nodeTracks=(d:SceneDocument,id:string)=>(d.animation?.tracks??[]).filter(t=>t.targetIds.includes(id));
+  const nodeTracks=(d:SceneDocument,id:string)=>(d.animation?.tracks??[]).filter(t=>t.targetIds.includes(id)).map(t=>({...t,targetIds:[id]}));
   for(const n of before.nodes)if(!same(n.transform,next.get(n.id)?.transform)||!same(nodeTracks(before,n.id),nodeTracks(after,n.id)))changed.add(n.id);
   const followers=[...(before.animation?.tracks??[]),...(after.animation?.tracks??[])].filter(t=>t.channel==='follow');
   for(let i=0;i<16;i++)for(const track of followers)if(track.sourceId&&changed.has(track.sourceId))for(const id of track.targetIds)changed.add(id);

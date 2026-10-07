@@ -56,8 +56,17 @@ export async function rasterizeWithFallback(doc:SceneDocument,view:CaptureView,t
 }
 let lastSoftwareInfo:{width:number;height:number;degraded:boolean}|null=null;
 export function getLastSoftwareCaptureInfo(){return lastSoftwareInfo;}
+export async function captureSoftwareEvidence(doc:SceneDocument,view:CaptureView,targetIds?:string[],signal?:AbortSignal){
+ if(!isSoftwareCaptureAvailable())throw Error('软件检查画布不可用');
+ const r=await rasterizeWithFallback(doc,view,targetIds,signal);
+ const canvas=document.createElement('canvas');canvas.width=r.width;canvas.height=r.height;
+ const ctx=canvas.getContext('2d');if(!ctx)throw Error('软件检查画布创建失败');
+ ctx.putImageData(new ImageData(r.data,r.width,r.height),0,0);
+ return {image:canvas.toDataURL('image/png'),softwareInfo:{width:r.width,height:r.height,degraded:r.degraded}};
+}
 export async function captureSoftware(doc:SceneDocument,view:CaptureView,targetIds?:string[],signal?:AbortSignal){
- lastSoftwareInfo=null;if(!isSoftwareCaptureAvailable())throw Error('软件检查画布不可用');const r=await rasterizeWithFallback(doc,view,targetIds,signal);const canvas=document.createElement('canvas');canvas.width=r.width;canvas.height=r.height;const ctx=canvas.getContext('2d');if(!ctx)throw Error('软件检查画布创建失败');ctx.putImageData(new ImageData(r.data,r.width,r.height),0,0);lastSoftwareInfo={width:r.width,height:r.height,degraded:r.degraded};return canvas.toDataURL('image/png');
+ lastSoftwareInfo=null;const result=await captureSoftwareEvidence(doc,view,targetIds,signal);
+ lastSoftwareInfo=result.softwareInfo;return result.image;
 }
 
 /** Geometry-only camera aid; it does not certify detail or remove occluders. */

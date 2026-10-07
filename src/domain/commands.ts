@@ -1,3 +1,6 @@
+import {serializeProject} from './project';
+import {duplicateSelectedNodes,layoutSelectedNodes,wholeObjectIds} from './manualComposition';
+import {editSelectedProperties,type SelectionChange} from './selectionProperties';
 import {persistFeatureBinding} from './structuredComponent';
 import {validateAnimation,remapAnimationForReplacement,type AnimationProgram} from './animation';
 // 命令系统（方案第 6 节）
@@ -143,16 +146,33 @@ export interface ReparentCommand {
   parentId: string | null;
   keepWorldTransform?: boolean; // false 时按局部处理
 }
-export interface DeleteCommand {
-  op: 'delete';
-  targetId: string;
+export type DeleteCommand = {op:'delete';scope?:'assembly'} & (
+  | {targetId:string;targetIds?:never}
+  | {targetIds:string[];targetId?:never}
+);
+
+/** Explicit node/assembly deletion, including descendants, never library assets. */
+export function deletionNodeIds(doc:SceneDocument,op:DeleteCommand):string[]{
+  const ids=new Set(op.targetIds??(op.targetId?[op.targetId]:[]));
+  if(op.scope==='assembly'){
+    const assemblies=new Set(doc.nodes.filter(n=>ids.has(n.id)&&n.assemblyId).map(n=>n.assemblyId!));
+    for(const n of doc.nodes)if(n.assemblyId&&assemblies.has(n.assemblyId))ids.add(n.id);
+  }
+  const children=new Map<string,string[]>();
+  for(const n of doc.nodes)if(n.parentId){const list=children.get(n.parentId)??[];list.push(n.id);children.set(n.parentId,list);}
+  const queue=[...ids];for(let i=0;i<queue.length;i++)for(const id of children.get(queue[i])??[])if(!ids.has(id)){ids.add(id);queue.push(id);}
+  return [...ids];
 }
 
 export type AppearancePatch=Partial<Pick<Material,'baseColor'|'roughness'|'metalness'|'opacity'>>;
 export type Command =
+  // Manual inspector-only aggregate. Intentionally absent from the AI parser/whitelist.
+  | {op:'editSelection';targetIds:string[];change:SelectionChange}
+  | {op:'duplicateSelection';targetIds:string[];count:number;axis:'x'|'z';gap:number}
+  | {op:'layoutSelection';targetIds:string[];layout:'ground'|'x'|'z'}
   | {op:'setSurface';targetId:string;scope?:'assembly';sourceMaterialIds?:string[];surface:import('./textures').SurfaceDetail|null}
   | {op:'setConnection';targetId:string;connection:import('./connections').Connection|null}
-  | {op:'importMeshComponent'|'importComponentDraft';nodes:SceneNode[];materials:Material[]}
+  | {op:'importMeshComponent'|'importComponentDraft'|'importManualComponent';nodes:SceneNode[];materials:Material[]}
   | {op:'setAnimation';animation:AnimationProgram}
   | {op:'clearAnimation'}
   | {op:'transformAssembly';targetId:string;rotationDegrees?:Vec3;scaleFactor?:number;pivot?:Vec3}
@@ -196,8 +216,12 @@ export interface CommandBatch {
 // ============ 影响 / 成本 ============
 export function affectedNodeIds(op: Command, doc: SceneDocument): string[] {
   switch (op.op) {
+    case 'layoutSelection': return wholeObjectIds(doc,op.targetIds);
+    case 'editSelection': return [...new Set(op.targetIds)];
+    case 'duplicateSelection': return [];
     case 'setAnimation':
     case 'clearAnimation':
+    case 'importManualComponent':
     case 'importComponentDraft':
     case 'importMeshComponent':
     case 'createAssembly':
@@ -216,8 +240,11 @@ export function affectedNodeIds(op: Command, doc: SceneDocument): string[] {
     case 'replaceAssemblyParts':
     case 'setAssemblyMetadata':
     case 'translateAssembly': { const assembly=doc.nodes.find(n=>n.id===op.targetId)?.assemblyId;return assembly?doc.nodes.filter(n=>n.assemblyId===assembly).map(n=>n.id):[op.targetId]; }
-    case 'duplicate':
     case 'delete': {
+      const removed=new Set(deletionNodeIds(doc,op));
+      return doc.nodes.filter(n=>removed.has(n.id)||(n.connection&&removed.has(n.connection.targetId))).map(n=>n.id);
+    }
+    case 'duplicate': {
       const ids = new Set<string>([op.targetId]);
       // delete 影响所有后代
       let added = true;
@@ -297,6 +324,20 @@ function findNode(doc: SceneDocument, id: string): SceneNode | undefined {
 }
 
 export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<string, string> = new Map()): { doc: SceneDocument; inverse?: CommandWithInverse['before']; createdIds?: string[]; error?: Error } {
+  if(op.op==='layoutSelection'){
+    try{const next={...doc,nodes:layoutSelectedNodes(doc,op.targetIds,op.layout),revision:doc.revision+1};const errors=validateDocument(next);if(errors.length)return {doc,error:errors[0]};const {nodeIndices:_,...inverse}=snapshotAffected(doc,op);return {doc:next,inverse};}catch(e){return {doc,error:e instanceof Error?e:new Error('排列失败；尚未修改场景')};}
+  }
+  if(op.op==='duplicateSelection'){
+    try{const added=duplicateSelectedNodes(doc,op.targetIds,op.count,op.axis,op.gap),next={...doc,nodes:[...doc.nodes,...added],revision:doc.revision+1};const errors=validateDocument(next);if(errors.length)return {doc,error:errors[0]};return {doc:next,createdIds:added.map(n=>n.id),inverse:{nodes:[],materialIds:[]}};}catch(e){return {doc,error:e instanceof Error?e:new Error('复制失败；尚未修改场景')};}
+  }
+  if(op.op==='editSelection'){
+    try{
+      const changed=editSelectedProperties(doc,op.targetIds,op.change);
+      const next={...doc,...changed,revision:doc.revision+1};
+      const errors=validateDocument(next);if(errors.length)return {doc,error:new Error('属性修改校验失败：'+errors.map(e=>e.message).join('；'))};
+      const {nodeIndices:_,...inverse}=snapshotAffected(doc,op);return {doc:next,inverse};
+    }catch(e){return {doc,error:e instanceof Error?e:new Error('属性修改失败；尚未修改任何对象。')};}
+  }
   // tempId 解析：模型在同一批次里用 tempId 引用前面创建的节点，这里换成真实 ID
   if ('targetId' in op && op.targetId && tempIdMap.has(op.targetId)) {
     op = { ...op, targetId: tempIdMap.get(op.targetId)! } as Command;
@@ -306,10 +347,19 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     op = { ...op, parentId: tempIdMap.get(rawParentId)! } as Command;
   }
   // 目标存在性
-  if ('targetId' in op) {
+  if ('targetId' in op && op.op!=='delete') {
     if (!findNode(doc, op.targetId)) {
       return { doc, error: new Error(`命令 ${op.op} 的目标节点 ${op.targetId} 不存在`) };
     }
+  }
+  if(op.op==='delete'){
+    if(op.scope!==undefined&&op.scope!=='assembly')return {doc,error:new Error('删除范围无效')};
+    if((op.targetId!==undefined)===(op.targetIds!==undefined))return {doc,error:new Error('删除需指定 targetId 或 targetIds，不能同时使用')};
+    const rawIds=op.targetIds??[op.targetId];
+    if(!Array.isArray(rawIds)||!rawIds.length||rawIds.length>10000||rawIds.some(id=>typeof id!=='string'||!id.trim()))return {doc,error:new Error('删除目标列表无效')};
+    const ids=[...new Set(rawIds.map(id=>tempIdMap.get(id!)??id!))];
+    if(ids.some(id=>!findNode(doc,id)))return {doc,error:new Error('删除目标已不存在，请重新选择对象')};
+    op={op:'delete',targetIds:ids,...(op.scope?{scope:op.scope}:{})};
   }
   // 材质引用
   if (op.op === 'setMaterial') {
@@ -330,14 +380,49 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
   }
 
   if(op.op==='createTemplate'&&op.templateId==='smt_workshop'&&doc.nodes.length)return {doc,error:new Error('完整车间组件请在空会话创建，避免覆盖或重叠；已有场景请直接修改其中设备')};
-  const nodes = doc.nodes.map(cloneNode);
+  // Append-only commands do not mutate existing nodes. Keep their identities and
+  // avoid copying the whole scene for every repeated asset in a batch.
+  const appendOnly = ['createPrimitive','createTemplate','createAssembly','duplicateAssembly','importComponentDraft','importManualComponent','importMeshComponent','setAnimation','clearAnimation'].includes(op.op);
+  const nodes = appendOnly ? doc.nodes.slice() : doc.nodes.map(cloneNode);
   let materials=doc.materials;
   let animation=doc.animation;
-  const beforeSnapshot:CommandWithInverse['before'] = {...('targetId' in op ? snapshotAffected(doc, op) : {nodes:[],materialIds:[]}),...(['setAnimation','clearAnimation'].includes(op.op)?{animation:structuredClone(doc.animation??null)}:{})};
+  const beforeSnapshot:CommandWithInverse['before'] = {...('targetId' in op || op.op==='delete' ? snapshotAffected(doc, op) : {nodes:[],materialIds:[]}),...(['setAnimation','clearAnimation'].includes(op.op)?{animation:structuredClone(doc.animation??null)}:{})};
 
   let createdIds: string[] | undefined;
 
   switch (op.op) {
+    case 'delete': {
+      const removed=new Set(deletionNodeIds(doc,op));
+      for(let i=nodes.length-1;i>=0;i--)if(removed.has(nodes[i].id))nodes.splice(i,1);
+      for(const n of nodes)if(n.connection&&removed.has(n.connection.targetId))delete n.connection;
+      // A partial delete must not erase the surviving component's only blueprint.
+      for(const old of beforeSnapshot.nodes){
+        const plan=old.modelStructure?.blueprint;
+        if(!removed.has(old.id)||!old.assemblyId||!plan)continue;
+        const members=nodes.filter(n=>n.assemblyId===old.assemblyId);
+        if(members.some(n=>n.modelStructure?.blueprint?.key===plan.key))continue;
+        const host=members.find(n=>n.modelStructure?.blueprintKey===plan.key)??members.find(n=>!n.modelStructure);
+        if(!host)continue;
+        if(!beforeSnapshot.nodes.some(n=>n.id===host.id)){
+          const index=doc.nodes.findIndex(n=>n.id===host.id);
+          beforeSnapshot.nodes.push(cloneNode(doc.nodes[index]));
+          beforeSnapshot.nodeIndices![host.id]=index;
+        }
+        host.modelStructure={...(host.modelStructure??{blueprintKey:plan.key,featureKeys:[]}),blueprint:structuredClone(plan)};
+      }
+      if(animation){
+        const tracks=animation.tracks.flatMap(track=>{
+          if(track.sourceId&&removed.has(track.sourceId))return [];
+          const targetIds=track.targetIds.filter(id=>!removed.has(id));
+          return targetIds.length?[{...track,targetIds}]:[];
+        });
+        if(JSON.stringify(tracks)!==JSON.stringify(animation.tracks)){
+          beforeSnapshot.animation=structuredClone(animation);
+          animation=tracks.length?{...animation,tracks}:undefined;
+        }
+      }
+      break;
+    }
     case 'setSurface': {
       if(op.scope!==undefined&&op.scope!=='assembly'||op.sourceMaterialIds!==undefined&&(!Array.isArray(op.sourceMaterialIds)||!op.sourceMaterialIds.length||op.sourceMaterialIds.some(x=>typeof x!=='string')))return {doc,error:new Error('表面作用范围无效')};
       const ids=new Set(affectedNodeIds(op,doc));if(!ids.size)return {doc,error:new Error('没有匹配的表面部件')};
@@ -351,9 +436,11 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
       break;
     }
     case 'clearAnimation': animation=undefined;break;
+    case 'importManualComponent':
     case 'importComponentDraft':
     case 'importMeshComponent': {
-      if(!Array.isArray(op.nodes)||!op.nodes.length||op.nodes.length>1000||!Array.isArray(op.materials)||op.materials.length>100)return {doc,error:new Error('网格组件数量或材质数量无效')};
+      if(!Array.isArray(op.nodes)||!op.nodes.length||(op.op!=='importManualComponent'&&op.nodes.length>1000)||!Array.isArray(op.materials)||(op.op!=='importManualComponent'&&op.materials.length>100))return {doc,error:new Error('网格组件数量或材质数量无效')};
+      if(op.op==='importManualComponent'){try{serializeProject({...doc,nodes:[...doc.nodes,...op.nodes],materials:[...doc.materials,...op.materials]});}catch(e){return {doc,error:e instanceof Error?e:new Error('手动放置超过项目序列化预算')};}}
       const imported:SceneDocument={...doc,nodes:op.nodes,materials:op.materials,assets:[]};delete imported.animation;
       const errors=validateDocument(imported);if(errors.length||op.nodes.some(n=>!n.geometry||n.kind!=='primitive'||(op.op==='importMeshComponent'&&n.geometry.type!=='mesh')||n.parentId!==null))return {doc,error:errors[0]??new Error('网格组件只能包含平级三角网格')};
       const materialMap=new Map(op.materials.map(m=>[m.id,makeId()]));materials=[...materials,...op.materials.map(m=>({...m,id:materialMap.get(m.id)!}))];
@@ -496,13 +583,14 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
       n.materialId = op.materialId;
       break;
     }
-    // createTemplate / instantiateAsset / duplicate / reparent / scale / rotate / delete
+    // instantiateAsset / duplicate / reparent / scale / rotate
     // 在 commands-full 实现中补齐；P0 先跑通创建+修改主干
     default:
       return { doc, error: new Error(`命令 ${op.op} 尚未实现（P0 主干不含）`) };
   }
 
-  if(nodes.length>10000)return {doc,error:new Error('场景对象数量超过10000上限')};
+  // Scene size is not a node-count gate. Geometry/texture validation and the
+  // per-batch work budget below remain in force regardless of existing size.
   const newDoc: SceneDocument = {
     ...doc,
     nodes,
@@ -510,6 +598,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     revision: doc.revision + 1,
   };
   if(animation)newDoc.animation=animation;else delete newDoc.animation;
+  if(op.op==='importManualComponent'){try{serializeProject(newDoc);}catch(e){return {doc,error:e instanceof Error?e:new Error('手动放置超过项目序列化预算')};}}
   const errs = validateDocument(newDoc);
   if (errs.length > 0) {
     return { doc, error: new Error(`提交后文档校验失败: ${errs.map((e) => e.message).join('; ')}`) };
@@ -557,12 +646,13 @@ export function applyBatch(doc: SceneDocument, batch: { operations: Command[] })
       errors.push(new Error(`操作 ${op.op} 失败: ${r.error.message}`));
       break; // 整批拒绝，current 不写回，正式场景与撤销栈都不变化
     }
-    actualNewNodes+=r.createdIds?.length??0;
+    // Explicit manual aggregate copies use the project byte budget, not the AI generation batch budget.
+    if(op.op!=='duplicateSelection'&&op.op!=='importManualComponent')actualNewNodes+=r.createdIds?.length??0;
     if(actualNewNodes>DEFAULT_BUDGET.maxNewNodes){errors.push(new Error(`本批实际新增 ${actualNewNodes} 个节点超过 ${DEFAULT_BUDGET.maxNewNodes}，请分批执行；本批未应用`));break;}
     current = r.doc;
     if (r.inverse) {
       // create 类命令没有「受影响」节点：创建结果用新节点 id 快照，撤销时才删得掉
-      const after = op.op==='appendAssemblyParts'||op.op==='replaceAssemblyParts'?snapshotIds(current,[...r.inverse.nodes.map(n=>n.id),...(r.createdIds??[])]):r.createdIds && r.createdIds.length > 0 ? snapshotIds(current, r.createdIds) : snapshotAffected(current, op);
+      const after = op.op==='delete'||op.op==='appendAssemblyParts'||op.op==='replaceAssemblyParts'?snapshotIds(current,[...r.inverse.nodes.map(n=>n.id),...(r.createdIds??[])]):r.createdIds && r.createdIds.length > 0 ? snapshotIds(current, r.createdIds) : snapshotAffected(current, op);
       applied.push({ command: op, before: r.inverse, after });
     }
   }

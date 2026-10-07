@@ -1,0 +1,63 @@
+name: Windows desktop installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install stable Rust with Windows x64 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Install JavaScript dependencies
+        run: npm ci
+      - name: Build unsigned Windows x64 NSIS installer
+        run: npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.windows.conf.json -- --locked
+      - name: Check installer and record hashes and source commit
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ((Test-Path 'dist/server') -or (Test-Path 'dist/_worker.js')) { throw 'Desktop frontend unexpectedly contains the Sites worker.' }
+          $installers = @(Get-ChildItem 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe')
+          if ($installers.Count -eq 0) { throw 'No NSIS installer was produced.' }
+          New-Item -ItemType Directory -Path 'windows-artifact' -Force | Out-Null
+          $hashes = foreach ($installer in $installers) {
+            if ($installer.Length -eq 0) { throw "Empty installer: $($installer.Name)" }
+            $stream = [System.IO.File]::OpenRead($installer.FullName)
+            try {
+              if ($stream.ReadByte() -ne 0x4D -or $stream.ReadByte() -ne 0x5A) { throw "Invalid executable: $($installer.Name)" }
+            } finally { $stream.Dispose() }
+            Copy-Item $installer.FullName 'windows-artifact/'
+            $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $($installer.Name)"
+          }
+          $hashes | Set-Content 'windows-artifact/SHA256SUMS.txt' -Encoding utf8
+          @(
+            "repository=$env:GITHUB_REPOSITORY"
+            "commit=$env:GITHUB_SHA"
+            "run=https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            'imported_source_commit=b4b908bdecd1c98f8f9adad6b85942bdfce5bbb8'
+            'source_archive_sha256=e532b9ea70169ceff23c340ca579951c52dae4136cf1919c779acc4e55af373b'
+            'target=x86_64-pc-windows-msvc'
+            'package=unsigned NSIS test installer; installation and GPU behavior not verified'
+          ) | Set-Content 'windows-artifact/SOURCE-COMMIT.txt' -Encoding utf8
+      - name: Upload installer and provenance
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat3d-windows-x64-${{ github.sha }}
+          path: windows-artifact/*
+          if-no-files-found: error
+          retention-days: 30

@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@heroui/styles";
 
 /* 全局基础：桌面应用占满视口、无滚动条 */
 html,

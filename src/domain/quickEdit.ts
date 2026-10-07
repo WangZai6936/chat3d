@@ -16,7 +16,16 @@ export function quickEdit(text:string,doc:SceneDocument,selection:string[],scope
   return nodes.length===1?{node:nodes[0],assembly:false}:null;
  };
  let operations:Command[]=[];let m:RegExpMatchArray|null;
- if((m=source.match(/^(.*?)\s*(?:改成|改为|变成|设为)\s*(红色|蓝色|绿色|黄色|白色|黑色|灰色|深灰色|#[\da-fA-F]{6})(?:[，,]\s*保留(?:所有|全部)?尺寸[、,，]位置和其他零件)?$/))){
+ if((m=source.match(/^(?:请)?(?:删除|删掉|移除)\s*(.+)$/))){
+  const name=m[1].trim();
+  if(/^(?:当前)?选中(?:的)?(?:对象|模型|零件|组件)?$/.test(name)){
+    if(!selection.length||selection.some(id=>!doc.nodes.some(n=>n.id===id)))return null;
+    operations=[{op:'delete',targetIds:[...new Set(selection)]}];
+  }else{
+    const t=target(name);if(!t?.node)return null;
+    operations=[{op:'delete',targetId:t.node.id,...(t.assembly?{scope:'assembly' as const}:{})}];
+  }
+ }else if((m=source.match(/^(.*?)\s*(?:改成|改为|变成|设为)\s*(红色|蓝色|绿色|黄色|白色|黑色|灰色|深灰色|#[\da-fA-F]{6})(?:[，,]\s*保留(?:所有|全部)?尺寸[、,，]位置和其他零件)?$/))){
   const t=target(m[1]);if(!t?.node)return null;operations=[{op:'setAppearance',targetId:t.node.id,...(t.assembly?{scope:'assembly' as const}:{}),baseColor:colors[m[2]]??m[2]}];
  }else if((m=source.match(/^(.*?)\s*(?:向|往)(左|右|前|后|上|下)(?:移动|挪动|挪|移)\s*(\d+(?:\.\d+)?)\s*(米|厘米|毫米)$/))){
   const t=target(m[1]);if(!t?.node)return null;const v=Number(m[3])*(m[4]==='厘米'?.01:m[4]==='毫米'?.001:1);if(v<=0||v>100)return null;
@@ -30,6 +39,6 @@ export function quickEdit(text:string,doc:SceneDocument,selection:string[],scope
  }else return null;
  const batch:CommandBatch={requestId:makeId(),projectId:doc.projectId,baseRevision:doc.revision,selectedIds:[...selection],editScope:scope,incomplete:true,summary:'明确编辑已完成数据校验（本地执行）。请检查预览后应用；尚未做视觉验收。',operations};
  const result=applyBatch(doc,batch);if(result.errors.length||checkEditScope(doc,result.doc,scope).length)return null;
- if(JSON.stringify(doc.animation)!==JSON.stringify(result.doc.animation))return null;
+ if(!operations.every(op=>op.op==='delete')&&JSON.stringify(doc.animation)!==JSON.stringify(result.doc.animation))return null;
  return {batch,result};
 }

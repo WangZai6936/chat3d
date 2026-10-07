@@ -6,7 +6,7 @@ import React from 'react';
 const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});
 for(const name of ['window','document','HTMLElement','HTMLInputElement','HTMLFormElement','HTMLSelectElement','Element','CustomEvent','Node','NodeFilter','MutationObserver','Event','MouseEvent','localStorage','location','DocumentFragment'])Object.defineProperty(globalThis,name,{value:dom.window[name],configurable:true});
 Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});globalThis.indexedDB=indexedDB;globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);globalThis.cancelAnimationFrame=clearTimeout;window.requestAnimationFrame=globalThis.requestAnimationFrame;window.cancelAnimationFrame=globalThis.cancelAnimationFrame;globalThis.ResizeObserver=class{observe(){} unobserve(){} disconnect(){}};
-globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+globalThis.CSS={escape:value=>String(value).replace(/[^a-zA-Z0-9_-]/g,char=>'\\'+char)};globalThis.SVGElement=dom.window.SVGElement;globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 HTMLElement.prototype.scrollIntoView=()=>{};
 const {render,fireEvent,waitFor,cleanup,act}=await import('@testing-library/react');
 const {Theme}=await import('@radix-ui/themes');

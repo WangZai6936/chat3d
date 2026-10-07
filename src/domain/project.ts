@@ -11,7 +11,8 @@ export function serializeProject(doc: SceneDocument): string {
     unit: doc.unit, upAxis: doc.upAxis, nodes: doc.nodes, materials: doc.materials,
     assets: doc.assets, ...(doc.animation?{animation:doc.animation}:{}), ...(doc.viewState ? { viewState: doc.viewState } : {}),
   };
-  const output=JSON.stringify({ format: 'chat3d-project', version: 1, scene }, null, doc.nodes.some(n=>n.geometry?.type==='mesh')?undefined:2);if(new TextEncoder().encode(output).length>MAX_PROJECT_BYTES)throw Error('项目文件超过20MB，请精简贴图或拆分场景后导出');return output;
+  // Compact JSON keeps whitespace from consuming the portable byte budget.
+  const output=JSON.stringify({ format: 'chat3d-project', version: 1, scene });if(new TextEncoder().encode(output).length>MAX_PROJECT_BYTES)throw Error('项目文件超过20MB，请精简贴图或拆分场景后导出');return output;
 }
 
 export function parseProject(text: string): SceneDocument {
@@ -22,7 +23,7 @@ export function parseProject(text: string): SceneDocument {
   if (!pack || pack.format !== 'chat3d-project' || pack.version !== 1 || !pack.scene) throw new Error('不支持的项目文件格式或版本');
   const doc = pack.scene;
   if (doc.schemaVersion !== SCHEMA_VERSION || typeof doc.projectId !== 'string' || !doc.projectId || !Number.isSafeInteger(doc.revision) || doc.revision < 0 || doc.unit !== 'm' || doc.upAxis !== 'Y') throw new Error('项目标识、版本、单位或坐标系无效');
-  if (!Array.isArray(doc.nodes) || !Array.isArray(doc.materials) || !Array.isArray(doc.assets) || doc.nodes.length > 10000) throw new Error('项目列表结构无效或对象数量超过上限');
+  if (!Array.isArray(doc.nodes) || !Array.isArray(doc.materials) || !Array.isArray(doc.assets)) throw new Error('项目列表结构无效');
   if (doc.assets.length) throw new Error('此版本尚不支持导入外部模型资产');
   const required: Record<string, string[]> = {loft:[],sweepTube:[],mesh:[],lathe:[],profile:[],capsule:['radius','length'],frame:['width','height','depth','thickness'],tube:['outerRadius','innerRadius','height'],trapezoid:['widthTop','widthBottom','height','depth'],roundedPlate:['width','height','depth','cornerRadius'],box:['width','height','depth'],sphere:['radius'],cylinder:['radiusTop','radiusBottom','height'],cone:['radius','height'],plane:['width','depth']};
   try {

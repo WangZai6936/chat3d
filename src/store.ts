@@ -49,7 +49,7 @@ export type AiTaskStatus =
   | 'cancelled';
 
 export interface MessageRun {
-  mode?:'demo'|'single'|'pi'; startedAt:number; endedAt?:number; status:'running'|'preview'|'completed'|'failed'|'stopped'; activity?:AgentActivity;
+  mode?:'demo'|'single'|'pi'; generationQuality?:'fast'|'fine'; startedAt:number; endedAt?:number; status:'running'|'preview'|'completed'|'failed'|'stopped'; activity?:AgentActivity;
 }
 export interface ChatMessage {
   id: string;
@@ -60,15 +60,17 @@ export interface ChatMessage {
   images?: string[];
   outcome?: 'applied' | 'discarded' | 'superseded';
   run?: MessageRun;
-  queuedTask?: {status:'waiting'|'prepared'};
+  queuedTask?: {status:'waiting'|'prepared'|'cancelled'};
   steering?: {runId:string;status:'queued'|'received'|'interrupted'};
   createdAt: number;
 }
 
 export interface HistoryEntry {
+  id?:string;createdAt?:number;source?:'manual'|'ai';
   summary: string;
   applied: CommandWithInverse[]; // before/after 快照
   docAfter: SceneDocument;
+  createdMaterialIds?: string[]; // Only this history entry's new materials; legacy entries stay compatible.
   bytes: number;
 }
 
@@ -105,6 +107,7 @@ export interface EditorState {
 
   // 动作
   applyCommandBatch: (ops: Command[], summary: string) => { ok: boolean; error?: string };
+  deleteSelection: () => {ok:boolean;error?:string};
   confirmPending: () => void;
   discardPending: () => void;
   undo: () => void;
@@ -147,7 +150,7 @@ export function loadModelConfig(): ModelConfig | null {
     const c = JSON.parse(s) as Partial<ModelConfig>;
     if (c.useMock === true) return null;
     if (typeof c.baseURL !== 'string' || typeof c.apiKey !== 'string' || typeof c.model !== 'string') return null;
-    return { taskBudget:normalizeTaskBudget(c.taskBudget), baseURL: c.baseURL, apiKey: c.apiKey, model: c.model, agentMode: c.agentMode === 'single' ? 'single' : 'pi', parallelDrafts: c.parallelDrafts === true, stream: c.stream !== false, useMock: false };
+    return { generationQuality:c.generationQuality==='fast'?'fast':'fine', taskBudget:normalizeTaskBudget(c.taskBudget), baseURL: c.baseURL, apiKey: c.apiKey, model: c.model, agentMode: c.agentMode === 'single' ? 'single' : 'pi', parallelDrafts: c.parallelDrafts === true, stream: c.stream !== false, useMock: false };
   } catch {
     return null;
   }
@@ -156,15 +159,15 @@ export function loadModelConfig(): ModelConfig | null {
 const restoredProject = loadAutosave();
 const EDIT_LOCKED = new Set<AiTaskStatus>(['capturing', 'context', 'generating', 'validating', 'previewing', 'applying']);
 
-export const useEditorStore = create<EditorState>((set, get) => ({
+export const createEditorStore = (initial: Partial<EditorState> = {}) => create<EditorState>((set, get) => ({
   viewportStatus:'starting',
   composerText:'',composerImages:[],lastRun:null,
   setComposerText:(composerText)=>set({composerText}),setComposerImages:(composerImages)=>set({composerImages}),setLastRun:(lastRun)=>set({lastRun}),
-  doc: restoredProject.doc ?? createInitialDoc(),
+  doc: createInitialDoc(),
   past: [],
   future: [],
-  dirty: !!restoredProject.doc,
-  autosaveError: restoredProject.error,
+  dirty: false,
+  autosaveError: null,
   replaceProject: (doc) => {
     if (EDIT_LOCKED.has(get().aiStatus)) return false;
     set({doc: structuredClone(doc), past: [], future: [], dirty: false, selection: [], messages: [], composerText:'',composerImages:[],lastRun:null, pendingBatch: null, pendingResult: null, previewDoc: null, aiStatus: 'idle', aiError: null});
@@ -177,7 +180,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   pendingBatch: null,
   pendingResult: null,
   previewDoc: null,
-  aiConfig: loadModelConfig(),
+  aiConfig: null,
 
   setAiConfig: (cfg) => {
     set({ aiConfig: cfg });
@@ -200,14 +203,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (result.errors.length > 0) {
       return { ok: false, error: result.errors.map((e) => e.message).join('; ') };
     }
+    const survivingIds=new Set(result.doc.nodes.map(n=>n.id));
     const entry: HistoryEntry = {
+      id:makeId(),createdAt:Date.now(),source:'manual',
       summary,
       applied: result.applied,
       docAfter: result.doc,
+      createdMaterialIds: result.doc.materials.filter(m=>!state.doc.materials.some(old=>old.id===m.id)).map(m=>m.id),
       bytes: entryBytes(result.applied),
     };
     set({
       doc: result.doc,
+      selection: state.selection.filter(id=>survivingIds.has(id)),
       past: pushHistory(state.past, entry),
       future: [],
       dirty: true,
@@ -217,13 +224,20 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     return { ok: true };
   },
 
+  deleteSelection: () => {
+    const state=get();
+    const ids=[...new Set(state.selection.filter(id=>state.doc.nodes.some(n=>n.id===id)))];
+    if(!ids.length)return {ok:false,error:'请先选中要删除的场景对象'};
+    return state.applyCommandBatch([{op:'delete',targetIds:ids}],`删除选中的 ${ids.length} 个场景零件`);
+  },
+
   // AI 事务确认：直接采用预演结果对象，不重跑 applyBatch
   // → 预览看到什么，提交就是什么；新建节点 ID 在预览/正式态完全一致
   confirmPending: () => {
     const { pendingBatch, pendingResult } = get();
-    if (!pendingBatch || !pendingResult) return;
+    if (!pendingBatch || !pendingResult || get().aiStatus !== 'previewing') return;
     // 防御：预览期间若文档被其他途径改动（界面已禁编辑，理论上走不到）
-    if (get().doc.revision !== pendingBatch.baseRevision) {
+    if (get().doc.revision !== pendingBatch.baseRevision || get().doc.projectId !== pendingBatch.projectId || pendingResult.doc.projectId !== pendingBatch.projectId) {
       set({
         aiError: '场景在预览期间已变更，预览作废',
         aiStatus: 'error',
@@ -234,14 +248,17 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return;
     }
     const entry: HistoryEntry = {
+      id:makeId(),createdAt:Date.now(),source:'ai',
       summary: pendingBatch.summary,
       applied: pendingResult.applied,
       docAfter: pendingResult.doc,
+      createdMaterialIds: pendingResult.doc.materials.filter(m=>!get().doc.materials.some(old=>old.id===m.id)).map(m=>m.id),
       bytes: entryBytes(pendingResult.applied),
     };
     set((s) => ({
       messages: s.messages.map(m => m.batch?.requestId === pendingBatch.requestId ? {...m, outcome: 'applied' as const} : m),
       doc: pendingResult.doc,
+      selection: s.selection.filter(id=>pendingResult.doc.nodes.some(n=>n.id===id)),
       past: pushHistory(s.past, entry),
       future: [],
       dirty: true,
@@ -254,6 +271,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
 
   discardPending: () => {
+    if (['capturing','context','generating','validating','applying'].includes(get().aiStatus)) return;
     set(s => ({ messages: s.messages.map(m => m.batch?.requestId === s.pendingBatch?.requestId && m.batch ? {...m, outcome: 'discarded' as const} : m), pendingBatch: null, pendingResult: null, previewDoc: null, aiStatus: 'idle', aiError: null }));
   },
 
@@ -263,8 +281,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (past.length === 0) return;
     const entry = past[past.length - 1];
     const restored = restoreFromBefore(doc, entry);
+    const survivingIds=new Set(restored.nodes.map(n=>n.id));
     set({
       doc: restored,
+      selection: get().selection.filter(id=>survivingIds.has(id)),
       past: past.slice(0, -1),
       future: [...future, entry],
       dirty: true,
@@ -276,8 +296,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     if (EDIT_LOCKED.has(aiStatus)) return;
     if (future.length === 0) return;
     const entry = future[future.length - 1];
+    const survivingIds=new Set(entry.docAfter.nodes.map(n=>n.id));
     set({
       doc: { ...structuredClone(entry.docAfter), revision: doc.revision + 1 },
+      selection: get().selection.filter(id=>survivingIds.has(id)),
       past: [...past, entry],
       future: future.slice(0, -1),
       dirty: true,
@@ -310,7 +332,12 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setPendingResult: (r) => set({ pendingResult: r }),
   setPreviewDoc: (d) => set({ previewDoc: d }),
   setAiError: (e) => set({ aiError: e }),
+  ...initial,
 }));
+export type EditorStore = ReturnType<typeof createEditorStore>;
+// This public store projects the currently viewed conversation. Background controllers
+// hold an independent store, never this navigation-dependent object.
+export const useEditorStore = createEditorStore({doc:restoredProject.doc??createInitialDoc(),dirty:!!restoredProject.doc,autosaveError:restoredProject.error,aiConfig:loadModelConfig()});
 
 // 从 before 快照恢复文档（撤销）
 // - before 里有快照的节点：回写旧值（保留原 ID、父子、参数、材料）
@@ -337,7 +364,9 @@ function restoreFromBefore(doc: SceneDocument, entry: HistoryEntry): SceneDocume
       if (!existing.has(n.id)) nodes.push(cloneSnapshot(n));
     }
   }
-  const restored={...doc,nodes,revision:doc.revision+1};if(animation)restored.animation=animation;else delete restored.animation;return restored;
+  const created=new Set(entry.createdMaterialIds??[]),used=new Set(nodes.map(n=>n.materialId));
+  const materials=doc.materials.filter(m=>!created.has(m.id)||used.has(m.id));
+  const restored={...doc,nodes,materials,revision:doc.revision+1};if(animation)restored.animation=animation;else delete restored.animation;return restored;
 }
 
 function cloneSnapshot(n: SceneNode): SceneNode {

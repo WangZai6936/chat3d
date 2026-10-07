@@ -1,3 +1,5 @@
+import {ManualInteraction,type CompositionInteraction} from './manualInteraction';
+import {rectangleObjectIds} from './rectangleSelection';
 import {materialReady,disposeMaterialTextures} from './surfaceTextures';
 import {createAnimationEvaluator} from '../domain/animation';
 import {AnimationClock,type PlaybackState} from './animationPlayback';
@@ -20,6 +22,8 @@ interface NodeResources {
 }
 
 export class Viewport {
+  private composition:ManualInteraction|null=null;
+  setComposition(config:CompositionInteraction|null){if(!this.composition)this.composition=new ManualInteraction(this.renderer.domElement,this.scene,this.camera,()=>this.nodeMap,()=>{this.selectionHelpers.forEach(h=>h.update());this.markDirty();});this.composition.set(config);}
   private renderer: THREE.WebGLRenderer;
   private scene: THREE.Scene;
   private camera: THREE.PerspectiveCamera;
@@ -42,7 +46,7 @@ export class Viewport {
   private lastFrame=0;
   private lastSyncedDoc:SceneDocument|null=null;
   private readonly host: HTMLElement;
-  private readonly onPick: (nodeId: string | null) => void;
+  private readonly onPick: (nodeId: string | null, additive?:boolean) => void;
   private resizeObserver: ResizeObserver | null = null;
   // 视口固有资源（不随场景文档重建）
   private envTexture: THREE.Texture | null = null;
@@ -52,7 +56,7 @@ export class Viewport {
   private keyLight: THREE.DirectionalLight | null = null;
 
   // 世界单位：米。相机近远裁剪面按工业设备场景尺度设定。
-  constructor(host: HTMLElement, onPick: (nodeId: string | null) => void) {
+  constructor(host: HTMLElement, onPick: (nodeId: string | null, additive?:boolean) => void) {
     this.host = host;
     this.onPick = onPick;
 
@@ -67,6 +71,7 @@ export class Viewport {
     this.renderer.domElement.style.width = '100%';
     this.renderer.domElement.style.height = '100%';
     this.renderer.domElement.style.display = 'block';
+    this.renderer.domElement.style.touchAction = 'none';
 
     this.scene = new THREE.Scene();
     this.backgroundTexture = this.createGradientBackground();
@@ -180,54 +185,59 @@ export class Viewport {
     this.scene.add(grid);
   }
 
+  private boxSelection=false;
+  private boxWholeModel=false;
+  private boxThrough=false;
+  private onBoxError:((message:string)=>void)|null=null;
+  private onBoxSelect:((ids:string[],additive:boolean)=>void)|null=null;
+  private cancelPointerGesture:()=>void=()=>{};
+  private escapeSelection=(e:KeyboardEvent)=>{if(e.key==='Escape')this.cancelPointerGesture?.();};
+  setBoxSelection(enabled:boolean,onSelect:((ids:string[],additive:boolean)=>void)|null,wholeModel=false,through=false,onError:((message:string)=>void)|null=null){
+    if(this.boxSelection!==enabled||this.boxWholeModel!==wholeModel||this.boxThrough!==through)this.cancelPointerGesture?.();
+    this.boxSelection=enabled;this.boxWholeModel=wholeModel;this.boxThrough=through;this.onBoxSelect=onSelect;this.onBoxError=onError;
+    this.renderer.domElement.style.cursor=enabled||this.composition?.placing?'crosshair':'';
+  }
   private setupPicking(): void {
     // 命令式交互：左键拖拽旋转 / 点击拾取（位移 < 3px 视为点击）/ 右键拖拽平移 / 滚轮缩放
     const canvas = this.renderer.domElement;
-    let down: { x: number; y: number; button: number } | null = null;
-
-    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-
-    canvas.addEventListener('pointerdown', (e: PointerEvent) => {
-      if (e.button !== 0 && e.button !== 2) return;
-      down = { x: e.clientX, y: e.clientY, button: e.button };
+    let down:{x:number;y:number;startX:number;startY:number;button:number;pointerId:number;box:boolean;additive:boolean;moved:boolean}|null=null;
+    let rectangle:HTMLDivElement|null=null;
+    const cancel=()=>{if(down&&canvas.hasPointerCapture?.(down.pointerId))canvas.releasePointerCapture(down.pointerId);down=null;rectangle?.remove();rectangle=null;};
+    this.cancelPointerGesture=cancel;
+    window.addEventListener('keydown',this.escapeSelection);
+    canvas.addEventListener('contextmenu',e=>e.preventDefault());
+    canvas.addEventListener('pointerdown',(e:PointerEvent)=>{
+      if((e.button!==0&&e.button!==2)||down||e.isPrimary===false)return;
+      down={x:e.clientX,y:e.clientY,startX:e.clientX,startY:e.clientY,button:e.button,pointerId:e.pointerId,box:this.boxSelection&&e.button===0,additive:e.shiftKey||e.ctrlKey||e.metaKey,moved:false};
       canvas.setPointerCapture(e.pointerId);
+      if(down.box){e.preventDefault();rectangle=document.createElement('div');rectangle.className='viewport-selection-rectangle';rectangle.setAttribute('aria-hidden','true');Object.assign(rectangle.style,{position:'absolute',pointerEvents:'none',border:'1px solid #3b82f6',background:'rgba(59,130,246,.12)',zIndex:'3'});this.host.appendChild(rectangle);}
     });
-
-    canvas.addEventListener('pointermove', (e: PointerEvent) => {
-      if (!down) return;
-      const dx = e.clientX - down.x;
-      const dy = e.clientY - down.y;
-      if (Math.abs(dx) + Math.abs(dy) < 3) return; // 小于阈值视为点击，不转相机
-      if (down.button === 0) {
-        // 左键：绕目标点旋转
-        this.orbitTheta -= dx * 0.005;
-        this.orbitPhi -= dy * 0.005;
-        this.orbitPhi = Math.min(Math.max(this.orbitPhi, 0.08), Math.PI - 0.08); // 不穿越极点
-      } else {
-        // 右键：屏幕空间平移（右拖目标左移，符合「内容跟手」直觉）
-        const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
-        const up = new THREE.Vector3(0, 1, 0).applyQuaternion(this.camera.quaternion);
-        const scale = this.orbitRadius * 0.0015;
-        this.orbitTarget.addScaledVector(right, -dx * scale).addScaledVector(up, dy * scale);
-      }
-      down.x = e.clientX;
-      down.y = e.clientY;
-      this.updateOrbitCamera();
+    canvas.addEventListener('pointermove',(e:PointerEvent)=>{
+      if(!down||e.pointerId!==down.pointerId)return;const dx=e.clientX-down.x,dy=e.clientY-down.y;
+      if(Math.abs(e.clientX-down.startX)+Math.abs(e.clientY-down.startY)>=3)down.moved=true;
+      if(down.box){const r=this.host.getBoundingClientRect();if(rectangle)Object.assign(rectangle.style,{left:Math.max(0,Math.min(down.startX,e.clientX)-r.left)+'px',top:Math.max(0,Math.min(down.startY,e.clientY)-r.top)+'px',width:Math.abs(e.clientX-down.startX)+'px',height:Math.abs(e.clientY-down.startY)+'px'});return;}
+      if(Math.abs(dx)+Math.abs(dy)<3)return;
+      if(down.button===0){this.orbitTheta-=dx*.005;this.orbitPhi-=dy*.005;this.orbitPhi=Math.min(Math.max(this.orbitPhi,.08),Math.PI-.08);}
+      else{const right=new THREE.Vector3(1,0,0).applyQuaternion(this.camera.quaternion),up=new THREE.Vector3(0,1,0).applyQuaternion(this.camera.quaternion),scale=this.orbitRadius*.0015;this.orbitTarget.addScaledVector(right,-dx*scale).addScaledVector(up,dy*scale);}
+      down.x=e.clientX;down.y=e.clientY;this.updateOrbitCamera();
     });
-
-    canvas.addEventListener('pointerup', (e: PointerEvent) => {
-      if (!down) return;
-      const dx = e.clientX - down.x;
-      const dy = e.clientY - down.y;
-      const moved = Math.abs(dx) + Math.abs(dy) >= 3;
-      if (!moved && down.button === 0) this.pickAt(e.clientX, e.clientY);
-      down = null;
+    canvas.addEventListener('pointerup',(e:PointerEvent)=>{
+      if(!down||e.pointerId!==down.pointerId)return;const gesture=down;
+      const moved=gesture.moved||Math.abs(e.clientX-gesture.startX)+Math.abs(e.clientY-gesture.startY)>=3;
+      if(gesture.box&&moved){const r=canvas.getBoundingClientRect();if(r.width&&r.height){
+        const rect={left:(gesture.startX-r.left)/r.width*2-1,right:(e.clientX-r.left)/r.width*2-1,top:1-(gesture.startY-r.top)/r.height*2,bottom:1-(e.clientY-r.top)/r.height*2};
+        const assemblies=new Map(this.lastSyncedDoc?.nodes.map(n=>[n.id,n.assemblyId])??[]);const objects=[...this.nodeMap].map(([id,value])=>({id,object:value.mesh,assemblyId:assemblies.get(id)}));
+        try{let ids=rectangleObjectIds(objects,this.camera,rect,false,{through:this.boxThrough,renderer:this.renderer});if(this.boxWholeModel){const groups=new Set(ids.map(id=>assemblies.get(id)).filter(Boolean));ids=[...new Set([...ids,...(this.lastSyncedDoc?.nodes.filter(n=>n.assemblyId&&groups.has(n.assemblyId)).map(n=>n.id)??[])])];}this.onBoxSelect?.(ids,gesture.additive);this.onBoxError?.('');}catch(e){this.onBoxError?.(e instanceof Error?e.message:'框选失败；选区未改变。');}
+      }}else if(!moved&&gesture.button===0)this.pickAt(e.clientX,e.clientY,gesture.additive);
+      cancel();
     });
+    canvas.addEventListener('pointercancel',cancel);canvas.addEventListener('lostpointercapture',()=>{down=null;rectangle?.remove();rectangle=null;});
 
     canvas.addEventListener(
       'wheel',
       (e: WheelEvent) => {
         e.preventDefault();
+        if(down?.box)return;
         this.orbitRadius = Math.min(Math.max(this.orbitRadius * (1 + e.deltaY * 0.001), 0.3), 800);
         this.updateOrbitCamera();
       },
@@ -236,7 +246,7 @@ export class Viewport {
   }
 
   // 射线拾取：命中节点反查稳定 ID（不用数组下标或临时数字 ID）
-  private pickAt(clientX: number, clientY: number): void {
+  private pickAt(clientX: number, clientY: number, additive=false): void {
     const canvas = this.renderer.domElement;
     const rect = canvas.getBoundingClientRect();
     const x = ((clientX - rect.left) / rect.width) * 2 - 1;
@@ -246,7 +256,7 @@ export class Viewport {
     const meshes = Array.from(this.nodeMap.values()).map((r) => r.mesh);
     const hits = raycaster.intersectObjects(meshes, false);
     const hit = hits.find((h) => h.object.userData.nodeId);
-    this.onPick(hit ? (hit.object.userData.nodeId as string) : null);
+    this.onPick(hit ? (hit.object.userData.nodeId as string) : null, additive);
   }
 
   // 按球面坐标摆放相机：所有相机操作最终统一走这里
@@ -318,8 +328,10 @@ export class Viewport {
 
   // Incremental reconciliation: preserve unchanged mesh/geometry/material identities.
   sync(doc: SceneDocument): void {
+    this.cancelPointerGesture?.();
     this.frameMaterialKeys.clear();
     if(doc===this.lastSyncedDoc)return;
+    this.frameMaterialsById = new Map(doc.materials.map(m => [m.id, m]));
     if(!this.animationClock)this.animationClock=new AnimationClock();
     this.animationClock.configure(doc.animation?.duration,doc.animation?.loop);
     this.animationEvaluator=doc.animation?createAnimationEvaluator(doc):null;
@@ -330,8 +342,8 @@ export class Viewport {
     for(const node of doc.nodes){
       if(!visible.has(node.id))continue;
       const existing=this.nodeMap.get(node.id);
-      if(!existing){this.createNodeMesh(node,doc);continue;}
-      const geometry=this.buildGeometry(node.geometry!),material=this.buildMaterial(node.materialId,doc,node.label);
+      if(!existing){this.createNodeMesh(node);continue;}
+      const geometry=this.buildGeometry(node.geometry!),material=this.buildMaterial(node.materialId,node.label);
       existing.geometry=geometry;existing.material=material;existing.mesh.geometry=geometry;existing.mesh.material=material;
       existing.mesh.position.fromArray(node.transform.position);existing.mesh.quaternion.fromArray(node.transform.rotationQuaternion);existing.mesh.scale.fromArray(node.transform.scale);
       existing.mesh.visible=node.visible;existing.mesh.name=node.name;existing.mesh.castShadow=material.opacity>=.95&&!node.label;
@@ -345,9 +357,9 @@ export class Viewport {
     this.markDirty();
   }
 
-  private createNodeMesh(node: SceneNode, doc: SceneDocument): void {
+  private createNodeMesh(node: SceneNode): void {
     const geometry = this.buildGeometry(node.geometry!);
-    const material = this.buildMaterial(node.materialId, doc, node.label);
+    const material = this.buildMaterial(node.materialId, node.label);
     const mesh = new THREE.Mesh(geometry, material);
     mesh.castShadow = material.opacity >= 0.95 && !node.label;
     mesh.receiveShadow = true;
@@ -376,16 +388,19 @@ export class Viewport {
     return geometry;
   }
 
-  private buildMaterial(materialId: string | undefined, doc: SceneDocument, label?:string): THREE.MeshStandardMaterial {
+  private buildMaterial(materialId: string | undefined, label?:string): THREE.MeshStandardMaterial {
     if (!materialId) return this.defaultMaterial;
-    const found = doc.materials.find((m) => m.id === materialId);
+    const found = this.frameMaterialsById.get(materialId);
     if (!found) return this.defaultMaterial;
     return this.getOrCreateMaterial(found,label);
   }
 
+  private frameMaterialsById=new Map<string,Material>();
   private frameMaterialKeys=new Map<Material,string>();
+  // Source material IDs stay independent in the editable document. Render
+  // identical appearances once; reconciliation swaps only the edited users.
   private getOrCreateMaterial(m: Material,label?:string): THREE.MeshStandardMaterial {
-    let materialKey=this.frameMaterialKeys.get(m);if(!materialKey){materialKey=JSON.stringify(m);this.frameMaterialKeys.set(m,materialKey);}const key=materialKey+(label??'');
+    let materialKey=this.frameMaterialKeys.get(m);if(!materialKey){const {id,...properties}=m;materialKey=JSON.stringify(properties);this.frameMaterialKeys.set(m,materialKey);}const key=materialKey+(label??'');
     const cached = this.materialCache.get(key);
     if (cached) return cached;
     const mat = createSceneMaterial(m,label);materialReady.get(mat)?.then(()=>this.markDirty()).catch(()=>this.markDirty());
@@ -415,10 +430,12 @@ export class Viewport {
   async captureDocument(doc: SceneDocument, view: 'perspective' | 'front' | 'side' | 'back' | 'left' | 'top' | 'bottom' | 'underside', targetIds?:string[],time?:number): Promise<string> {
     if(this.renderer.getContext().isContextLost())throw new Error('WebGL 上下文丢失，无法截图');
     if(this.host.clientWidth<=0 || this.host.clientHeight<=0)throw new Error('视口不可见，无法截图');
+    this.composition?.cancel();
     this.sync(doc);await Promise.all([...this.materialCache.values()].map(m=>materialReady.get(m)??Promise.resolve()));if(this.lastSyncedDoc!==doc)throw Error('贴图加载期间场景已变化，请重新截图');
     const savedPlayback={...this.animationClock.state};this.animationClock.pause();
     const saved = {target:this.orbitTarget.clone(),radius:this.orbitRadius,theta:this.orbitTheta,phi:this.orbitPhi};
-    const helpers = [...this.scene.children].filter(o => o.type === 'BoxHelper');
+    const helpers = [...this.scene.children].filter(o => o.type === 'BoxHelper'||o.name==='__manualPlacementPreview');
+    const helperVisibility=new Map(helpers.map(h=>[h,h.visible]));
     try {
       if(time!==undefined)this.applyAnimation(time);else this.restoreBasePose();
       helpers.forEach(h=>h.visible=false);
@@ -435,7 +452,7 @@ export class Viewport {
       if(!data.startsWith('data:image/jpeg;base64,')) throw new Error('截图无效');
       return data;
     } finally {
-      helpers.forEach(h=>h.visible=true);
+      helpers.forEach(h=>h.visible=helperVisibility.get(h)??false);
       this.animationClock.state=savedPlayback;
       if(savedPlayback.time>0||savedPlayback.playing)this.applyAnimation(savedPlayback.time);else this.restoreBasePose();
       this.orbitTarget.copy(saved.target);this.orbitRadius=saved.radius;this.orbitTheta=saved.theta;this.orbitPhi=saved.phi;
@@ -500,6 +517,8 @@ export class Viewport {
   }
 
   dispose(): void {
+    this.composition?.dispose();this.composition=null;
+    this.cancelPointerGesture?.();window.removeEventListener('keydown',this.escapeSelection);
     if (this.rafHandle !== null) cancelAnimationFrame(this.rafHandle);
     this.resizeObserver?.disconnect();
     this.disposeAllNodes();

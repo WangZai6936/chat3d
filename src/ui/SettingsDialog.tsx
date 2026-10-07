@@ -67,7 +67,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   };
   const save = () => {
     if (!valid) return;
-    const cfg: ModelConfig = {taskBudget:normalizeTaskBudget(taskBudget),baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode,parallelDrafts:agentMode==='pi'&&parallelDrafts};
+    const cfg: ModelConfig = {generationQuality:useEditorStore.getState().aiConfig?.generationQuality==='fast'?'fast':'fine',taskBudget:normalizeTaskBudget(taskBudget),baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode,parallelDrafts:agentMode==='pi'&&parallelDrafts};
     useEditorStore.getState().setAiConfig(cfg); onClose();
   };
   const shown = (models ?? []).filter((id) => id.toLowerCase().includes(query.toLowerCase()));

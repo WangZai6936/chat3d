@@ -1,3 +1,4 @@
+import {selectionPropertyCommands} from '../domain/selectionProperties';
 import {Button} from '@radix-ui/themes';
 import {boundsFor} from '../domain/sceneQuality';
 import {focusSceneObjects} from '../scene/focus';
@@ -26,7 +27,7 @@ export function PropertiesPanel() {
 
   if (!node) {
     return (
-      <div className="flex flex-col h-full bg-[#252A31] text-gray-200">
+      <div className="properties-panel flex flex-col h-full">
         <div className="px-3 py-2 text-xs font-bold text-gray-400 border-b border-black/30 tracking-wider">属性</div>
         <div className="px-3 py-6 text-xs text-gray-500 text-center">点击场景或对象列表中的零件，即可修改颜色、尺寸与位置</div>
       </div>
@@ -36,10 +37,10 @@ export function PropertiesPanel() {
   if(selection.length>1){
     const ids=new Set(selection);const members=doc.nodes.filter(n=>ids.has(n.id));const assembly=node.assemblyId;
     const same=!!assembly&&members.every(n=>n.assemblyId===assembly)&&members.length===doc.nodes.filter(n=>n.assemblyId===assembly).length;
-    return <div className="p-4 bg-[#252A31] text-gray-200 text-sm h-full overflow-auto"><h3>{same?node.assemblyName??'组件':'多选对象'}</h3>{lockNotice}{status==='previewing'&&<Button variant="soft" color="gray" size="2" type="button" className="m-3 rounded bg-blue-600 p-2 text-xs" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</Button>}<FocusObject doc={doc} node={node}/><p className="text-xs text-gray-400 my-3">已选 {members.length} 个零件。外观修改只影响所选范围，可撤销。</p>
+    return <div className="properties-panel p-4 text-sm h-full overflow-auto"><h3>{same?node.assemblyName??'组件':'多选对象'}</h3>{lockNotice}{status==='previewing'&&<Button variant="soft" color="gray" size="2" type="button" className="m-3 rounded bg-blue-600 p-2 text-xs" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</Button>}<FocusObject doc={doc} node={node}/><p className="text-xs text-gray-400 my-3">已选 {members.length} 个零件。外观修改只影响所选范围，可撤销。</p>
       <fieldset disabled={locked} className="disabled:opacity-50">{same&&<div className="grid grid-cols-2 gap-2">{([['左移 1m',[-1,0,0]],['右移 1m',[1,0,0]],['前移 1m',[0,0,1]],['后移 1m',[0,0,-1]]] as const).map(([title,value])=><Button variant="soft" color="gray" size="2" key={title} className="rounded bg-white/10 p-2 text-xs" onClick={()=>{const r=applyCommandBatch([{op:'translateAssembly',targetId:node.id,value:[...value]}],title);if(!r.ok)window.alert(r.error);}}>{title}</Button>)}</div>}
       {same&&<AssemblyTransformEditor nodes={members} wholeAssembly/>}
-      <AppearanceEditor key={members.map(n=>n.id+':'+n.materialId).join('|')} doc={doc} nodes={members} wholeAssembly={same}/></fieldset>
+      <AppearanceEditor key={members.map(n=>n.id+':'+n.materialId).join('|')} doc={doc} nodes={members}/></fieldset>
       <p className="mt-4 text-xs text-gray-400">展开对象树后选择单个零件，可编辑它的尺寸与位置。</p></div>;
   }
   const isPrimitive = node.kind === 'primitive' && node.geometry;
@@ -56,7 +57,7 @@ export function PropertiesPanel() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#252A31] text-gray-200">
+    <div className="properties-panel flex flex-col h-full">
       <div className="px-3 py-2 text-xs font-bold text-gray-400 border-b border-black/30 tracking-wider">属性</div>
       {lockNotice}{status==='previewing'&&<Button variant="soft" color="gray" size="2" type="button" className="m-3 rounded bg-blue-600 p-2 text-xs" onClick={()=>useEditorStore.getState().confirmPending()}>应用当前草稿并编辑属性</Button>}
       <FocusObject doc={doc} node={node}/>
@@ -133,7 +134,7 @@ export function PropertiesPanel() {
         )}
 
         <AssemblyTransformEditor key={node.id} nodes={[node]}/>
-        <AppearanceEditor key={node.id+':'+node.materialId} doc={doc} nodes={[node]} wholeAssembly={false}/>
+        <AppearanceEditor key={node.id+':'+node.materialId} doc={doc} nodes={[node]}/>
       </fieldset>
     </div>
   );
@@ -153,7 +154,7 @@ function AssemblyTransformEditor({nodes,wholeAssembly=false}:{nodes:SceneNode[];
  return <section className="mt-4 space-y-2"><h4 className="text-xs">{wholeAssembly?'整机旋转与等比缩放':'零件旋转与等比缩放'}</h4><p className="text-xs text-gray-400">世界外包尺寸：X {size.x.toFixed(3)} · Y {size.y.toFixed(3)} · Z {size.z.toFixed(3)} m。底部 Y {bounds.min.y.toFixed(3)} m；以底部中心为变换支点</p><div className="grid grid-cols-3 gap-1">{['X','Y','Z'].map((axis,i)=><label key={axis} className="text-xs">{axis} 旋转角<input aria-label={`整体旋转 ${axis}`} type="number" step="15" value={angles[i]} onChange={e=>setAngles(old=>old.map((v,j)=>i===j?e.target.value:v))} className="block w-full min-w-0 rounded bg-black/30 p-1"/></label>)}</div><label className="block text-xs">等比缩放倍数<input aria-label="整体等比缩放倍数" type="number" min="0.001" max="1000" step="0.1" value={factor} onChange={e=>setFactor(e.target.value)} className="block w-full rounded bg-black/30 p-1"/></label><Button variant="soft" color="gray" size="2" onClick={apply} className="rounded bg-white/10 px-2 py-1 text-xs">应用整体变换</Button>{error&&<p role="status" className="text-xs text-amber-200">{error}</p>}</section>;
 }
 
-function AppearanceEditor({doc,nodes,wholeAssembly}:{doc:SceneDocument;nodes:SceneNode[];wholeAssembly:boolean}){
+function AppearanceEditor({doc,nodes}:{doc:SceneDocument;nodes:SceneNode[]}){
   const first=doc.materials.find(m=>m.id===nodes[0]?.materialId);
   const [color,setColor]=useState(first?.baseColor??'#9099a4');
   const [roughness,setRoughness]=useState(String(first?.roughness??.5));
@@ -163,8 +164,8 @@ function AppearanceEditor({doc,nodes,wholeAssembly}:{doc:SceneDocument;nodes:Sce
   const originals=[...new Set(nodes.map(n=>n.materialId).filter((id):id is string=>!!id))];
   const targets=sourceId==='all'?nodes:nodes.filter(n=>n.materialId===sourceId);
   const apply=(patch:AppearancePatch&{materialId?:string},label:string)=>{
-    const operations:Command[]=wholeAssembly?[{op:'setAppearance',targetId:nodes[0].id,scope:'assembly',...(sourceId==='all'?{}:{sourceMaterialIds:[sourceId]}),...patch}]:targets.map(n=>({op:'setAppearance',targetId:n.id,...patch}));
-    if(!operations.length){setNotice('没有匹配的零件');return;}
+    if(!targets.length){setNotice('没有匹配的零件');return;}
+    let operations:Command[];try{operations=selectionPropertyCommands(doc,targets.map(n=>n.id),{kind:'appearance',value:patch});}catch(e){setNotice(e instanceof Error?e.message:'外观修改参数无效');return;}
     const result=useEditorStore.getState().applyCommandBatch(operations,label);setNotice(result.ok?'已修改，可撤销':result.error??'修改失败');
   };
   return <section className="mt-4 space-y-3"><h4 className="text-xs text-gray-300">颜色与材质</h4>
