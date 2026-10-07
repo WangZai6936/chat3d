@@ -4,6 +4,7 @@ on:
     branches: [main]
     paths:
       - tests/windows-native-smoke.mjs
+      - tests/windows-ui-smoke.ps1
       - .github/workflows/windows-smoke.yml
   workflow_dispatch:
     inputs:
@@ -68,8 +69,9 @@ jobs:
             $graphics.Dispose(); $bitmap.Dispose()
           } catch { $_ | Out-String | Set-Content windows-smoke-results/screenshot-error.txt }
           if (!$app.HasExited) { $app.CloseMainWindow() | Out-Null; Start-Sleep -Seconds 3; if (!$app.HasExited) { $app.Kill() } }
-      - name: Exercise installed app and native file saves
-        run: node tests/windows-native-smoke.mjs
+      - name: Exercise installed app through Windows accessibility and real clicks
+        shell: pwsh
+        run: ./tests/windows-ui-smoke.ps1
       - uses: actions/upload-artifact@v4
         if: always()
         with:
