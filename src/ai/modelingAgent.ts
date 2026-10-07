@@ -1,3 +1,6 @@
+import {boundSceneRead} from './sceneReadBudget';
+import {editReceipt} from '../domain/editReceipt';
+import {normalizedUsage,providerHasUsage,executionMetadata,type UsageState} from './executionTelemetry';
 import {bendExistingMesh} from '../domain/meshBend';
 import {localEditContext} from '../domain/localEditContext';
 import {worldPoseRig} from '../domain/poseRig';
@@ -65,9 +68,11 @@ import { makeId } from '../util/ids';
 import { AGENT_LIMITS } from './agentPolicy';
 import { normalizeModelingRequestMessages } from './modelingRequest';
 export { AGENT_LIMITS } from './agentPolicy';
-export interface ActivityTiming { id:string; kind:'model'|'tool'; label:string; startedAt:number; firstDataAt?:number; endedAt?:number; failed?:boolean; detail?:string; inputTokens?:number; outputTokens?:number; requestFootprint?:RequestFootprint }
+export interface ActivityTiming { toolName?:string;repeatedInput?:boolean;argumentsChars?:number;resultChars?:number;sceneRevision?:number;firstContentAt?:number;responseAt?:number;usageState?:UsageState;uncachedInputTokens?:number;cacheReadTokens?:number;cacheWriteTokens?:number; id:string; kind:'model'|'tool'; label:string; startedAt:number; firstDataAt?:number; endedAt?:number; failed?:boolean; detail?:string; inputTokens?:number; outputTokens?:number; requestFootprint?:RequestFootprint }
 export interface DesignBrief {flow:string[];layout:string;equipment:{name:string;count:number;features:string[]}[];checks:string[];composition?:CompositionPlan}
 export interface AgentActivity {
+  executionMeta?:ReturnType<typeof executionMetadata>;
+  outcome?:'preview-ready'|'partial'|'answered'|'budget-exhausted'|'cancelled'|'failed';
   generationQuality?: GenerationQuality; // 本次任务开始时的快照，包括本地明确编辑
   generationReview?: {coverage:'basic-overview'|'component-multiview';staticImages:number;staticImageLimit:number|null;basicReviewCompleted:boolean};
   repairQueue?:ReturnType<typeof buildQualityRepairQueue>;
@@ -236,7 +241,6 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
   }
   const base=structuredClone(options.document);
   let draft=structuredClone(base);let localFocus:{ids:string[];radius:number}|undefined;
-  const editContext=()=>localFocus&&localFocus.ids.every(id=>draft.nodes.some(n=>(n.assemblyId??n.id)===id))?localEditContext(draft,localFocus.ids,localFocus.radius):agentSceneContext(draft,selectionForDoc(draft),undefined,options.editScope);
   const originallySelectedAssemblies=new Set(selectedAssemblies(base,options.selection));
   const selectionForDoc=(doc:SceneDocument)=>{const ids=new Set(options.selection);for(const n of doc.nodes)if(n.assemblyId&&originallySelectedAssemblies.has(n.assemblyId))ids.add(n.id);const existing=new Set(doc.nodes.map(n=>n.id));return [...ids].filter(id=>existing.has(id));};
   const resolvedIntent=resolveConversationIntent(options.text,options.history);
@@ -279,7 +283,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
     }
     catch(error){if(signal?.aborted)throw error;visualFailure=error instanceof Error?error.message:'截图失败';throw new Error(unavailableStage());}
   };
-  let activity: AgentActivity={generationQuality,generationReview:{coverage:isFast?'basic-overview':'component-multiview',staticImages:0,staticImageLimit:isFast?FAST_STATIC_REVIEW_IMAGE_LIMIT:null,basicReviewCompleted:false},title:'准备 Pi 建模任务',turn:0,toolCalls:0,characters:0,inputTokens:0,outputTokens:0,usageReported:false,lastEventAt:Date.now(),plan:[],events:[],timings:[]};
+  let activity: AgentActivity={executionMeta:executionMetadata(cfg.model,cfg.apiKey,base.revision),generationQuality,generationReview:{coverage:isFast?'basic-overview':'component-multiview',staticImages:0,staticImageLimit:isFast?FAST_STATIC_REVIEW_IMAGE_LIMIT:null,basicReviewCompleted:false},title:'准备 Pi 建模任务',turn:0,toolCalls:0,characters:0,inputTokens:0,outputTokens:0,usageReported:false,lastEventAt:Date.now(),plan:[],events:[],timings:[]};
   const restoredStructure=restoreModelStructure(base);activity.objectBlueprints=restoredStructure.blueprints;activity.featureBindings=restoredStructure.bindings;
   const emit=(title:string,record=false) => {
     activity={...activity,title,lastEventAt:Date.now(),events:record?[...activity.events,title].slice(-30):activity.events};
@@ -290,7 +294,7 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       taskStatus:'partial',incomplete:true,continuation:`继续完成原任务：${executionTexts.join('；补充：') || '根据参考图建模'}。当前场景是已保留的阶段成果，先检查现有对象，保留有效部分，不要重复创建；优先完成下一阶段。${visualAvailable()?'三维可用时截图复核。':'三维不可用，先保留数据修改；恢复视图后再做视觉验收，不要反复请求截图。'}`,
       qualityIssues:[...new Set([...reviewIssues,...(activity.detailAcceptance?.issues??[]),...(activity.blueprintCoverage?.issues??[]),...(activity.requirements?.items.filter(r=>r.status!=='pass').map(r=>`需求${r.status==='mismatch'?'不符':'待核对'}：${r.quote}；${r.actual}`)??[])])],
       summary:`${isFast?'快速模式 · ':''}阶段草稿已保留（未完成最终复核）\n${reason}\n已执行 ${operations.length} 项操作，当前 ${draft.nodes.length} 个对象。请人工检查后保留此阶段，或放弃。`+(reviewIssues.length?'\n已知问题：'+reviewIssues.join('；'):''),operations:structuredClone(operations)},
-    result:{doc:structuredClone(draft),applied:structuredClone(applied),errors:[]},activity:structuredClone(activity)
+    result:{doc:structuredClone(draft),applied:structuredClone(applied),errors:[]},activity:structuredClone({...activity,outcome:stageReason?'budget-exhausted' as const:'partial' as const})
   });
   const stamp=(id:string,patch:Partial<ActivityTiming>)=>{activity.timings=activity.timings.map(t=>t.id===id?{...t,...patch}:t);};
   const firstData=()=>{const t=activity.timings.find(t=>t.id===`model-${calls}`);if(t && t.firstDataAt===undefined)stamp(t.id,{firstDataAt:Date.now()});};
@@ -324,13 +328,14 @@ export async function runModelingAgent(options: AgentOptions): Promise<AgentResu
       validateResult?.(result.doc);check();
       const changed=JSON.stringify(draft.nodes)!==JSON.stringify(result.doc.nodes)||JSON.stringify(draft.materials)!==JSON.stringify(result.doc.materials)||JSON.stringify(draft.animation)!==JSON.stringify(result.doc.animation);
       if(!changed)throw new Error('本次操作未改变场景，请执行计划中的有效修改或复核提交');
+      const receipt=editReceipt(draft,result.doc);
       const oldRevision=draft.revision,sameVisual=visualFingerprint(draft)===visualFingerprint(result.doc);
       if(!sameVisual||!args.operations.every(op=>op.op==='rename'))progress();
       for(const t of detailTargets(draft,result.doc))componentVersions.set(t.id,result.doc.revision);detailReviews=carryUnchangedReviews(draft,result.doc,detailReviews);draft=result.doc;
       const saved=restoreModelStructure(draft),plans=new Map((activity.objectBlueprints??[]).map(p=>[p.key,p]));for(const p of saved.blueprints)if(!plans.has(p.key))plans.set(p.key,p);activity.objectBlueprints=[...plans.values()];activity.featureBindings=saved.bindings.filter(b=>JSON.stringify(saved.blueprints.find(p=>p.key===b.blueprintKey))===JSON.stringify(plans.get(b.blueprintKey)));activity.blueprintCoverage=inspectBlueprintCoverage(draft,activity.objectBlueprints,activity.featureBindings);refreshDetail();if(requirements.length)activity.requirements=checkRequirements(draft,requirements);applied.push(...result.applied);operations.push(...args.operations);
       if(sameVisual){for(const evidence of [capturedViews,reviewedViews])for(const key of [...evidence])if(key.startsWith(oldRevision+':'))evidence.add(draft.revision+key.slice(String(oldRevision).length));if(latestCaptureKey.startsWith(oldRevision+':'))latestCaptureKey=draft.revision+latestCaptureKey.slice(String(oldRevision).length);if(capturedRevision===oldRevision)capturedRevision=draft.revision;if(reviewedRevision===oldRevision)reviewedRevision=draft.revision;if(reviewedWholeRevision===oldRevision)reviewedWholeRevision=draft.revision;if(animationCheckedRevision===oldRevision)animationCheckedRevision=draft.revision;}else reviewedRevision=-1;
       options.onCheckpoint?.(checkpoint());options.onPreview?.(draft);emit(`草稿已更新：${args.summary}（共 ${draft.nodes.length} 个对象）`,true);
-      return {...textResult(JSON.stringify({revision:draft.revision,scene:editContext(),review:reviewRequirement(base,draft),geometryWarnings:inspectGeometryQuality(draft),profileOpenings:profileOpeningMetrics(draft),next:visualAvailable()?'按实际修改复核：none无需截图可提交；local可用受影响组件近景；whole需全景；animation需动态样本。截图后下一轮review_model。完成用户要求即可提交，不要追加无关工序。':'三维不可用。继续完成用户要求的全部数据编辑和数量/尺寸检查；不要遗漏其他对象。完成后调用submit_data_preview保留未视觉验收草稿，不要请求截图。'})),details:{revision:draft.revision}};
+      return {...textResult(JSON.stringify({revision:draft.revision,scene:receipt,review:reviewRequirement(base,draft),geometryWarnings:inspectGeometryQuality(draft),profileOpenings:profileOpeningMetrics(draft),next:visualAvailable()?'按实际修改复核：none无需截图可提交；local可用受影响组件近景；whole需全景；animation需动态样本。截图后下一轮review_model。完成用户要求即可提交，不要追加无关工序。':'三维不可用。继续完成用户要求的全部数据编辑和数量/尺寸检查；不要遗漏其他对象。完成后调用submit_data_preview保留未视觉验收草稿，不要请求截图。'})),details:{revision:draft.revision}};
   };
   const armSchema=Type.Object({assemblyId:Type.String(),replaceIds:Type.Array(Type.String(),{minItems:1,maxItems:30}),shoulder:Type.Tuple([Type.Number(),Type.Number(),Type.Number()]),elbowHint:Type.Tuple([Type.Number(),Type.Number(),Type.Number()]),upperLength:Type.Number({minimum:.03,maximum:2}),forearmLength:Type.Number({minimum:.03,maximum:2}),target:Type.Tuple([Type.Number(),Type.Number(),Type.Number()]),operation:Type.Union([Type.Literal('press'),Type.Literal('grasp'),Type.Literal('reach'),Type.Literal('support')]),forward:Type.Tuple([Type.Number(),Type.Number(),Type.Number()]),dorsal:Type.Tuple([Type.Number(),Type.Number(),Type.Number()]),handedness:Type.Union([Type.Literal('left'),Type.Literal('right')]),pose:Type.Union(HAND_POSES.map(p=>Type.Literal(p))),skinMaterialId:Type.String(),sleeveMaterialId:Type.String(),gripDiameter:Type.Optional(Type.Number({minimum:.012,maximum:.08})),contactNormal:Type.Optional(Type.Tuple([Type.Number(),Type.Number(),Type.Number()]))});
   const armArgs=(args:any):ArmEdit=>({...args,hand:{forward:args.forward,dorsal:args.dorsal,handedness:args.handedness,pose:args.pose,gripDiameter:args.gripDiameter}});
@@ -347,7 +352,7 @@ return invalid.slice(0,8).join('；');};
       return commitEdits({summary:args.summary,operations:parsed.operations});
     };
   const tools: AgentTool<any>[]=[
-    tool('enable_modeling_tools','启用按需建模工具','按需要启用完整工具组，下一轮提供参数定义：animation为动画/路线/动态预览；surfaces为贴图、表面细节、UV；interaction为手型与肩肘腕联动。基础材质与造型命令仍在edit_scene。只增加本轮工具说明，不执行修改。',Type.Object({group:Type.Union([Type.Literal('animation'),Type.Literal('surfaces'),Type.Literal('interaction')])}),async(_id,args)=>{enabledToolGroups.add(args.group);return textResult('工具组已启用，下一轮查看完整参数定义再调用；不改变场景。');}),
+    tool('enable_modeling_tools','启用按需建模工具','按需要启用完整工具组，下一轮提供参数定义：animation为动画/路线/动态预览；surfaces为贴图、表面细节、UV；interaction为手型与肩肘腕联动；assets为已保存资产的读取/插入/检查；connections为连接与接触检查。需要某组能力时先启用，不要用其他工具假装完成。基础材质与造型命令仍在edit_scene。只增加本轮工具说明，不执行修改。',Type.Object({group:Type.Union([Type.Literal('animation'),Type.Literal('surfaces'),Type.Literal('interaction'),Type.Literal('assets'),Type.Literal('connections')])}),async(_id,args)=>{enabledToolGroups.add(args.group);return textResult('工具组已启用，下一轮查看完整参数定义再调用；不改变场景。');}),
     tool('detail_quality_standard','读取通用细节验收标准','适用于任何单独模型和完整场景，不限工业或已有网格。返回六项标准及本轮新增/改结构对象。按用途具体化，不以零件数当质量。无截图时只能待核对；有未达标项应先修正。',Type.Object({}),async()=>textResult(JSON.stringify({criteria:DETAIL_CRITERIA,acceptance:refreshDetail(),instruction:isFast?'快速模式先完整构建明确需求，再做基础全景复核。六项完整验收标准不降低，但未拍近景或无证据的项目保持未验收；不要为了填写清单追加取图。':'先完成全部结构，再按每个目标的近景核对六项；按repairQueue先修明确缺陷，blocked不要重复取图，deferred保留缺陷并停止该项重试；无近景时保留未验收状态。现成网格也不豁免。'}))),
     tool('audit_model_detail','记录对象细节验收','逐对象记录六项验收，componentId用detail_quality_standard返回的真实ID，nodeIds引用当前组件内真实部件。pass必须有当前版本至少两个不同近景视角（优先capture_multiview）且在截图返回的下一轮调用。fail需说明待修正，unknown如实保留，not_applicable说明对象用途为何不需要；外形与细节不能跳过。有明确reusedCriteria时只需补交失效项目；没有可复用记录时仍需六项齐全。自检不是人工验收。',Type.Object({componentId:Type.String(),checks:Type.Array(Type.Object({criterion:Type.Union(DETAIL_CRITERIA.map(c=>Type.Literal(c.key))),status:Type.Union(['pass','fail','unknown','not_applicable'].map(x=>Type.Literal(x))),evidence:Type.String({minLength:5,maxLength:600}),nodeIds:Type.Array(Type.String(),{maxItems:16})}),{minItems:1,maxItems:6})}),async(_id,args)=>{check();const review=prepareDetailReview(args);detailReviews=[...detailReviews.filter(r=>r.componentId!==args.componentId),review];repairAttempts.record([review],componentVersions);markReviewProgress([review]);const report=refreshDetail();emit('已记录对象细节检查；'+report.issues.length+'项未验收',true);return {...textResult(JSON.stringify({revision:report.revision,status:report.status,review,repairQueue:repairContext(),remaining:report.issues.slice(0,12),remainingCount:report.issues.length,unreviewed:report.targets.filter(t=>!report.reviews.some(r=>r.componentId===t.id)).map(t=>({id:t.id,name:t.name}))})),details:{revision:draft.revision,componentId:args.componentId}};}),
     tool('prepare_surface_uv','建立网格投影UV','为缺少UV的现有网格生成平面、圆柱或按面法线分割的盒投影。盒投影适合多面外壳但会产生接缝。按当前世界轴投影并烘焙到网格，不改变形状或位置。仅为基础投影，复杂角色/多面资产仍需专门UV展开和逐面检查，不能冒称无拉伸。axis是平面的法向或圆柱轴，默认Y。',Type.Object({targetId:Type.String(),mode:Type.Union([Type.Literal('planar'),Type.Literal('cylindrical'),Type.Literal('box')]),axis:Type.Optional(Type.Union([Type.Literal('x'),Type.Literal('y'),Type.Literal('z')]))}),async(_id,args)=>{const node=draft.nodes.find(n=>n.id===args.targetId);if(!node)throw Error('目标部件不存在');return commitEdits({summary:'建立表面UV投影',operations:[{op:'updateParameters',targetId:node.id,geometry:projectMeshUV(node,args.mode,args.axis)}]});}),
@@ -389,7 +394,7 @@ return invalid.slice(0,8).join('；');};
       if(!activity.plan.length)progress();
       activity.plan=args.steps;activity.design=args.design;emit(`计划：${args.steps.join(' → ')}；${args.assumptions}`,true);return textResult('设计已记录。按设备→输送/转运→工位→物料→人员动作建立关系；先完成各类代表设备近景，再布置同类设备与配套。createAssembly的planKey对应设计清单名称，sceneRole标明类别；不适用的配套不添加。局部编辑严格遵守本次作用范围。');
     }),
-    tool('read_scene','读取当前场景','默认只返回组件摘要。修改人物手臂等零件需传assemblyId读取组件全部真实零件，或nodeIds读取指定对象，二者可同时提供，合并去重返回明细。当前版本不同目标的明细会一起保留，重复同一目标不提供新信息；资料齐全后配置动画或修改模型。',Type.Object({assemblyId:Type.Optional(Type.String()),nodeIds:Type.Optional(Type.Array(Type.String(),{maxItems:64}))},{additionalProperties:false}),async(_id,args)=>{
+    tool('read_scene','读取当前场景','默认只返回组件摘要。assemblyId返回组件全部真实零件的ID与变换，大型结果省略长几何参数；需要精确形状时单独传nodeIds读取指定对象，二者可同时提供，合并去重返回明细。当前版本不同目标的明细会一起保留，重复同一目标不提供新信息；资料齐全后配置动画或修改模型。',Type.Object({assemblyId:Type.Optional(Type.String()),nodeIds:Type.Optional(Type.Array(Type.String(),{maxItems:64}))},{additionalProperties:false}),async(_id,args)=>{
       check();const request={...args,assemblyId:args.assemblyId||undefined,nodeIds:args.nodeIds?.length?args.nodeIds:undefined};
       if(request.assemblyId&&!draft.nodes.some(n=>n.assemblyId===request.assemblyId))throw new Error('设备组件不存在');
       if(request.nodeIds?.some(id=>!draft.nodes.some(n=>n.id===id)))throw new Error('部分节点ID不存在，请使用当前场景返回的真实ID');
@@ -402,7 +407,8 @@ return invalid.slice(0,8).join('；');};
       const requestedIds=new Set([...componentIds,...request.nodeIds??[]]);
       const context=request.nodeIds?targetedSceneContext(draft,selectionForDoc(draft),requestedIds,options.editScope):agentSceneContext(draft,selectionForDoc(draft),request.assemblyId,options.editScope);
       if(scopeKey!=='overview')recordReadProgress(context.nodes.map(n=>n.id));
-      return {...textResult(JSON.stringify({...context,revision:draft.revision,scopeKey,animationWorkflow:'configure_animation→preview_animation→下一轮review_model→submit_preview。不同对象明细会同时保留；选中高亮不限制全场景编辑，历史静态-only说法已过时。'})),details:{revision:draft.revision,scopeKey,snapshot:true}};
+      const readContext=request.nodeIds?context:boundSceneRead(context,new Map(draft.nodes.map(n=>[n.id,n.geometry?.type??'group'])));
+      return {...textResult(JSON.stringify({...readContext,revision:draft.revision,scopeKey,...(wantsAnimation?{animationWorkflow:'configure_animation→preview_animation→下一轮review_model→submit_preview。不同对象明细会同时保留。'}:{})})),details:{revision:draft.revision,scopeKey,snapshot:true}};
     }),
     tool('edit_scene','修改模型草稿','对草稿应用一组建模命令，不会修改用户正式场景。每次最多40项；本次调用内可用tempId，后续调用必须用返回的真实ID。',Type.Object({summary:Type.String({minLength:1,maxLength:300}),operations:Type.Array(Type.Unknown(),{minItems:1,maxItems:40})}),async(_id,args)=>{try{const result=await executeSceneEdit(args);failedEdits.clear();return result;}catch(error){if(signal?.aborted)throw error;const cached=failedEdits.remember(_id,draft.revision,executionTexts.join('\n'),args);throw Error((error instanceof Error?error.message:String(error))+(cached?' 失败批次ID='+_id+'，可用retry_scene_edit仅纠正错误字段，不必重新输出整批命令；最多两次。':''));}}),
     tool('retry_structured_component','纠正失败单体的局部参数','重试缓存的build_structured_component或repair_structured_features，不重写全部零件。failedId使用错误返回的失败结构ID；patches.path从原参数字段开始，如["definition","parts",6,"geometry","params","bevelRadius"]，value为正确值。仅允许definition、parts、features、origin、yaw；不能改目标身份。最多8处、两次，场景、结构计划或任务改变后失效；仍须通过全部结构/尺寸/范围校验。',Type.Object({failedId:Type.String(),patches:Type.Array(Type.Object({path:Type.Array(Type.Union([Type.String(),Type.Integer({minimum:0})]),{minItems:1,maxItems:9}),value:Type.Unknown()}),{minItems:1,maxItems:8})}),async(_id,args)=>{
@@ -538,7 +544,7 @@ return invalid.slice(0,8).join('；');};
       if(activity.generationReview)activity.generationReview={...activity.generationReview,basicReviewCompleted:requirement.kind==='none'||reviewed};
       summary=(isFast?'快速模式草稿\n':'')+args.summary+(remaining.length?'\n仍需改进：'+remaining.join('；'):requirement.kind==='none'?'\n已完成数据校验；本次非视觉修改无需重新截图。':'\n已完成模型自检，仍请人工核对参考图。');
       if(isFast&&detail.issues.length)summary+='\n快速基础复核已完成；六项细节验收仍有未完成项，不代表精细质量通过。';
-      submitted=true;emit((detail.issues.length||activity.blueprintCoverage.issues.length)?'本次修改已提交，等待你确认应用；模型整体仍有待验收项':'已完成本轮，等待你确认应用',true);
+      submitted=true;activity.outcome='preview-ready';emit((detail.issues.length||activity.blueprintCoverage.issues.length)?'本次修改已提交，等待你确认应用；模型整体仍有待验收项':'已完成本轮，等待你确认应用',true);
       return {...textResult('预览已提交，等待用户确认应用。'),terminate:true};
     }),
   ];
@@ -573,13 +579,13 @@ return invalid.slice(0,8).join('；');};
     }finally{
       signal?.removeEventListener('abort',abortChildren);if(parallelController===controller)parallelController=null;
       for(const row of rows)if(row.status==='queued'||row.status==='running'||(row.status==='ready'&&controller.signal.aborted)){row.status='cancelled';row.endedAt=Date.now();}
-      activity.usageIncomplete=activity.parallelRuns?.some(r=>!r.usageReported||r.status==='failed'||r.status==='cancelled');
+      activity.usageIncomplete=activity.timings.some(t=>t.kind==='model'&&t.usageState==='unknown')||activity.parallelRuns?.some(r=>!r.usageReported||r.status==='failed'||r.status==='cancelled');
       if(!signal?.aborted)emit('子代理阶段结束，保留全部已报告用量',true);
     }
   }));
   if(options.workerTask){const allowed=new Set(['retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','read_saved_asset','inspect_asset_instances','align_saved_instances','plan_object_structure','bind_object_features','list_saved_assets','add_saved_assets','edit_scene','read_scene','find_scene_parts','list_mesh_components','add_mesh_component','add_mesh_components','read_component_recipe','add_reference_component','set_surface_detail','set_surfaces_batch','prepare_surface_uv','detail_quality_standard','inspect_scene','check_requirements','submit_data_preview']);for(let i=tools.length-1;i>=0;i--)if(!allowed.has(tools[i].name))tools.splice(i,1);}
   const model:Model<'openai-completions'>={id:cfg.model,name:cfg.model,api:'openai-completions',provider:'chat3d-gateway',baseUrl:cfg.baseURL.trim().replace(/\/+$/,''),reasoning:false,input:['text','image'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:AGENT_LIMITS.outputPerTurn,compat:{supportsDeveloperRole:false,supportsReasoningEffort:false,supportsStore:false,supportsUsageInStreaming:true,maxTokensField:'max_tokens'}};
-  let geometryGuide=buildSystemPrompt(agentSceneContext(draft,selectionForDoc(draft),undefined,options.editScope),generationQuality,'geometry').replace(/# 参考范例[\s\S]*?# 图片/, '# 图片').replace(/# 输出格式[\s\S]*?(?=\n# |$)/, '');
+  let geometryGuide=buildSystemPrompt(boundSceneRead(agentSceneContext(draft,selectionForDoc(draft),undefined,options.editScope),new Map(draft.nodes.map(n=>[n.id,n.geometry?.type??'group']))),generationQuality,'geometry').replace(/# 参考范例[\s\S]*?# 图片/, '# 图片').replace(/# 输出格式[\s\S]*?(?=\n# |$)/, '');
   if(!wantsAnimation)geometryGuide=geometryGuide.replace(/# 对话生成动态[\s\S]*?# 建模优先级/,'# 建模优先级');
   let prompt=`当前三维渲染${visualAvailable()?'可用，保留所需视觉复核。':'不可用：继续完成全部可行的数据编辑与数量/尺寸核对，包括所有要求的对象；完成后调用submit_data_preview。不要请求截图或声称视觉通过。不能只完成第一个组件就结束。'}\n你是 chat3d 的分步建模 agent。每个主要阶段开始前，可用一两句面向用户的简短说明表达目标、约束和接下来要完成的结果；这些是公开工作摘要，不输出内部思维链、原始推理草稿或详细工具参数。不要逐轮重复状态或用轮次代替说明。用户最新明确需求优先于默认展示设置、旧方案和模型假设；本次编辑约束已按当前指令计算，不要凭历史高亮或旧助手说法制造限制。场景没有固定对象总数上限。单次工具的容量限制应通过分批操作满足完整需求，不得据此擅自缩水任务：保存资产每批最多16个实例，成功后继续下一批直到全部位置和明确数量完成，不能只做顶层或前16个。恢复阶段草稿时按真实ID和位置核对已完成部分，避免重复插入。真实安全边界、数据合法性和不支持的能力必须如实说明，不能伪造完成。用工具操作草稿，用户确认前禁止修改正式场景。\n用户要求动态时优先调用原生configure_animation工具生成可播放配置（也兼容edit_scene中的setAnimation），不能用文字建议代替实现，也不要求用户先建动作库。支持通用关键帧与受限数学表达式、绑定及时间编排；不支持任意JavaScript/物理仿真。修改动画后preview_animation→下一轮review_model→submit_preview。\n${isFast?'参考图重建：先用referenceObservation简短记录主轮廓、主要分区、显著开口与支撑关系；只记录可见事实及相对比例，背面或绝对尺寸未知时注明假设。优先准确表达可识别主结构和负空间，用户明确要求的细节全部保留；不为未要求的微小表面结构反复细化。profileOpenings仅描述生成截面的孔/实体比例，不是图片测量或整体相似度。具体未还原特征如实列出，不因工具无报错就说还原完成。':`参考图重建：先逐项记录referenceObservation，区分真实格栅细筋与厚板打孔、网格分区与主加强筋、边框/圆角、侧壁开口、底部支撑和可见嵌件。只记录图中可见事实及相对比例；背面和绝对尺寸未知时明确假设。不能用一种重复纹理覆盖不同分区，不能把孔洞画成表面装饰。profileOpenings返回截面开孔率，只用于检查自己生成的孔/实体比例，不能冒充图片测量或整体相似度。优先让主轮廓、负空间和筋/孔比例匹配，再处理材质。对照同方向全景及局部近景，列出具体未还原特征，不能因工具无报错就宣布还原完成。`}\n复杂独立模型或新场景先plan_object_structure声明各类对象用途、整体轮廓、必要结构/负空间和生成细节档位；必须包含form外形项，曲线轮廓优先profile/lathe/sweep/mesh，不能默认所有结构都是方盒。背景档位不删除用户要求。建模后bind_object_features关联实际部件，按指定视角复查，不把关联数当质量。复杂新场景另用plan_model；已有场景的明确小改动可直接edit_scene。按工具返回review决定是否及如何截图，收到图片后下一轮review_model，达到要求后submit_preview。纯名称/分类修改无需截图；单组件外观可近景，不必全景；结构/布局用全景；动画用动态样本。\n每轮可调用多个工具，顺序执行。在用户设置的本次任务时间、轮数和已报告Token上限内，有有效进展就继续。到达上限保留未验收草稿，不提前宣称完成。连续4轮没有新的目标明细、实际场景变化或视觉检查进展，或连续3轮工具调用失败且没有有效进展时会暂停并保留草稿。
 完整车间/产线/仓库必须先用plan_model.design明确工艺顺序、布局、设备清单及数量/识别特征、验收项，并填写composition：zones分区用途、connections设备之间经何种配套连接（from/to/via用清单名称）、support配套名称/角色/数量/目的、palette统一配色、presentation镜头与材质层次。没有关系的场景connections可空，用户不需要的机器人/人员等不要强加。
@@ -613,6 +619,8 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
   const seenCalls=new Set<string>();
   const steeringMessages=new Map<number,{id:string;text:string;mode:'guide'|'question'}>();
   let steeringTimestamp=Date.now(),acceptingSteering=true,respondingToSteering=false;
+  const providerUsageRounds=new Set<number>();
+  const toolInputs=new Set<string>();
   const runner=new Agent({
     initialState:{model,systemPrompt:prompt,tools,thinkingLevel:'off'},toolExecution:'sequential',
     transformContext:async messages=>compactAgentContext(messages),
@@ -630,20 +638,23 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
         const unavailable=new Set(['capture_view','capture_multiview','capture_quality_review','capture_detail_diagnostic','capture_component_intrinsic','preview_animation','review_model','audit_model_detail','audit_model_details_batch','submit_preview']);
         context={...context,messages:context.messages.map(message=>message.role==='system'?{...message,toolsAdded:message.toolsAdded?.filter(t=>!unavailable.has(t.name)),content:typeof message.content==='string'?message.content+'\n本次工具可用性覆盖：三维不可用，视觉工具不提供。忽略上文通用截图与逐项视觉审查步骤。系统会自动把全部细节标准标为未验收，不要调用audit_model_detail逐个填写unknown，也不要为凑验收字段反复读部件。继续完成所有数据对象与尺寸核对，再用submit_data_preview；不要在首个组件后结束。':message.content}:message)};
       }
+      if(draft.nodes.some(n=>n.modelAsset))enabledToolGroups.add('assets');
+      if(draft.nodes.some(n=>n.connection))enabledToolGroups.add('connections');
       if(preserveAssetShape)enabledToolGroups.add('interaction');
-      for(const group of ['animation','surfaces','interaction'] as const)if(toolGroupNeeded(group,executionTexts.join('\n')))enabledToolGroups.add(group);
+      for(const group of ['animation','surfaces','interaction','assets','connections'] as const)if(toolGroupNeeded(group,executionTexts.join('\n')))enabledToolGroups.add(group);
       context={...context,messages:context.messages.map(message=>message.role==='system'?{...message,toolsAdded:message.toolsAdded?exposeTools(message.toolsAdded,enabledToolGroups):undefined}:message)};
       if(!draft.nodes.some(n=>n.visible&&n.geometry))context={...context,messages:context.messages.map(message=>message.role==='system'?{...message,toolsAdded:message.toolsAdded?.filter(t=>t.name!=='detail_quality_standard')}:message)};
       if(preserveAssetShape&&base.nodes.some(n=>n.modelAsset)){
         const poseTools=new Set(['enable_modeling_tools','read_scene','find_scene_parts','find_scene_parts_batch','prepare_local_edit','read_pose_rig','prepare_local_edit','read_pose_rig','define_pose_rig','pose_with_rig','bend_existing_mesh','pose_existing_parts','edit_scene','retry_scene_edit','move_components','read_saved_asset','list_saved_assets','inspect_asset_instances','detail_quality_standard','inspect_model_quality','inspect_scene','check_requirements','capture_view','capture_multiview','capture_quality_review','capture_component_intrinsic','capture_detail_diagnostic','inspect_view_visibility','inspect_contact_surfaces','inspect_connections','connect_scene_parts','set_connection','bind_object_features','audit_model_detail','audit_model_details_batch','review_model','submit_preview','submit_data_preview','configure_animation','preview_animation']);
         context={...context,messages:context.messages.map(message=>message.role==='system'?{...message,toolsAdded:message.toolsAdded?.filter(t=>poseTools.has(t.name))}:message)};
       }
+      if(localFocus&&!localFocus.ids.every(id=>draft.nodes.some(n=>(n.assemblyId??n.id)===id)))localFocus=undefined;
       if(localFocus)context={...context,messages:context.messages.map(m=>m.role==='system'&&typeof m.content==='string'?{...m,content:m.content.replace(/# 场景上下文[\s\S]*?(?=\n本次编辑约束：)/,'# 场景上下文\n当前已选择局部上下文，以最近prepare_local_edit或编辑结果的目标/邻近信息为准；完整场景保留，其他对象只需摘要。\n')}:m)};
       context={...context,messages:normalizeModelingRequestMessages(context.messages)};
       stamp(`model-${calls}`,{requestFootprint:measureRequestFootprint(context)});
       if(options.streamFn)return options.streamFn(m,context,streamOptions);
       return stream(model,context,{...streamOptions,apiKey:cfg.apiKey.trim(),fetch:f,maxTokens:AGENT_LIMITS.outputPerTurn,maxRetries:0,timeoutMs:AGENT_LIMITS.idleTimeoutMs,
-        onProviderStreamEvent:()=>{firstData();emit(activity.title);},onResponse:()=>emit(`第 ${calls} 轮：服务已响应，正在接收`) });
+        onProviderStreamEvent:data=>{if(providerHasUsage(data))providerUsageRounds.add(calls);firstData();emit(activity.title);},onResponse:()=>{stamp(`model-${calls}`,{responseAt:Date.now()});emit(`第 ${calls} 轮：服务已响应，正在接收`);} });
     },
     beforeToolCall:async({toolCall})=>{check();stageReason=stageReason||budgetExceeded();if(stageReason)return {block:true,reason:stageReason,terminate:true};if(!visualAvailable()&&['audit_model_detail','audit_model_details_batch'].includes(toolCall.name))return {block:true,reason:'当前无可用画面证据，系统已自动标记细节未验收；无需逐项填写unknown。继续完成数据编辑与必要数量检查，然后submit_data_preview。'};if(!visualAvailable()&&(['capture_view','capture_multiview','capture_quality_review','capture_detail_diagnostic','capture_component_intrinsic','preview_animation','review_model'].includes(toolCall.name)||(toolCall.name==='submit_preview'&&reviewRequirement(base,draft).kind!=='none')))return {block:true,reason:unavailableStage(),terminate:true};if(runner.hasQueuedMessages())return {block:true,reason:'用户补充了新指令，请先读取并按最新要求重新决定操作',terminate:true};if(questionOnly&&['retry_structured_component','bind_object_features','repair_structured_features','build_structured_component','align_saved_instances','add_saved_assets','retry_scene_edit','define_pose_rig','pose_with_rig','bend_existing_mesh','pose_existing_parts','pose_bimanual_interaction','pose_arm_interaction','create_hand_pose','edit_scene','configure_animation','configure_process_route','add_reference_component','add_mesh_component','add_mesh_components','connect_scene_parts','remove_connection','set_surface_detail','set_surfaces_batch','build_components_parallel','prepare_surface_uv','move_components','submit_data_preview','submit_preview'].includes(toolCall.name))return {block:true,reason:'用户当前选择只提问，请直接回答，不要修改或提交场景',terminate:true};if(seenCalls.has(toolCall.id))return {block:true,reason:'重复的工具调用ID已拒绝，避免重复修改'};seenCalls.add(toolCall.id);if(submitted)return {block:true,reason:'本轮已提交预览',terminate:true};if(pauseReason)return {block:true,reason:pauseReason,terminate:true};activity.toolCalls++;return undefined;},
     finishTurn:async({message})=>{
@@ -668,8 +679,8 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
   const unsubscribe=runner.subscribe(event=>{
     if(signal?.aborted)return;
     if(event.type==='message_end'&&event.message.role==='user'){const guide=steeringMessages.get(event.message.timestamp);if(guide){respondingToSteering=true;questionOnly=guide.mode==='question';localFocus=undefined;if(preserveAssetShapeIntent(guide.text,options.history))preserveAssetShape=true;userTexts.push(guide.text);if(!questionOnly){executionTexts.push(guide.text);requirementsNeedRefresh=requirements.length>0;}steeringMessages.delete(event.message.timestamp);options.onSteeringApplied?.(guide.id);emit('已接收补充要求，正在按最新指令调整',true);}}
-    if(event.type==='tool_execution_start'){const readArgs=event.args as {assemblyId?:string;nodeIds?:string[]};const readLabel=readArgs.assemblyId?'组件:'+(draft.nodes.find(n=>n.assemblyId===readArgs.assemblyId)?.assemblyName??readArgs.assemblyId):readArgs.nodeIds?'节点:'+readArgs.nodeIds.map(id=>draft.nodes.find(n=>n.id===id)?.name??id).join(',').slice(0,120):'总览';turnActions.push(event.toolName+(event.toolName==='read_scene'?`(${readLabel})`:''));const label=tools.find(t=>t.name===event.toolName)?.label??event.toolName;activity.timings=[...activity.timings,{id:event.toolCallId,kind:'tool',label,detail:event.toolName==='read_scene'?readLabel:typeof (event.args as {summary?:unknown}).summary==='string'?String((event.args as {summary:string}).summary).slice(0,300):undefined,startedAt:Date.now()}];emit(`正在${label}`);}
-    if(event.type==='tool_execution_end'){const result=event.result as {content?:{type:string;text?:string}[]};const detail=event.isError?(result?.content??[]).filter(c=>c.type==='text').map(c=>c.text??'').join(' ').split('Received arguments:')[0].slice(0,500):undefined;stamp(event.toolCallId,{endedAt:Date.now(),failed:event.isError,...(detail?{detail}:{})});emit(activity.title);}
+    if(event.type==='tool_execution_start'){const inputKey=JSON.stringify([draft.revision,event.toolName,event.args,parallelEpoch]);const repeatedInput=toolInputs.has(inputKey);toolInputs.add(inputKey);const readArgs=event.args as {assemblyId?:string;nodeIds?:string[]};const readLabel=readArgs.assemblyId?'组件:'+(draft.nodes.find(n=>n.assemblyId===readArgs.assemblyId)?.assemblyName??readArgs.assemblyId):readArgs.nodeIds?'节点:'+readArgs.nodeIds.map(id=>draft.nodes.find(n=>n.id===id)?.name??id).join(',').slice(0,120):'总览';turnActions.push(event.toolName+(event.toolName==='read_scene'?`(${readLabel})`:''));const label=tools.find(t=>t.name===event.toolName)?.label??event.toolName;activity.timings=[...activity.timings,{id:event.toolCallId,kind:'tool',label,toolName:tools.some(t=>t.name===event.toolName)?event.toolName:undefined,repeatedInput,argumentsChars:JSON.stringify(event.args??{}).length,sceneRevision:draft.revision,detail:event.toolName==='read_scene'?readLabel:typeof (event.args as {summary?:unknown}).summary==='string'?String((event.args as {summary:string}).summary).slice(0,300):undefined,startedAt:Date.now()}];emit(`正在${label}`);}
+    if(event.type==='tool_execution_end'){const result=event.result as {content?:{type:string;text?:string}[]};const detail=event.isError?(result?.content??[]).filter(c=>c.type==='text').map(c=>c.text??'').join(' ').split('Received arguments:')[0].slice(0,500):undefined;stamp(event.toolCallId,{endedAt:Date.now(),failed:event.isError,resultChars:JSON.stringify(result?.content??[]).length,...(detail?{detail}:{})});emit(activity.title);}
     if(event.type==='tool_execution_end'){
       if(event.isError){
         const result=event.result as {content?:{type:string;text?:string}[]};
@@ -685,7 +696,7 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
         activity.explanations=[...entries.filter(v=>v.id!==id),{id,text:(previous+e.delta).slice(0,4000)}].slice(-40);
       }
       if(e.type==='text_delta'||e.type==='toolcall_delta'){
-        firstData();
+        firstData();const timing=activity.timings.find(t=>t.id===`model-${calls}`);if(timing?.firstContentAt===undefined)stamp(`model-${calls}`,{firstContentAt:Date.now()});
         activity.characters+=e.delta.length;emit(e.type==='toolcall_delta'?'正在接收建模工具参数':'正在接收模型回复');
       }
     }
@@ -693,8 +704,10 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
       const publicText=event.message.content.filter(c=>c.type==='text').map(c=>c.text).join('\n');
       if(publicText.trim()){const id=`explanation-${calls}`;activity.explanations=[...(activity.explanations??[]).filter(v=>v.id!==id),{id,text:publicText.slice(0,4000)}].slice(-40);}
       const usage=event.message.usage;
-      stamp(`model-${calls}`,{endedAt:Date.now(),inputTokens:usage?.input,outputTokens:usage?.output});
-      if(usage && usage.totalTokens>0){budgetState.reportedTokens+=usage.input+usage.cacheRead+usage.cacheWrite+usage.output;activity.usageReported=true;activity.inputTokens+=usage.input+usage.cacheRead+usage.cacheWrite;activity.outputTokens+=usage.output;}
+      const measured=normalizedUsage(usage,providerUsageRounds.has(calls));
+      stamp(`model-${calls}`,{endedAt:Date.now(),...measured,failed:event.message.stopReason==='error'||event.message.stopReason==='aborted'});
+      if(measured.usageState==='unknown')activity.usageIncomplete=true;
+      if(measured.usageState!=='unknown'){budgetState.reportedTokens+=measured.inputTokens+measured.outputTokens;activity.usageReported=true;activity.inputTokens+=measured.inputTokens;activity.outputTokens+=measured.outputTokens;}
       emit(activity.title);
     }
   });
@@ -718,10 +731,12 @@ capture_view 和 review_model 必须分在不同模型轮次，先收到图片�
     if(!operations.length && pauseReason)throw new Error(pauseReason+'\n最近执行：'+activity.events.filter(e=>/^第\d+轮执行/.test(e)).slice(-4).join('；')+(rootToolErrors.length?'\n原始工具错误：'+rootToolErrors.join('；'):''));
     if(!operations.length){summary=last?.role==='assistant'?last.content.filter(c=>c.type==='text').map(c=>c.text).join('\n'):'';if(!summary.trim())throw new Error(lastToolError?'工具调用未完成：'+lastToolError:'模型未返回有效回复，请检查模型工具调用支持');
       if(summary.trim().startsWith('{') && summary.includes('\"operations\"'))throw new Error('模型输出了普通JSON而未调用建模工具。请检查网关的工具调用支持，或在模型配置切回单次生成');}
+    if(!submitted)activity.outcome='answered';
     return {batch:{requestId:makeId(),projectId:base.projectId,baseRevision:base.revision,selectedIds:options.selection,editScope:options.editScope,taskStatus:'submitted',qualityIssues:[...new Set([...submittedQualityIssues,...(activity.detailAcceptance?.issues??[])])],summary,operations,...((requirementsNeedRefresh||!!submittedQualityIssues.length||!!activity.detailAcceptance?.issues.length||!!activity.blueprintCoverage?.issues.length||activity.requirements?.items.some(r=>r.status!=='pass'))?{incomplete:true,continuation:'继续核对并完成：'+executionTexts.join('；')}:{})},result:{doc:draft,applied,errors:[]},activity};
   } catch(error) {
+    activity.outcome=outerSignal?.aborted?'cancelled':stageReason?'budget-exhausted':'failed';
     if(operations.length && !outerSignal?.aborted){emit('任务中断，已保留阶段草稿',true);return checkpoint(stageReason||(budgetController.signal.aborted?budgetExceeded():'')||(error instanceof Error?error.message:'模型请求中断'));}
     if(budgetController.signal.aborted)throw new Error(stageReason||budgetExceeded());
-    throw error;
+    emit(activity.title);throw error;
   } finally {clearTimeout(budgetTimer);acceptingSteering=false;options.onControl?.(null);unsubscribe();signal?.removeEventListener('abort',abort);}
 }
