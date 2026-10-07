@@ -1,0 +1,5 @@
+.canvas-studio .library-save-toast{position:absolute;z-index:40;left:50%;bottom:86px;transform:translateX(-50%);display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:12px;border:1px solid var(--green-6);background:var(--color-panel-solid);color:var(--gray-12);box-shadow:0 5px 22px #162e4220;font-size:14px;max-width:calc(100% - 32px);white-space:nowrap}
+.canvas-studio.editor-mode .library-save-toast{left:calc((100% - var(--chat-space))/2)}
+.library-save-toast>svg{width:18px;height:18px;color:var(--green-11)}
+.library-save-toast .rt-Button{width:24px;height:24px;padding:0;margin-left:6px}
+@media(max-width:720px){.canvas-studio.editor-mode .library-save-toast{left:50%;bottom:calc(58% + 72px)}}

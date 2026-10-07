@@ -1,3 +1,4 @@
+import {downloadJson} from '../util/downloadJson';
 import {encodeReviewProject} from '../domain/reviewExport';
 import {useRef,useState} from 'react';
 import {Dialog,Button} from '@radix-ui/themes';
@@ -7,7 +8,7 @@ import {inspectSceneQuality} from '../domain/sceneQuality';
 export function WorkspaceTools({onClose}:{onClose:()=>void}){
  const [reviewText,setReviewText]=useState('');const [preparingReview,setPreparingReview]=useState(false);
  const [notice,setNotice]=useState('');const input=useRef<HTMLInputElement>(null);const doc=useDisplayDoc();const status=useEditorStore(s=>s.viewportStatus);const cfg=useEditorStore(s=>s.aiConfig);const [report,setReport]=useState<ReturnType<typeof inspectSceneQuality>|null>(null);
- const download=()=>{try{const blob=new Blob([exportWorkspaceBackup()],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='chat3d-workspace.backup.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);setNotice('备份已发起下载，请确认文件落盘。含聊天文字与草稿，不含模型配置、密钥和参考图片。');}catch(e){setNotice(String(e));}};
+ const download=async()=>{try{setNotice(await downloadJson(exportWorkspaceBackup(),'workspace')+' 备份包含聊天文字与草稿，分享前请检查敏感内容。');}catch(e){setNotice('备份失败：'+String(e));}};
  return <Dialog.Root open onOpenChange={v=>!v&&onClose()}><Dialog.Content maxWidth="680px"><Dialog.Title>工作台检查与备份</Dialog.Title><Dialog.Description>先检查运行环境，再导出可迁移副本。恢复以新增会话方式导入，不覆盖现有项目。</Dialog.Description>
  <div className="space-y-4 mt-4"><section><h3>运行状态</h3><p>三维：{status==='ready'?'已就绪':status==='error'?'不可用，不能完成视觉验收':'正在启动'} · 模型：{cfg?'已配置（不代表连接已验证）':'未配置'}</p><p>场景 {doc.nodes.length} 个零件 · 动画 {doc.animation?.tracks.length??0} 条轨道</p><p>三维不可用时可以编辑与备份，但请在支持 WebGL 的浏览器检查真实画面。请勿为了运行应用关闭浏览器安全保护。</p></section>
  <section><h3>场景检查</h3><Button onClick={()=>setReport(inspectSceneQuality(doc))}>检查当前场景</Button>{report&&<div role="status"><p>检查版本 {report.revision}，{report.componentCount} 个组件{report.revision!==doc.revision?'（结果已过期，请重新检查）':''}</p><ul>{report.issues.map((s,i)=><li key={i}>{s}</li>)}</ul><p>{report.issues.length?'这些是待核对线索':'未发现已覆盖规则的问题'}；不代表工艺、碰撞或视觉验收通过。</p></div>}</section>

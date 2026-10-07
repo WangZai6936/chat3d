@@ -1,3 +1,5 @@
+import {SaveToast,isLibrarySaveNotice} from './ui/SaveToast';
+import {TaskQueue} from './ui/TaskQueue';
 import {BrandMark} from './ui/BrandMark';
 import {useSelectionTool} from './ui/selectionTool';
 import {DeleteSelectionAction} from './ui/DeleteSelectionAction';
@@ -20,7 +22,7 @@ import {WorkspaceTools} from './ui/WorkspaceTools';
 // React 只画壳子与列表类 UI；Three.js 视口保持命令式（决策 #1）
 // 对话区放右侧整高：消息上下文完整可见（早期版本放底部，只能看到一两行）
 // 工具栏「模型配置」打开 SettingsDialog：baseURL/apiKey/model 存本机，对话生成走真实 API
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChatPanel } from './ui/ChatPanel';
 import { SettingsDialog } from './ui/SettingsDialog';
 import {modelingModule} from './modules/modeling';
@@ -30,7 +32,7 @@ const PropertiesPanel=modelingModule.Properties;
 import { useEditorStore, useDisplayDoc } from './store';
 import { exportGlb } from './scene/export';
 import {Button,IconButton,Badge,DropdownMenu,Popover,Spinner} from '@radix-ui/themes';
-import {LayersIcon,ActivityLogIcon,ChevronDownIcon,GearIcon,CubeIcon,UploadIcon,DownloadIcon,Cross1Icon,CounterClockwiseClockIcon,ReloadIcon,MixerHorizontalIcon,ChatBubbleIcon} from '@radix-ui/react-icons';
+import {LayersIcon,ChevronDownIcon,GearIcon,CubeIcon,UploadIcon,DownloadIcon,Cross1Icon,CounterClockwiseClockIcon,ReloadIcon,MixerHorizontalIcon,ChatBubbleIcon} from '@radix-ui/react-icons';
 import '@radix-ui/themes/styles.css';
 import './workspace.css';
 import {TaskPanel} from './ui/TaskPanel';
@@ -48,6 +50,7 @@ import './creative-gallery.css';
 import './studio-control-polish.css';
 import './graphite-controls.css';
 import './workbench-footer.css';
+import './thumbnail-layout.css';
 import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning} from './workspace';
 import { MAX_PROJECT_BYTES, parseProject, serializeProject } from './domain/project';
 
@@ -65,6 +68,8 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
   const modelFileRef=useRef<HTMLInputElement>(null);
   const [projectNotice, setProjectNotice] = useState('');
+  const closeSaveNotice=useCallback(()=>setProjectNotice(''),[]);
+  const saveNotice=isLibrarySaveNotice(projectNotice)&&!autosaveError;
   const [modulePage,setModulePage]=useState<'home'|'workbench'|'asset'|'scene'|'tasks'|'settings'>('home');const [libraryRefresh,setLibraryRefresh]=useState(0);
   const [librarySaving,setLibrarySaving]=useState(false),[showLibrarySave,setShowLibrarySave]=useState(false);
 
@@ -138,11 +143,12 @@ export default function App() {
         <div className="app-brand"><BrandMark/><strong>Chat3D</strong></div>
 
         <div className="navigation-pages">{([['home','首页','首页'],['asset','资产','资产库'],['scene','场景','场景库'],['workbench','工作台','建模工作台']] as const).map(([page,label,accessibleLabel])=><Button variant="ghost" color="gray" key={page} title={accessibleLabel} aria-label={accessibleLabel} disabled={librarySaving||!workspace.ready} aria-current={modulePage===page?'page':undefined} onClick={()=>{setModulePage(page);setFocusScene(false);}}><span>{label}</span></Button>)}</div>
-        <div className="navigation-utilities"><AppearanceMenu/><Button variant="ghost" color="gray" title="任务" aria-label="任务" disabled={librarySaving||!workspace.ready} aria-current={modulePage==='tasks'?'page':undefined} onClick={()=>setModulePage('tasks')}><ActivityLogIcon/></Button><Button variant="ghost" color="gray" title="设置" aria-label="设置" disabled={librarySaving||!workspace.ready} aria-current={modulePage==='settings'?'page':undefined} onClick={()=>setModulePage('settings')}><GearIcon/></Button></div>
+        <div className="navigation-utilities"><AppearanceMenu/><TaskQueue disabled={librarySaving||!workspace.ready} onOpen={()=>{setModulePage('workbench');setFocusScene(false);setAssistantOpen(true);setAssistantTab('chat');}} onHistory={()=>{setModulePage('tasks');setFocusScene(false);}}/><Button variant="ghost" color="gray" title="设置" aria-label="设置" disabled={librarySaving||!workspace.ready} aria-current={modulePage==='settings'?'page':undefined} onClick={()=>setModulePage('settings')}><GearIcon/></Button></div>
       </nav>
       <section className="studio-main">
 
-        {(workspace.error||autosaveError||projectNotice)&&<div role="status" className={`workspace-notice ${workspace.error||autosaveError?'is-error':''}`}><span>{workspace.error||autosaveError||projectNotice}</span>{!workspace.error&&!autosaveError&&<IconButton size="1" variant="ghost" color="gray" aria-label="关闭通知" onClick={()=>setProjectNotice('')}><Cross1Icon/></IconButton>}</div>}
+        {saveNotice&&!workspace.error&&<SaveToast message={projectNotice} onClose={closeSaveNotice}/>}
+        {(workspace.error||autosaveError||(projectNotice&&!saveNotice))&&<div role="status" className={`workspace-notice ${workspace.error||autosaveError?'is-error':''}`}><span>{workspace.error||autosaveError||projectNotice}</span>{!workspace.error&&!autosaveError&&<IconButton size="1" variant="ghost" color="gray" aria-label="关闭通知" onClick={()=>setProjectNotice('')}><Cross1Icon/></IconButton>}</div>}
         {!workspace.ready&&<div className="workspace-loading"><Spinner size="3"/><p>正在恢复项目…</p></div>}
         {workspace.ready&&<StudioHome onConfigure={()=>setShowSettings(true)} onGenerate={projectId=>setAutoStartRequest({id:makeId(),projectId})} hidden={modulePage!=='home'} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);setAssistantTab('chat');}} onLibrary={setModulePage}/>}
         {workspace.ready&&(modulePage==='asset'||modulePage==='scene')&&<ProjectLibrary key={modulePage+libraryRefresh} kind={modulePage} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}} onManage={()=>setShowAssets(true)}/>}
@@ -158,13 +164,13 @@ export default function App() {
           <HeroButton className="workbench-save" variant="primary" aria-label={librarySaving?'正在保存…':active?.moduleKind==='asset'?'保存资产':'保存场景'} isDisabled={locked||librarySaving||!workspace.ready} onPress={()=>{if(active?.moduleKind==='asset'&&!useEditorStore.getState().doc.nodes.length){setProjectNotice('还没有可保存的模型。请先创建或导入模型，再保存到资产库。');setAssistantOpen(true);setAssistantTab('chat');return;}setShowLibrarySave(true);}}>{librarySaving?'保存中…':'保存'}</HeroButton>
           <HeroButton isIconOnly variant="ghost" aria-label="模型配置" onPress={()=>setShowSettings(true)}><GearIcon/></HeroButton>
           <DropdownMenu.Root><DropdownMenu.Trigger><Button variant="ghost" color="gray" aria-label="导出与更多" disabled={locked||!workspace.ready}>导出 <ChevronDownIcon/></Button></DropdownMenu.Trigger><DropdownMenu.Content>
-            <DropdownMenu.Item onSelect={()=>setShowTools(true)}>工作台检查与备份</DropdownMenu.Item>
-            <DropdownMenu.Item onSelect={()=>fileRef.current?.click()}><UploadIcon/>导入项目到新会话</DropdownMenu.Item>
-            <DropdownMenu.Item onSelect={()=>modelFileRef.current?.click()}>导入网格模型 GLB（静态）</DropdownMenu.Item>
-            <DropdownMenu.Label>保存工程：可重新打开编辑（JSON）</DropdownMenu.Label>
-            <DropdownMenu.Item onSelect={saveProject}><DownloadIcon/>下载项目 JSON</DropdownMenu.Item>
-            <DropdownMenu.Label>交付模型：供其他三维工具使用（GLB，无动画）</DropdownMenu.Label>
-            <DropdownMenu.Item disabled={exporting||nodeCount===0} onSelect={()=>void downloadGlb()}><CubeIcon/>{exporting?'导出中…':'导出模型 GLB'}</DropdownMenu.Item>
+
+            <DropdownMenu.Item onSelect={()=>fileRef.current?.click()}><UploadIcon/>导入项目 JSON</DropdownMenu.Item>
+            <DropdownMenu.Item title="静态网格，导入到新会话" onSelect={()=>modelFileRef.current?.click()}><CubeIcon/>导入模型 GLB</DropdownMenu.Item>
+            <DropdownMenu.Separator/>
+            <DropdownMenu.Item title="保存可重新编辑的工程，包含动画" onSelect={saveProject}><DownloadIcon/>下载项目 JSON</DropdownMenu.Item>
+
+            <DropdownMenu.Item title="导出静态模型和材质，不含动画" disabled={exporting||nodeCount===0} onSelect={()=>void downloadGlb()}><CubeIcon/>{exporting?'导出中…':'导出模型 GLB'}</DropdownMenu.Item><DropdownMenu.Separator/><DropdownMenu.Item onSelect={()=>setShowTools(true)}><GearIcon/>检查与备份</DropdownMenu.Item>
           </DropdownMenu.Content></DropdownMenu.Root>
           </div>
           <input ref={fileRef} type="file" accept=".json,.chat3d.json" className="hidden" onChange={e=>{const file=e.target.files?.[0];e.target.value='';if(file)void openProject(file);}}/>

@@ -1,3 +1,4 @@
+import {remapPoseRig} from './poseRig';
 import {MAX_PROJECT_BYTES,serializeProject} from './project';
 import {Vector3} from 'three';
 import {assemblyBounds} from './assemblyEditing';
@@ -64,7 +65,7 @@ export function duplicateSelectedNodes(doc:SceneDocument,ids:string[],count:numb
   const instances=new Map<string,string>(),assemblies=new Map<string,string>(),idMap=new Map(nodes.map(n=>[n.id,makeId()]));
   for(const n of nodes){const copy=structuredClone(n),key=compositionGroup(n),assembly=n.assemblyId??n.id;
    if(!instances.has(key))instances.set(key,makeId());if(!assemblies.has(assembly))assemblies.set(assembly,makeId());
-   copy.id=idMap.get(n.id)!;copy.assemblyId=assemblies.get(assembly)!;
+   if(n.poseRig){const rig=remapPoseRig(n.poseRig,idMap);if(rig)copy.poseRig=rig;else delete copy.poseRig;}copy.id=idMap.get(n.id)!;copy.assemblyId=assemblies.get(assembly)!;
    if(copy.modelAsset)copy.modelAsset.instanceId=instances.get(key)!;
    if(copy.connection){if(included.has(copy.connection.targetId))copy.connection.targetId=idMap.get(copy.connection.targetId)!;else delete copy.connection;}
    if(copy.parentId)copy.parentId=idMap.get(copy.parentId)??null;

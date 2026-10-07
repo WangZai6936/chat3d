@@ -6,6 +6,7 @@ export function armEditCommands(doc:SceneDocument,arms:ArmEdit[]){
  if(arms.length<1||arms.length>2)throw Error('需要一至两条手臂');
  if(arms.length===2&&arms[0].assemblyId!==arms[1].assemblyId)throw Error('双手必须属于同一人物');
  const allIds=arms.flatMap(a=>a.replaceIds);if(new Set(allIds).size!==allIds.length)throw Error('左右手替换范围不能重复');
+ if(doc.nodes.some(n=>n.modelAsset&&allIds.includes(n.id)))throw Error('资产姿态调整必须保留原手袖几何，请用pose_existing_parts；此工具会重建网格，不能用于无损调姿态');
  const targets=arms.map(a=>{
   const members=doc.nodes.filter(n=>(n.assemblyId??n.id)===a.assemblyId);if(!members.length||!members.some(n=>n.sceneRole==='person'))throw Error('人物组件不存在');
   if(!a.replaceIds.length||a.replaceIds.length>30||a.replaceIds.some(id=>!members.some(n=>n.id===id&&/hand|finger|palm|thumb|sleeve|forearm|upper arm|手|袖|前臂|上臂/i.test(n.name))))throw Error('替换范围只能是明确的手部或衣袖');

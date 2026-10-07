@@ -1,3 +1,4 @@
+import {remapPoseRig,validatePoseRig,type PoseRig} from './poseRig';
 import {serializeProject} from './project';
 import {duplicateSelectedNodes,layoutSelectedNodes,wholeObjectIds} from './manualComposition';
 import {editSelectedProperties,type SelectionChange} from './selectionProperties';
@@ -51,6 +52,7 @@ export type CommandOp =
   | 'appendAssemblyParts'
   | 'replaceAssemblyParts'
   | 'setAssemblyMetadata'
+  | 'setPoseRig'
   | 'setAppearance'
   | 'setMaterial'
   | 'rename'
@@ -178,6 +180,7 @@ export type Command =
   | {op:'transformAssembly';targetId:string;rotationDegrees?:Vec3;scaleFactor?:number;pivot?:Vec3}
   | {op:'appendAssemblyParts';targetId:string;parts:AssemblyPart[];origin?:Vec3;yaw?:number}
   | {op:'replaceAssemblyParts';blueprint?:import('./objectBlueprint').ObjectBlueprint;targetId:string;partIds:string[];parts:AssemblyPart[];origin?:Vec3;yaw?:number}
+  | {op:'setPoseRig';targetId:string;rig:PoseRig}
   | {op:'setAssemblyMetadata';targetId:string;structure?:{blueprint:import('./objectBlueprint').ObjectBlueprint;binding:import('./objectBlueprint').FeatureBinding};sceneRole?:import('./types').SceneRole;planKey?:string;zone?:string}
   | ({op:'setAppearance';targetId:string;scope?:'assembly';sourceMaterialIds?:string[];materialId?:string}&AppearancePatch)
   | ({op:'createAssembly';tempId?:string}&AssemblyDefinition)
@@ -239,6 +242,7 @@ export function affectedNodeIds(op: Command, doc: SceneDocument): string[] {
     case 'appendAssemblyParts':
     case 'replaceAssemblyParts':
     case 'setAssemblyMetadata':
+    case 'setPoseRig':
     case 'translateAssembly': { const assembly=doc.nodes.find(n=>n.id===op.targetId)?.assemblyId;return assembly?doc.nodes.filter(n=>n.assemblyId===assembly).map(n=>n.id):[op.targetId]; }
     case 'delete': {
       const removed=new Set(deletionNodeIds(doc,op));
@@ -304,6 +308,7 @@ function cloneNode(n: SceneNode): SceneNode {
   return {
     ...n,
     ...(n.modelAsset?{modelAsset:{...n.modelAsset}}:{}),
+    ...(n.poseRig?{poseRig:structuredClone(n.poseRig)}:{}),
     ...(n.modelStructure?{modelStructure:structuredClone(n.modelStructure)}:{}),
     transform: {
       position: [...n.transform.position] as Vec3,
@@ -444,7 +449,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
       const imported:SceneDocument={...doc,nodes:op.nodes,materials:op.materials,assets:[]};delete imported.animation;
       const errors=validateDocument(imported);if(errors.length||op.nodes.some(n=>!n.geometry||n.kind!=='primitive'||(op.op==='importMeshComponent'&&n.geometry.type!=='mesh')||n.parentId!==null))return {doc,error:errors[0]??new Error('网格组件只能包含平级三角网格')};
       const materialMap=new Map(op.materials.map(m=>[m.id,makeId()]));materials=[...materials,...op.materials.map(m=>({...m,id:materialMap.get(m.id)!}))];
-      const groupMap=new Map<string,string>(),nodeMap=new Map<string,string>();for(const n of op.nodes){const old=n.assemblyId??'component';if(!groupMap.has(old))groupMap.set(old,makeId());nodeMap.set(n.id,nodeMap.size===0?groupMap.get(old)!:makeId());}const copies=op.nodes.map(n=>({...cloneNode(n),id:nodeMap.get(n.id)!,assemblyId:groupMap.get(n.assemblyId??'component')!,materialId:materialMap.get(n.materialId!),...(n.connection?{connection:{...n.connection,targetId:nodeMap.get(n.connection.targetId)!}}:{})}));
+      const groupMap=new Map<string,string>(),nodeMap=new Map<string,string>();for(const n of op.nodes){const old=n.assemblyId??'component';if(!groupMap.has(old))groupMap.set(old,makeId());nodeMap.set(n.id,nodeMap.size===0?groupMap.get(old)!:makeId());}const copies=op.nodes.map(n=>({...cloneNode(n),...(n.poseRig?{poseRig:remapPoseRig(n.poseRig,nodeMap)}:{}),id:nodeMap.get(n.id)!,assemblyId:groupMap.get(n.assemblyId??'component')!,materialId:materialMap.get(n.materialId!),...(n.connection?{connection:{...n.connection,targetId:nodeMap.get(n.connection.targetId)!}}:{})}));
       createdIds=copies.map(n=>n.id);nodes.push(...copies);break;
     }
     case 'createAssembly': {
@@ -453,7 +458,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     case 'duplicateAssembly': {
       const anchor=findNode(doc,op.targetId)!;const members=anchor.assemblyId?doc.nodes.filter(n=>n.assemblyId===anchor.assemblyId):[anchor];
       if(members.length>2000||!Array.isArray(op.offset)||op.offset.length!==3||!op.offset.every(Number.isFinite))return {doc,error:new Error('复制数量或偏移无效')};
-      const assemblyId=makeId(),instanceId=makeId();const name=op.name?.trim()||`${anchor.assemblyName??anchor.name} 副本`;const copiedIds=new Map(members.map((n,i)=>[n.id,i?makeId():assemblyId]));const copies=members.map(n=>({...cloneNode(n),...(n.modelAsset?{modelAsset:{...n.modelAsset,instanceId}}:{}),...(n.connection?{connection:{...structuredClone(n.connection),targetId:copiedIds.get(n.connection.targetId)??n.connection.targetId}}:{}),id:copiedIds.get(n.id)!,assemblyId,assemblyName:name,name:`${name} · ${n.name.split(' · ').slice(1).join(' · ')||n.name}`,transform:{...structuredClone(n.transform),position:n.transform.position.map((v,k)=>v+op.offset[k]) as Vec3}}));
+      const assemblyId=makeId(),instanceId=makeId();const name=op.name?.trim()||`${anchor.assemblyName??anchor.name} 副本`;const copiedIds=new Map(members.map((n,i)=>[n.id,i?makeId():assemblyId]));const copies=members.map(n=>({...cloneNode(n),...(n.modelAsset?{modelAsset:{...n.modelAsset,instanceId}}:{}),...(n.connection?{connection:{...structuredClone(n.connection),targetId:copiedIds.get(n.connection.targetId)??n.connection.targetId}}:{}),...(n.poseRig?{poseRig:remapPoseRig(n.poseRig,copiedIds)}:{}),id:copiedIds.get(n.id)!,assemblyId,assemblyName:name,name:`${name} · ${n.name.split(' · ').slice(1).join(' · ')||n.name}`,transform:{...structuredClone(n.transform),position:n.transform.position.map((v,k)=>v+op.offset[k]) as Vec3}}));
       createdIds=copies.map(n=>n.id);if(op.tempId)tempIdMap.set(op.tempId,copies[0].id);nodes.push(...copies);break;
     }
     case 'createTemplate': {
@@ -492,6 +497,7 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
         if(op.op==='replaceAssemblyParts'&&!op.blueprint){const originals=doc.nodes.filter(n=>ids.has(n.id)&&n.modelStructure?.blueprint),plans=new Map(originals.map(n=>[JSON.stringify(n.modelStructure!.blueprint),n.modelStructure!.blueprint!]));const members=nodes.filter(n=>(n.assemblyId??n.id)===assemblyId);if(plans.size===1&&!members.some(n=>n.modelStructure?.blueprint)){const plan=[...plans.values()][0],host=members.find(n=>n.modelStructure?.blueprintKey===plan.key)??members[0];if(host)host.modelStructure={...(host.modelStructure??{blueprintKey:plan.key,featureKeys:[]}),blueprint:structuredClone(plan)};}}
       }catch(e){return {doc,error:e instanceof Error?e:new Error('追加或替换零件失败')}}break;
     }
+    case 'setPoseRig': {const ids=new Set(affectedNodeIds(op,doc));try{validatePoseRig(op.rig,nodes.filter(n=>ids.has(n.id)));for(const n of nodes)if(ids.has(n.id))delete n.poseRig;findNodeInList(nodes,op.targetId)!.poseRig=structuredClone(op.rig);}catch(e){return {doc,error:e instanceof Error?e:new Error('关节保存失败')};}break;}
     case 'setAssemblyMetadata': {
       if(op.structure){try{const member=findNode(doc,op.targetId)!;if(op.structure.binding.componentId!==(member.assemblyId??member.id))throw Error('结构关联目标与组件不一致');const updated=persistFeatureBinding(doc,op.structure.blueprint,op.structure.binding);for(let i=0;i<nodes.length;i++)nodes[i]=cloneNode(updated[i]);}catch(e){return {doc,error:e instanceof Error?e:new Error('结构关联失败')};}}
       const ids=new Set(affectedNodeIds(op,doc));for(const n of nodes)if(ids.has(n.id)){if(op.sceneRole!==undefined)n.sceneRole=op.sceneRole;if(op.planKey!==undefined)n.planKey=op.planKey;if(op.zone!==undefined)n.zone=op.zone;}break;

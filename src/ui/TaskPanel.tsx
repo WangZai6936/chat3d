@@ -1,3 +1,4 @@
+import {downloadJson} from '../util/downloadJson';
 import {RequirementList} from './RequirementList';
 import {runDiagnostics} from '../domain/runDiagnostics';
 import {customerText,progressSteps} from '../domain/customerProgress';
@@ -9,7 +10,7 @@ import './task-progress.css';
 export function TaskPanel({onConversation}:{onConversation:()=>void}){
  const {lastRun,aiStatus,aiError,pendingBatch,pendingResult,doc,messages,past,future}=useEditorStore();
  const busy=['capturing','context','generating','validating','applying'].includes(aiStatus);
- const [now,setNow]=useState(Date.now());useEffect(()=>{if(!busy)return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[busy]);
+ const [exportNotice,setExportNotice]=useState(''),[exporting,setExporting]=useState(false),[diagnosticText,setDiagnosticText]=useState('');const [now,setNow]=useState(Date.now());useEffect(()=>{if(!busy)return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer);},[busy]);
  const runs=messages.filter(m=>m.run).slice().reverse(),latest=runs[0]?.run;
  const outcomes=messages.filter(m=>m.batch).slice().reverse(),outcome=outcomes[0];
  const steps=progressSteps(lastRun,busy),done=steps.reduce((n,s)=>n+s.completed,0),failed=steps.reduce((n,s)=>n+s.failed,0);
@@ -19,7 +20,7 @@ export function TaskPanel({onConversation}:{onConversation:()=>void}){
  const pending=!!pendingBatch||!!pendingResult;
  const title=busy?customerText(lastRun?.title):pending?'模型已生成，请检查预览':aiStatus==='error'||latest?.status==='failed'?'这次处理未完成':aiStatus==='cancelled'||latest?.status==='stopped'?'已停止，已生成的内容保留':outcome?.outcome==='applied'?'修改已应用到场景':outcome?.outcome==='discarded'?'这次预览已放弃':latest?.mode==='demo'?'历史模拟记录已结束 · 当前无运行任务':lastRun||latest?'本次处理已结束':manualHistory.length?(past.some(e=>e.source!=='ai')?'修改记录已更新':'修改已撤销'):'还没有建模任务';
  const next=busy?'正在继续处理，可返回对话补充要求或停止。':pending?'检查模型后选择应用或放弃。应用不等于质量验收通过。':aiStatus==='error'?'回到对话查看提示，确认后再继续。不会自动重试。':'可以继续提出修改要求，或保存当前模型。';
- const exportDiagnostics=()=>{const state=useEditorStore.getState();const url=URL.createObjectURL(new Blob([JSON.stringify(runDiagnostics(state.aiStatus,state.lastRun,state.aiError),null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='chat3d-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+ const exportDiagnostics=async()=>{if(exporting)return;setExporting(true);try{const state=useEditorStore.getState();const text=JSON.stringify(runDiagnostics(state.aiStatus,state.lastRun,state.aiError),null,2);setDiagnosticText(text);setExportNotice(await downloadJson(text,'diagnostics'));}catch(e){setExportNotice('下载失败：'+String(e)+'。可展开下方诊断内容手动复制。');}finally{setExporting(false);}};
  return <section className="task-panel customer-task-panel" aria-label="任务记录">
  <header className="task-panel-intro"><ActivityLogIcon/><h2>任务与执行记录</h2><p>当前进展、处理结果和接下来要做的事。</p></header>
  <section className={`customer-current ${busy?'is-running':''}`} aria-label="当前任务状态"><span className="customer-status">{busy?'正在处理':pending?'等待应用':'当前状态'}</span><h3>{title}</h3><p>{next}</p><button onClick={onConversation}>{pending?'查看预览':busy?'返回对话':'前往对话'}</button></section>
@@ -34,6 +35,6 @@ export function TaskPanel({onConversation}:{onConversation:()=>void}){
  {!!manualHistory.length&&<section className="customer-section" aria-label="手动修改记录"><h3>手动与历史修改 <span>{manualHistory.length}</span></h3>{manualHistory.map(({entry,undone},i)=><article className="customer-outcome" key={entry.id??i}><div><strong>{undone?'已撤销':'已应用'} · {entry.source==='manual'?'手动操作':'历史操作'}</strong><time>{entry.createdAt?new Date(entry.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):'时间未记录'}</time></div><p>{customerText(entry.summary,'模型修改')}</p></article>)}<p className="task-footnote">这里显示当前保留的可撤销操作。导出的工作区备份不包含撤销历史。</p></section>}
  <section className="customer-section"><h3>AI 修改结果 <span>{outcomes.length}</span></h3>{outcomes.length?outcomes.map(m=><article className="customer-outcome" key={m.id}><div><strong>{m.outcome==='applied'?'已应用':m.outcome==='discarded'?'已放弃':m.outcome==='superseded'?'已保留到后续预览':pendingBatch?.requestId===m.batch?.requestId?'等待应用':'预览已结束'}</strong><time>{new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</time></div><p>{customerText(m.batch?.summary||m.text,'模型修改')}</p></article>):<p className="task-footnote">{manualHistory.length?'还没有 AI 生成的修改结果；其他操作见上方记录。':'完成一次 AI 生成后，这里会显示预览和应用结果。'}</p>}</section>
  {!!runs.length&&<details className="customer-section"><summary>历史任务 · {runs.length} 次</summary>{runs.map(m=><details className="customer-history" key={m.id}><summary>{customerText(m.text,'建模请求').slice(0,90)}</summary><RunTrace run={m.run!} now={now}/></details>)}</details>}
- {!busy&&(lastRun||latest)&&<details className="customer-section"><summary>问题排查</summary><p className="task-footnote">遇到问题时可下载记录用于排查，日常使用无需理解技术细节。</p><button className="customer-diagnostics" onClick={exportDiagnostics}>下载脱敏诊断记录</button></details>}
+ {!busy&&(lastRun||latest)&&<details className="customer-section"><summary>问题排查</summary><p className="task-footnote">遇到问题时可下载记录用于排查，日常使用无需理解技术细节。</p><button className="customer-diagnostics" disabled={exporting} onClick={()=>void exportDiagnostics()}>{exporting?'正在保存…':'下载脱敏诊断记录'}</button>{exportNotice&&<p role="status">{exportNotice}</p>}{diagnosticText&&<details><summary>查看或复制诊断内容</summary><textarea aria-label="脱敏诊断内容" readOnly value={diagnosticText} rows={6} style={{width:'100%'}} onFocus={e=>e.currentTarget.select()}/></details>}</details>}
  </section>;
 }

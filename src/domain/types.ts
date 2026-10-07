@@ -1,3 +1,4 @@
+import {poseRigSchema,type PoseRig} from './poseRig';
 import {validateBlueprints,type ObjectBlueprint} from './objectBlueprint';
 import {validateProfile,profileCornerLimit} from './profileValidation';
 import {validateTextureMaps,validateSurface,type TextureMaps,type SurfaceDetail} from './textures';
@@ -105,6 +106,7 @@ export type SceneRole=typeof SCENE_ROLES[number];
 export type SceneNodeKind = 'primitive' | 'asset' | 'group';
 
 export interface SceneNode {
+  poseRig?:PoseRig;
   modelStructure?:{blueprintKey:string;featureKeys:string[];localTransform?:Transform;blueprint?:ObjectBlueprint};
   modelAsset?:{id:string;version:number;instanceId:string;sourceNodeId?:string};
   connection?:Connection;
@@ -233,7 +235,7 @@ export function validateGeometry(g: Geometry): Error[] {
 
   if(g.type==='frame' && g.params.thickness>=Math.min(g.params.width,g.params.height)/2)errs.push(new Error('边框厚度必须小于宽高的一半，保留真实开口'));
   if(g.type==='tube' && g.params.innerRadius>=g.params.outerRadius)errs.push(new Error('管内半径必须小于外半径'));
-  if(g.type==='box' && g.params.bevelRadius!==undefined && g.params.bevelRadius>Math.min(g.params.width,g.params.height,g.params.depth)/2)errs.push(new Error('倒角半径不能超过最短边一半'));
+  if(g.type==='box' && g.params.bevelRadius!==undefined && g.params.bevelRadius>Math.min(g.params.width,g.params.height,g.params.depth)/2)errs.push(new Error('倒角半径不能超过最短边一半：geometry.params.bevelRadius='+g.params.bevelRadius+'；width='+g.params.width+'，height='+g.params.height+'，depth='+g.params.depth+'；允许上限='+Math.min(g.params.width,g.params.height,g.params.depth)/2+'。仅缩小bevelRadius，薄屏可设为0，勿改变设备尺寸'));
   if(g.type === 'roundedPlate') {
     const {width,depth,cornerRadius,holeRadius=0} = g.params;
     if(cornerRadius > Math.min(width,depth)/2) errs.push(new Error('圆角半径不能超过短边一半'));
@@ -285,6 +287,7 @@ export function validateNode(node: SceneNode): Error[] {
   }
   for(const key of ['assemblyName','zone','label','planKey'] as const)if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key]!.length>200))errs.push(new Error('场景标注或分组名称无效'));
   if(node.modelStructure){const s=node.modelStructure;if(typeof s.blueprintKey!=='string'||!s.blueprintKey.trim()||s.blueprintKey.length>80||!Array.isArray(s.featureKeys)||s.featureKeys.length>16||new Set(s.featureKeys).size!==s.featureKeys.length||s.featureKeys.some(k=>typeof k!=='string'||!k.trim()||k.length>80))errs.push(new Error('单体结构关联元数据无效'));if(s.localTransform){errs.push(...validateVec3(s.localTransform.position,'结构局部位置'),...validateVec3(s.localTransform.scale,'结构局部缩放'),...validateQuaternion(s.localTransform.rotationQuaternion,'结构局部旋转'));if(Array.isArray(s.localTransform.scale)&&s.localTransform.scale.some(n=>n<=0))errs.push(new Error('结构局部缩放必须为正'));}if(s.blueprint){try{validateBlueprints([s.blueprint]);if(s.blueprint.key!==s.blueprintKey||s.featureKeys.some(k=>!s.blueprint!.features.some(f=>f.key===k)))throw Error('结构方案引用不匹配');}catch(e){errs.push(e instanceof Error?e:new Error('结构方案无效'));}}}
+  if(node.poseRig){try{poseRigSchema(node.poseRig);}catch(e){errs.push(e instanceof Error?e:new Error('关节记录无效'));}}
   if(node.modelAsset&&(!isValidId(node.modelAsset.id)||!isValidId(node.modelAsset.instanceId)||(node.modelAsset.sourceNodeId!==undefined&&!isValidId(node.modelAsset.sourceNodeId))||!Number.isSafeInteger(node.modelAsset.version)||node.modelAsset.version<1))errs.push(new Error('模型资产来源标识或版本无效'));
   if(node.connection){const c=node.connection;if(!isValidId(c.targetId)||c.targetId===node.id||validateVec3(c.sourcePoint,'连接源点').length||validateVec3(c.targetPoint,'连接目标点').length||!Number.isFinite(c.maxDistance)||c.maxDistance<=0||c.maxDistance>10||typeof c.purpose!=='string'||!c.purpose.trim()||c.purpose.length>160)errs.push(new Error('连接关系无效'));}
   if(node.sceneRole!==undefined&&!SCENE_ROLES.includes(node.sceneRole))errs.push(new Error('场景角色无效'));

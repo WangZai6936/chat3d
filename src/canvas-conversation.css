@@ -42,3 +42,7 @@
 .canvas-studio.editor-mode .canvas-selection-summary{top:76px;bottom:auto}
 .scope-disclosure{flex-shrink:0}.scope-disclosure>summary{margin:0 16px 8px;font-size:12px;color:var(--gray-11);cursor:pointer}
 @media(max-width:720px){.canvas-studio.editor-mode .canvas-selection-summary{top:auto;bottom:62%}}
+/* The action remains a stop square during a run; draft text gets its own queue action. */
+.chat-composer .composer-send.is-running{background:var(--blue-9);color:white}
+.chat-composer .composer-send.is-running svg{width:15px;height:15px}
+.composer-queue-row>button{flex-shrink:0}
