@@ -4,3 +4,9 @@ dist
 .env*
 *.local
 src-tauri/target
+
+dist-team
+team-data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
