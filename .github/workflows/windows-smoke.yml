@@ -80,24 +80,35 @@ jobs:
           $ErrorActionPreference = 'Stop'
           npm run build:team
           if ($LASTEXITCODE -ne 0) { throw 'Team validator build failed' }
+          $env:CHAT3D_TEAM_SMOKE_PORT = '1435'
+          $env:CHAT3D_TEAM_SMOKE_URL = 'http://127.0.0.1'
           $env:CHAT3D_TEAM_SMOKE_DIR = Join-Path $env:RUNNER_TEMP ('chat3d-team-' + [guid]::NewGuid())
           New-Item $env:CHAT3D_TEAM_SMOKE_DIR -ItemType Directory -Force | Out-Null
           $fixture = Start-Process node -ArgumentList 'tests/team-smoke-server.mjs' -NoNewWindow -PassThru -RedirectStandardOutput 'windows-smoke-results/team-server.log' -RedirectStandardError 'windows-smoke-results/team-server-error.log'
           "CHAT3D_TEAM_SMOKE_PID=$($fixture.Id)" >> $env:GITHUB_ENV
           Start-Sleep -Seconds 3
           $fixture.Refresh()
-          if ($fixture.HasExited) { throw 'Team fixture failed to start' }
+          if ($fixture.HasExited) { Get-Content windows-smoke-results/team-server-error.log; throw 'Team fixture failed to start' }
+          # Use HTTP.sys to share the runner's standard port with its IIS service.
+          # No URL ACL, port exclusion, certificate trust, or app permission changes.
+          $gateway = Start-Process pwsh -ArgumentList '-NoProfile -File tests/team-smoke-proxy.ps1' -NoNewWindow -PassThru -RedirectStandardOutput 'windows-smoke-results/team-gateway.log' -RedirectStandardError 'windows-smoke-results/team-gateway-error.log'
+          "CHAT3D_TEAM_GATEWAY_PID=$($gateway.Id)" >> $env:GITHUB_ENV
           try {
+            Start-Sleep -Seconds 3
+            $gateway.Refresh()
+            if ($gateway.HasExited) { Get-Content windows-smoke-results/team-gateway-error.log; throw 'Team gateway failed to start' }
             & ./tests/windows-ui-smoke.ps1
             if ($LASTEXITCODE -ne 0) { throw 'Installed UI smoke failed' }
           } finally {
             Stop-Process -Id $fixture.Id -ErrorAction SilentlyContinue
+            Stop-Process -Id $gateway.Id -ErrorAction SilentlyContinue
           }
       - name: Stop isolated team sharing fixture
         if: always()
         shell: pwsh
         run: |
           if ($env:CHAT3D_TEAM_SMOKE_PID) { Stop-Process -Id $env:CHAT3D_TEAM_SMOKE_PID -ErrorAction SilentlyContinue }
+          if ($env:CHAT3D_TEAM_GATEWAY_PID) { Stop-Process -Id $env:CHAT3D_TEAM_GATEWAY_PID -ErrorAction SilentlyContinue }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

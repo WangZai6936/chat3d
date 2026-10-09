@@ -1,4 +1,5 @@
 $ErrorActionPreference = 'Stop'
+$teamBase = if($env:CHAT3D_TEAM_SMOKE_URL){$env:CHAT3D_TEAM_SMOKE_URL}else{'http://127.0.0.1'}
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Windows.Forms
@@ -54,11 +55,11 @@ function Dump-Controls($name) {
 }
 try {
  # Prove the isolated server is reachable before testing the installed UI.
- $fixtureLogin=Invoke-RestMethod -Uri 'http://127.0.0.1:1435/api/team/login' -Method Post -ContentType 'application/json' -Body (@{name='smoke-bob';password='isolated-smoke-password-b'} | ConvertTo-Json)
+ $fixtureLogin=Invoke-RestMethod -Uri ($teamBase + '/api/team/login') -Method Post -ContentType 'application/json' -Body (@{name='smoke-bob';password='isolated-smoke-password-b'} | ConvertTo-Json)
  $fixtureHeaders=@{Authorization=('Bearer '+$fixtureLogin.token)}
- $fixtureRows=Invoke-RestMethod -Uri 'http://127.0.0.1:1435/api/team/items?kind=asset' -Headers $fixtureHeaders
+ $fixtureRows=Invoke-RestMethod -Uri ($teamBase + '/api/team/items?kind=asset') -Headers $fixtureHeaders
  if(@($fixtureRows | Where-Object name -eq 'NativeTestBox').Count -ne 1){throw 'Isolated team fixture asset missing'}
- Invoke-RestMethod -Uri 'http://127.0.0.1:1435/api/team/logout' -Method Post -ContentType 'application/json' -Headers $fixtureHeaders -Body '{}' | Out-Null
+ Invoke-RestMethod -Uri ($teamBase + '/api/team/logout') -Method Post -ContentType 'application/json' -Headers $fixtureHeaders -Body '{}' | Out-Null
  Write-Host 'Isolated server authentication and asset readiness verified'
  $app=Start-Process $env:CHAT3D_INSTALLED_EXE -PassThru
  for($i=0;$i -lt 30;$i++) { $app.Refresh(); if($app.MainWindowHandle -ne 0){break};Start-Sleep -Seconds 1 }
@@ -73,7 +74,7 @@ try {
  Click-Control '资产库';Find-Control '新建资产' | Out-Null;Shot 'ui-library'
  $checks.Add(@{name='asset library opens';pass=$true})
  Click-Control '打开团队资产库'
- Set-Input '团队服务地址' 'http://127.0.0.1:1435'
+ Set-Input '团队服务地址' $teamBase
  Set-Input '团队账号' 'smoke-bob'
  Set-Input '团队密码' 'isolated-smoke-password-b'
  Click-Control '登录团队'
