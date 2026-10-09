@@ -14,15 +14,15 @@ jobs:
         with:
           github-token: ${{ github.token }}
           repository: WangZai6936/chat3d
-          run-id: 37883893375
-          name: windows-installed-recheck-d48d7bd-37883893375
+          run-id: 37884617451
+          name: windows-installed-recheck-d48d7bd-37884617451
           path: evidence
       - name: Print synthetic test diagnostics and screenshot
         run: |
           python3 - <<'PY'
           import pathlib,base64
           root=pathlib.Path('evidence')
-          for name in ['ui-result.json','ui-failure-controls.json','team-server.log','team-server-error.log','installation.json']:
+          for name in ['ui-result.json','ui-failure-controls.json','team-server.log','team-server-error.log','team-gateway.log','team-gateway-error.log','installation.json']:
               if (root/name).exists(): print('\nFILE '+name+'\n'+(root/name).read_text(encoding='utf-8-sig'))
           print('SCREENSHOT_BASE64_START')
           picture = root/('ui-failure.png' if (root/'ui-failure.png').exists() else 'ui-team-local-copy.png')
