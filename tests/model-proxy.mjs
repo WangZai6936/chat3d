@@ -3,6 +3,7 @@ import {createServer as httpServer} from 'node:http';
 import {createServer} from 'vite';
 import {handleModelProxy,MAX_BODY} from '../server/model-proxy.mjs';
 import {modelProxyMiddleware} from '../server/node-adapter.mjs';
+import './proxy-diagnostics.mjs';
 let passed=0;const test=async(name,fn)=>{await fn();console.log('PASS',name);passed++;};
 const root='https://discovery-api.intern-ai.org.cn/v1';
 const request=(path='/models',patch={})=>new Request('https://app.test/api/model'+path,{method:path==='/models'?'GET':'POST',headers:{authorization:'Bearer test-only',origin:'https://app.test','x-chat3d-upstream':root,...(path==='/models'?{}:{'content-type':'application/json'}),...patch.headers},...(path==='/models'?{}:{body:'{"model":"test"}'}),...Object.fromEntries(Object.entries(patch).filter(([k])=>k!=='headers'))});
