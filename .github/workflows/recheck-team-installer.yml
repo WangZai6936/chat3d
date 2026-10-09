@@ -2,6 +2,7 @@ name: Verify existing 0.2.0 installer with live fixture
 on:
   push:
     branches: [diagnostics/team-smoke-evidence]
+    paths: [.github/workflows/recheck-team-installer.yml, tests/windows-ui-smoke.ps1, tests/team-smoke-server.mjs]
 permissions:
   contents: read
   actions: read

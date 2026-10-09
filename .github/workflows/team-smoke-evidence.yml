@@ -1,6 +1,8 @@
 name: Inspect isolated team smoke evidence
 on:
-  workflow_dispatch:
+  push:
+    branches: [diagnostics/team-smoke-evidence]
+    paths: [.github/workflows/team-smoke-evidence.yml]
 permissions:
   contents: read
   actions: read
@@ -12,8 +14,8 @@ jobs:
         with:
           github-token: ${{ github.token }}
           repository: WangZai6936/chat3d
-          run-id: 37882179103
-          name: windows-installed-smoke-d48d7bda8da8330e37a3f5035d0eafb79b5a3431
+          run-id: 37883893375
+          name: windows-installed-recheck-d48d7bd-37883893375
           path: evidence
       - name: Print synthetic test diagnostics and screenshot
         run: |
@@ -24,6 +26,6 @@ jobs:
               if (root/name).exists(): print('\nFILE '+name+'\n'+(root/name).read_text(encoding='utf-8-sig'))
           print('SCREENSHOT_BASE64_START')
           picture = root/('ui-failure.png' if (root/'ui-failure.png').exists() else 'ui-team-local-copy.png')
-          print(base64.b64encode(picture.read_bytes()).decode())
+          if picture.exists(): print(base64.b64encode(picture.read_bytes()).decode())
           print('SCREENSHOT_BASE64_END')
           PY
