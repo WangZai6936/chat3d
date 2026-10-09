@@ -2,7 +2,7 @@ name: Verify existing 0.2.0 installer with live fixture
 on:
   push:
     branches: [diagnostics/team-smoke-evidence]
-    paths: [.github/workflows/recheck-team-installer.yml, tests/windows-ui-smoke.ps1, tests/team-smoke-server.mjs]
+    paths: [.github/workflows/recheck-team-installer.yml, tests/windows-ui-smoke.ps1, tests/team-smoke-server.mjs, tests/team-smoke-proxy.ps1]
 permissions:
   contents: read
   actions: read
@@ -22,6 +22,7 @@ jobs:
         run: |
           Copy-Item verification-harness/tests/windows-ui-smoke.ps1 tests/windows-ui-smoke.ps1 -Force
           Copy-Item verification-harness/tests/team-smoke-server.mjs tests/team-smoke-server.mjs -Force
+          Copy-Item verification-harness/tests/team-smoke-proxy.ps1 tests/team-smoke-proxy.ps1 -Force
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -100,7 +101,7 @@ jobs:
           netsh http show servicestate
           netsh interface ipv4 show excludedportrange protocol=tcp
           Get-Service W3SVC,WAS -ErrorAction SilentlyContinue | Format-List Name,Status
-          $env:CHAT3D_TEAM_SMOKE_PORT = '80'
+          $env:CHAT3D_TEAM_SMOKE_PORT = '1435'
           $env:CHAT3D_TEAM_SMOKE_URL = 'http://127.0.0.1'
           $env:CHAT3D_TEAM_SMOKE_DIR = Join-Path $env:RUNNER_TEMP ('chat3d-team-' + [guid]::NewGuid())
           New-Item $env:CHAT3D_TEAM_SMOKE_DIR -ItemType Directory -Force | Out-Null
@@ -109,11 +110,16 @@ jobs:
           Start-Sleep -Seconds 3
           $fixture.Refresh()
           if ($fixture.HasExited) { Get-Content windows-smoke-results/team-server-error.log; throw 'Team fixture failed to start' }
+          $gateway = Start-Process pwsh -ArgumentList '-NoProfile -File tests/team-smoke-proxy.ps1' -NoNewWindow -PassThru -RedirectStandardOutput 'windows-smoke-results/team-gateway.log' -RedirectStandardError 'windows-smoke-results/team-gateway-error.log'
           try {
+            Start-Sleep -Seconds 3
+            $gateway.Refresh()
+            if ($gateway.HasExited) { Get-Content windows-smoke-results/team-gateway-error.log; throw 'Team gateway failed to start' }
             & ./tests/windows-ui-smoke.ps1
             if ($LASTEXITCODE -ne 0) { throw 'Installed UI smoke failed' }
           } finally {
             Stop-Process -Id $fixture.Id -ErrorAction SilentlyContinue
+            Stop-Process -Id $gateway.Id -ErrorAction SilentlyContinue
           }
       - name: Stop isolated team sharing fixture
         if: always()
