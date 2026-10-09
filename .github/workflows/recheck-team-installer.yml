@@ -13,6 +13,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: d48d7bda8da8330e37a3f5035d0eafb79b5a3431
+      - uses: actions/checkout@v4
+        with:
+          path: verification-harness
+      - name: Use the versioned verification harness without changing the installed binary
+        shell: pwsh
+        run: |
+          Copy-Item verification-harness/tests/windows-ui-smoke.ps1 tests/windows-ui-smoke.ps1 -Force
+          Copy-Item verification-harness/tests/team-smoke-server.mjs tests/team-smoke-server.mjs -Force
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
@@ -87,6 +95,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           npm run build:team
           if ($LASTEXITCODE -ne 0) { throw 'Team validator build failed' }
+          $env:CHAT3D_TEAM_SMOKE_PORT = '80'
+          $env:CHAT3D_TEAM_SMOKE_URL = 'http://127.0.0.1'
           $env:CHAT3D_TEAM_SMOKE_DIR = Join-Path $env:RUNNER_TEMP ('chat3d-team-' + [guid]::NewGuid())
           New-Item $env:CHAT3D_TEAM_SMOKE_DIR -ItemType Directory -Force | Out-Null
           $fixture = Start-Process node -ArgumentList 'tests/team-smoke-server.mjs' -NoNewWindow -PassThru -RedirectStandardOutput 'windows-smoke-results/team-server.log' -RedirectStandardError 'windows-smoke-results/team-server-error.log'
