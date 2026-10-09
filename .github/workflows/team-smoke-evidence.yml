@@ -14,8 +14,8 @@ jobs:
         with:
           github-token: ${{ github.token }}
           repository: WangZai6936/chat3d
-          run-id: 37884617451
-          name: windows-installed-recheck-d48d7bd-37884617451
+          run-id: 37884867035
+          name: windows-installed-smoke-4c16cad2bbfc15c54b9e4e00da65b472bf6196eb
           path: evidence
       - name: Print synthetic test diagnostics and screenshot
         run: |
