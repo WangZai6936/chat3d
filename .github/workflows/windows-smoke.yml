@@ -74,7 +74,7 @@ jobs:
             $graphics.Dispose(); $bitmap.Dispose()
           } catch { $_ | Out-String | Set-Content windows-smoke-results/screenshot-error.txt }
           if (!$app.HasExited) { $app.CloseMainWindow() | Out-Null; Start-Sleep -Seconds 3; if (!$app.HasExited) { $app.Kill() } }
-      - name: Start isolated team sharing fixture
+      - name: Exercise installed app with a live isolated team service
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -82,14 +82,17 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Team validator build failed' }
           $env:CHAT3D_TEAM_SMOKE_DIR = Join-Path $env:RUNNER_TEMP ('chat3d-team-' + [guid]::NewGuid())
           New-Item $env:CHAT3D_TEAM_SMOKE_DIR -ItemType Directory -Force | Out-Null
-          $fixture = Start-Process node -ArgumentList 'tests/team-smoke-server.mjs' -PassThru -RedirectStandardOutput 'windows-smoke-results/team-server.log' -RedirectStandardError 'windows-smoke-results/team-server-error.log'
+          $fixture = Start-Process node -ArgumentList 'tests/team-smoke-server.mjs' -NoNewWindow -PassThru -RedirectStandardOutput 'windows-smoke-results/team-server.log' -RedirectStandardError 'windows-smoke-results/team-server-error.log'
           "CHAT3D_TEAM_SMOKE_PID=$($fixture.Id)" >> $env:GITHUB_ENV
           Start-Sleep -Seconds 3
           $fixture.Refresh()
           if ($fixture.HasExited) { throw 'Team fixture failed to start' }
-      - name: Exercise installed app through Windows accessibility and real clicks
-        shell: pwsh
-        run: ./tests/windows-ui-smoke.ps1
+          try {
+            & ./tests/windows-ui-smoke.ps1
+            if ($LASTEXITCODE -ne 0) { throw 'Installed UI smoke failed' }
+          } finally {
+            Stop-Process -Id $fixture.Id -ErrorAction SilentlyContinue
+          }
       - name: Stop isolated team sharing fixture
         if: always()
         shell: pwsh

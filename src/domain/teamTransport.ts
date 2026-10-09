@@ -1,6 +1,5 @@
 import type {fetch as nativeFetch} from '@tauri-apps/plugin-http';
-// Match the existing desktop HTTP boundary. Browser fetch cannot reliably reach
-// configured team endpoints from the WebView origin (observed in installed CI).
+// Match the existing desktop HTTP boundary for configured team endpoints.
 // Native requests retain the existing Tauri capability scope and TLS checks.
 export function createTeamTransport(
  desktop=()=>Boolean((globalThis as unknown as {__TAURI_INTERNALS__?:unknown}).__TAURI_INTERNALS__),
