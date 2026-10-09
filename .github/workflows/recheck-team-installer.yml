@@ -96,6 +96,10 @@ jobs:
           $ErrorActionPreference = 'Stop'
           npm run build:team
           if ($LASTEXITCODE -ne 0) { throw 'Team validator build failed' }
+          Get-NetTCPConnection -LocalPort 80 -ErrorAction SilentlyContinue | Format-List *
+          netsh http show servicestate
+          netsh interface ipv4 show excludedportrange protocol=tcp
+          Get-Service W3SVC,WAS -ErrorAction SilentlyContinue | Format-List Name,Status
           $env:CHAT3D_TEAM_SMOKE_PORT = '80'
           $env:CHAT3D_TEAM_SMOKE_URL = 'http://127.0.0.1'
           $env:CHAT3D_TEAM_SMOKE_DIR = Join-Path $env:RUNNER_TEMP ('chat3d-team-' + [guid]::NewGuid())
@@ -104,7 +108,7 @@ jobs:
           "CHAT3D_TEAM_SMOKE_PID=$($fixture.Id)" >> $env:GITHUB_ENV
           Start-Sleep -Seconds 3
           $fixture.Refresh()
-          if ($fixture.HasExited) { throw 'Team fixture failed to start' }
+          if ($fixture.HasExited) { Get-Content windows-smoke-results/team-server-error.log; throw 'Team fixture failed to start' }
           try {
             & ./tests/windows-ui-smoke.ps1
             if ($LASTEXITCODE -ne 0) { throw 'Installed UI smoke failed' }
