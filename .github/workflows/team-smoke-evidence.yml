@@ -1,7 +1,6 @@
 name: Inspect isolated team smoke evidence
 on:
-  push:
-    branches: [diagnostics/team-smoke-evidence]
+  workflow_dispatch:
 permissions:
   contents: read
   actions: read
@@ -13,8 +12,8 @@ jobs:
         with:
           github-token: ${{ github.token }}
           repository: WangZai6936/chat3d
-          run-id: 37880669235
-          name: windows-installed-smoke-525e392bc8fbd45b1e9229d7648c9a944193fb39
+          run-id: 37882179103
+          name: windows-installed-smoke-d48d7bda8da8330e37a3f5035d0eafb79b5a3431
           path: evidence
       - name: Print synthetic test diagnostics and screenshot
         run: |
@@ -22,8 +21,9 @@ jobs:
           import pathlib,base64
           root=pathlib.Path('evidence')
           for name in ['ui-result.json','ui-failure-controls.json','team-server.log','team-server-error.log','installation.json']:
-              print('\nFILE '+name+'\n'+(root/name).read_text(encoding='utf-8-sig'))
+              if (root/name).exists(): print('\nFILE '+name+'\n'+(root/name).read_text(encoding='utf-8-sig'))
           print('SCREENSHOT_BASE64_START')
-          print(base64.b64encode((root/'ui-failure.png').read_bytes()).decode())
+          picture = root/('ui-failure.png' if (root/'ui-failure.png').exists() else 'ui-team-local-copy.png')
+          print(base64.b64encode(picture.read_bytes()).decode())
           print('SCREENSHOT_BASE64_END')
           PY
