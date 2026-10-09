@@ -28,7 +28,7 @@ jobs:
           if ($source.repository -cne $env:GITHUB_REPOSITORY -or $source.commit -cne $checkedOut) { throw 'Installer source commit or repository mismatch.' }
           if ($source.build_run_id -ne $env:GITHUB_RUN_ID) { throw 'Installer belongs to another workflow run.' }
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($version -ne '0.1.3' -or $source.version -ne $version) { throw 'Expected the 0.1.3 installer.' }
+          if ($version -ne '0.2.0' -or $source.version -ne $version) { throw 'Expected the 0.2.0 installer.' }
           if ($source.target -ne 'x86_64-pc-windows-msvc') { throw 'Installer target mismatch.' }
           $installers = @(Get-ChildItem installer-artifact -Filter '*.exe')
           if ($installers.Count -ne 1) { throw 'Expected exactly one installer.' }
@@ -47,7 +47,7 @@ jobs:
           $app = Get-ChildItem $destination -Recurse -Filter '*.exe' | Where-Object { $_.Name -ieq 'chat3d.exe' } | Select-Object -First 1
           if (!$app) { throw 'Installed executable missing' }
           $installedVersion = $app.VersionInfo.ProductVersion
-          if ($installedVersion -notmatch '^0\.1\.3(?:\.0)?$') { throw "Installed executable version mismatch: $installedVersion" }
+          if ($installedVersion -notmatch '^0\.2\.0(?:\.0)?$') { throw "Installed executable version mismatch: $installedVersion" }
           @{ repository=$env:GITHUB_REPOSITORY; commit=$checkedOut; buildRun=$env:GITHUB_RUN_ID; version=$version; installer=$exe.Name; installerSha256=$actual; installExitCode=$p.ExitCode; installedVersion=$installedVersion; installedExeSha256=(Get-FileHash $app.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json | Set-Content windows-smoke-results/installation.json
           "CHAT3D_INSTALLED_EXE=$($app.FullName)" >> $env:GITHUB_ENV
       - name: Install locked JavaScript test dependencies
@@ -74,9 +74,27 @@ jobs:
             $graphics.Dispose(); $bitmap.Dispose()
           } catch { $_ | Out-String | Set-Content windows-smoke-results/screenshot-error.txt }
           if (!$app.HasExited) { $app.CloseMainWindow() | Out-Null; Start-Sleep -Seconds 3; if (!$app.HasExited) { $app.Kill() } }
+      - name: Start isolated team sharing fixture
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm run build:team
+          if ($LASTEXITCODE -ne 0) { throw 'Team validator build failed' }
+          $env:CHAT3D_TEAM_SMOKE_DIR = Join-Path $env:RUNNER_TEMP ('chat3d-team-' + [guid]::NewGuid())
+          New-Item $env:CHAT3D_TEAM_SMOKE_DIR -ItemType Directory -Force | Out-Null
+          $fixture = Start-Process node -ArgumentList 'tests/team-smoke-server.mjs' -PassThru -RedirectStandardOutput 'windows-smoke-results/team-server.log' -RedirectStandardError 'windows-smoke-results/team-server-error.log'
+          "CHAT3D_TEAM_SMOKE_PID=$($fixture.Id)" >> $env:GITHUB_ENV
+          Start-Sleep -Seconds 3
+          $fixture.Refresh()
+          if ($fixture.HasExited) { throw 'Team fixture failed to start' }
       - name: Exercise installed app through Windows accessibility and real clicks
         shell: pwsh
         run: ./tests/windows-ui-smoke.ps1
+      - name: Stop isolated team sharing fixture
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:CHAT3D_TEAM_SMOKE_PID) { Stop-Process -Id $env:CHAT3D_TEAM_SMOKE_PID -ErrorAction SilentlyContinue }
       - uses: actions/upload-artifact@v4
         if: always()
         with:

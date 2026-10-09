@@ -65,6 +65,21 @@ try {
  $checks.Add(@{name='installed app home renders with accessible navigation';pass=$true})
  Click-Control '资产库';Find-Control '新建资产' | Out-Null;Shot 'ui-library'
  $checks.Add(@{name='asset library opens';pass=$true})
+ Click-Control '打开团队资产库'
+ Set-Input '团队服务地址' 'http://127.0.0.1:1435'
+ Set-Input '团队账号' 'smoke-bob'
+ Set-Input '团队密码' 'isolated-smoke-password-b'
+ Click-Control '登录团队'
+ Click-Control '预览 NativeTestBox'
+ Find-Control '复制到本地' | Out-Null
+ Shot 'ui-team-preview'
+ Click-Control '复制到本地'
+ Find-Control '已复制为独立本地副本；重新打开本地库即可查看。' | Out-Null
+ Click-Control '收起团队库'
+ Find-Control '查看资产 NativeTestBox 副本' | Out-Null
+ Shot 'ui-team-local-copy'
+ $checks.Add(@{name='installed app member B logs into isolated server, previews member A asset and copies it into local library';pass=$true})
+
  Click-Control '新建资产';Find-Control '导出与更多' | Out-Null;Shot 'ui-workbench'
  $checks.Add(@{name='new asset opens workbench';pass=$true})
  Click-Control '导出与更多';Shot 'ui-export-menu';Dump-Controls 'ui-export-controls';Click-Control '备份与恢复';Shot 'ui-after-menu-selection';Find-Control '下载工作台备份' | Out-Null
