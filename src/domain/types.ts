@@ -1,3 +1,4 @@
+import {poseRigSchema,type PoseRig} from './poseRig';
 import {validateBlueprints,type ObjectBlueprint} from './objectBlueprint';
 import {validateProfile,profileCornerLimit} from './profileValidation';
 import {validateTextureMaps,validateSurface,type TextureMaps,type SurfaceDetail} from './textures';
@@ -105,6 +106,7 @@ export type SceneRole=typeof SCENE_ROLES[number];
 export type SceneNodeKind = 'primitive' | 'asset' | 'group';
 
 export interface SceneNode {
+  poseRig?:PoseRig;
   modelStructure?:{blueprintKey:string;featureKeys:string[];localTransform?:Transform;blueprint?:ObjectBlueprint};
   modelAsset?:{id:string;version:number;instanceId:string;sourceNodeId?:string};
   connection?:Connection;
@@ -233,7 +235,7 @@ export function validateGeometry(g: Geometry): Error[] {
 
   if(g.type==='frame' && g.params.thickness>=Math.min(g.params.width,g.params.height)/2)errs.push(new Error('边框厚度必须小于宽高的一半，保留真实开口'));
   if(g.type==='tube' && g.params.innerRadius>=g.params.outerRadius)errs.push(new Error('管内半径必须小于外半径'));
-  if(g.type==='box' && g.params.bevelRadius!==undefined && g.params.bevelRadius>Math.min(g.params.width,g.params.height,g.params.depth)/2)errs.push(new Error('倒角半径不能超过最短边一半'));
+  if(g.type==='box' && g.params.bevelRadius!==undefined && g.params.bevelRadius>Math.min(g.params.width,g.params.height,g.params.depth)/2)errs.push(new Error('倒角半径不能超过最短边一半：geometry.params.bevelRadius='+g.params.bevelRadius+'；width='+g.params.width+'，height='+g.params.height+'，depth='+g.params.depth+'；允许上限='+Math.min(g.params.width,g.params.height,g.params.depth)/2+'。仅缩小bevelRadius，薄屏可设为0，勿改变设备尺寸'));
   if(g.type === 'roundedPlate') {
     const {width,depth,cornerRadius,holeRadius=0} = g.params;
     if(cornerRadius > Math.min(width,depth)/2) errs.push(new Error('圆角半径不能超过短边一半'));
@@ -285,6 +287,7 @@ export function validateNode(node: SceneNode): Error[] {
   }
   for(const key of ['assemblyName','zone','label','planKey'] as const)if(node[key]!==undefined&&(typeof node[key]!=='string'||node[key]!.length>200))errs.push(new Error('场景标注或分组名称无效'));
   if(node.modelStructure){const s=node.modelStructure;if(typeof s.blueprintKey!=='string'||!s.blueprintKey.trim()||s.blueprintKey.length>80||!Array.isArray(s.featureKeys)||s.featureKeys.length>16||new Set(s.featureKeys).size!==s.featureKeys.length||s.featureKeys.some(k=>typeof k!=='string'||!k.trim()||k.length>80))errs.push(new Error('单体结构关联元数据无效'));if(s.localTransform){errs.push(...validateVec3(s.localTransform.position,'结构局部位置'),...validateVec3(s.localTransform.scale,'结构局部缩放'),...validateQuaternion(s.localTransform.rotationQuaternion,'结构局部旋转'));if(Array.isArray(s.localTransform.scale)&&s.localTransform.scale.some(n=>n<=0))errs.push(new Error('结构局部缩放必须为正'));}if(s.blueprint){try{validateBlueprints([s.blueprint]);if(s.blueprint.key!==s.blueprintKey||s.featureKeys.some(k=>!s.blueprint!.features.some(f=>f.key===k)))throw Error('结构方案引用不匹配');}catch(e){errs.push(e instanceof Error?e:new Error('结构方案无效'));}}}
+  if(node.poseRig){try{poseRigSchema(node.poseRig);}catch(e){errs.push(e instanceof Error?e:new Error('关节记录无效'));}}
   if(node.modelAsset&&(!isValidId(node.modelAsset.id)||!isValidId(node.modelAsset.instanceId)||(node.modelAsset.sourceNodeId!==undefined&&!isValidId(node.modelAsset.sourceNodeId))||!Number.isSafeInteger(node.modelAsset.version)||node.modelAsset.version<1))errs.push(new Error('模型资产来源标识或版本无效'));
   if(node.connection){const c=node.connection;if(!isValidId(c.targetId)||c.targetId===node.id||validateVec3(c.sourcePoint,'连接源点').length||validateVec3(c.targetPoint,'连接目标点').length||!Number.isFinite(c.maxDistance)||c.maxDistance<=0||c.maxDistance>10||typeof c.purpose!=='string'||!c.purpose.trim()||c.purpose.length>160)errs.push(new Error('连接关系无效'));}
   if(node.sceneRole!==undefined&&!SCENE_ROLES.includes(node.sceneRole))errs.push(new Error('场景角色无效'));
@@ -316,6 +319,8 @@ export function validateDocument(doc: SceneDocument): Error[] {
   if (!isFiniteNumber(doc.revision) || doc.revision < 0) errs.push(new Error('revision 非法'));
   if((doc.nodes??[]).reduce((n,x)=>n+(x.geometry?.type==='mesh'?x.geometry.params.positions.length:0),0)>1500000)errs.push(new Error('项目网格总顶点数超过50万预算'));
   if((doc.materials??[]).reduce((sum,m)=>sum+Object.values(m.maps??{}).reduce((n,t)=>n+(t?.dataUrl?.length??0),0),0)>12*1024*1024)errs.push(new Error('项目内嵌贴图总量超过12MB'));
+  const nodesById = new Map((doc.nodes ?? []).map(n => [n.id, n]));
+  const materialsById = new Map((doc.materials ?? []).map(m => [m.id, m]));
   const nodeIds = new Set<string>();
   const materialIds = new Set<string>();
   const assetIds = new Set<string>();
@@ -332,27 +337,27 @@ export function validateDocument(doc: SceneDocument): Error[] {
     if (n.materialId && !materialIds.has(n.materialId)) {
       errs.push(new Error(`节点 ${n.id} 悬空引用材质 ${n.materialId}`));
     }
-    const material=doc.materials.find(m=>m.id===n.materialId);if(n.geometry?.type==='mesh'&&(material?.surface||Object.keys(material?.maps??{}).length)&&!n.geometry.params.uvs)errs.push(new Error(`网格贴图缺少UV：${n.name}`));
+    const material=materialsById.get(n.materialId??'');if(n.geometry?.type==='mesh'&&(material?.surface||Object.keys(material?.maps??{}).length)&&!n.geometry.params.uvs)errs.push(new Error(`网格贴图缺少UV：${n.name}`));
     if (n.assetId && !assetIds.has(n.assetId)) {
       errs.push(new Error(`节点 ${n.id} 悬空引用资产 ${n.assetId}`));
     }
   }
   for(const n of doc.nodes??[])if(n.connection&&!nodeIds.has(n.connection.targetId))errs.push(new Error(`连接目标不存在，请先解除关联：${n.name}`));
-  // 父引用与循环层级
+  // Resolve references once and visit each parent chain once. This remains linear
+  // for flat repeated scenes and deep imported hierarchies, without skipping checks.
+  const checked = new Set<string>();
   for (const n of doc.nodes ?? []) {
     if (n.parentId !== null && !nodeIds.has(n.parentId)) {
       errs.push(new Error(`节点 ${n.id} 悬空引用父节点 ${n.parentId}`));
     }
-    // 循环检测：沿父链上溯，最多 nodes 步
     let cur: string | null = n.id;
     const path = new Set<string>();
-    for (let i = 0; i < (doc.nodes?.length ?? 0) + 1; i++) {
-      if (cur === null) break;
+    while (cur !== null && !checked.has(cur)) {
       if (path.has(cur)) { errs.push(new Error(`检测到循环层级（涉及节点 ${cur}）`)); break; }
       path.add(cur);
-      const node = doc.nodes?.find((x) => x.id === cur);
-      cur = node ? node.parentId : null;
+      cur = nodesById.get(cur)?.parentId ?? null;
     }
+    for (const id of path) checked.add(id);
   }
   errs.push(...validateAnimation(doc.animation,doc.nodes??[]));
   return errs;

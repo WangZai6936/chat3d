@@ -154,6 +154,12 @@ try{
  await test('latest review problems cannot silently disappear from submitted summary',async()=>{const f=fake([[plan,edit,capture],[{...review,args:{...review.args,issues:['背面未还原']}},submit]]);const r=await runModelingAgent(opts(f));assert.match(r.batch.summary,/背面未还原/)});
  await test('clarification makes no scene changes',async()=>{const f=fake(['请提供实际宽度']);const r=await runModelingAgent(opts(f));assert.equal(r.batch.operations.length,0);assert.equal(r.batch.summary,'请提供实际宽度')});
  await test('repeated scene reads stop after four no-progress turns',async()=>{const f=fake(Array(20).fill([{name:'read_scene',args:{}}]));await assert.rejects(()=>runModelingAgent(opts(f)));assert.equal(f.calls,4)});
+ await test('Pi edit_scene rejects manual editSelection alone or mixed with valid commands without budget bypass',async()=>{
+  const base=applyBatch(createInitialDoc(),{operations:[create]}).doc,id=base.nodes[0].id,manual={op:'editSelection',targetIds:[id],change:{kind:'color',value:'#123456'}};
+  for(const operations of [[manual],[{op:'rename',targetId:id,name:'must roll back'},manual]]){
+   const f=fake([[{name:'edit_scene',args:{summary:'manual-only command attempt',operations}}],'不支持该命令']);const r=await runModelingAgent(opts(f,base));assert.deepEqual(r.result.doc,base);assert.equal(r.result.applied.length,0);assert.ok(f.contexts[1].messages.some(m=>m.role==='toolResult'&&m.isError&&JSON.stringify(m.content).includes('editSelection')&&JSON.stringify(m.content).includes('整组拒绝')));
+  }
+ });
  await test('invalid command in group refuses entire group and leaves base untouched',async()=>{const f=fake([[plan,{name:'edit_scene',args:{summary:'invalid',operations:[create,{op:'execute_shell',command:'bad'}]}}],'不支持该命令']);const o=opts(f);const r=await runModelingAgent(o);assert.equal(r.result.doc.nodes.length,0);assert.ok(f.contexts[1].messages.some(m=>m.role==='toolResult'&&m.isError))});
  await test('cancellation during capture prevents completion and later draft callbacks',async()=>{const f=fake([[plan,edit,capture],[review,submit]]);const ctrl=new AbortController();let release;const o=opts(f);o.signal=ctrl.signal;o.capture=()=>new Promise(r=>release=r);const promise=runModelingAgent(o);while(!release)await new Promise(r=>setTimeout(r,1));ctrl.abort();release(picture);await assert.rejects(()=>promise,/停止/);assert.equal(o.document.nodes.length,0);assert.equal(f.calls,1)});
  await test('mesh tool routes actual catalogue geometry through scope-checked preview without raw vertices in model context',async()=>{
@@ -164,7 +170,7 @@ try{
  });
  await test('general detail audit closes only after actual latest capture and all six evidenced criteria',async()=>{
  const keys=['silhouette','structure','connections','materials','details','context'];
- const f=fake([[edit,{name:'capture_multiview',args:{views:['front','back']}}],ctx=>{const node=JSON.parse(ctx.messages.find(m=>m.role==='toolResult'&&m.toolName==='edit_scene').content[0].text).scene.nodes[0];return [{name:'audit_model_detail',args:{componentId:node.id,checks:keys.map(criterion=>({criterion,status:'pass',evidence:'测试截图中核对当前对象的形体与表面',nodeIds:[node.id]}))}},review,submit]}]);const result=await runModelingAgent(opts(f));assert.equal(result.activity.detailAcceptance.status,'self_reviewed');assert.equal(result.batch.incomplete,undefined);
+ const f=fake([[edit,{name:'capture_multiview',args:{views:['front','back']}}],ctx=>{const node=JSON.parse(ctx.messages.find(m=>m.role==='toolResult'&&m.toolName==='edit_scene').content[0].text).scene.nodes[0];return [{name:'audit_model_detail',args:{componentId:node.id,checks:keys.map(criterion=>({criterion,status:'pass',evidence:'测试截图中核对当前对象的形体与表面',nodeIds:[node.id]}))}},review,submit]}]);const result=await runModelingAgent(opts(f));assert.equal(result.activity.detailAcceptance.status,'self_reviewed');assert.equal(result.batch.incomplete,true);assert.ok(result.batch.qualityIssues.some(x=>x.includes('参考图尚未拆解')));
  });
  await test('detail audit cannot fabricate pass without a screenshot or same-turn image reading',async()=>{
  const keys=['silhouette','structure','connections','materials','details','context'];const f=fake([[edit],ctx=>{const node=JSON.parse(ctx.messages.find(m=>m.role==='toolResult'&&m.toolName==='edit_scene').content[0].text).scene.nodes[0];return [{name:'audit_model_detail',args:{componentId:node.id,checks:keys.map(criterion=>({criterion,status:'pass',evidence:'企图无截图声称通过的测试',nodeIds:[node.id]}))}},capture]},[review,submit]]);const result=await runModelingAgent(opts(f));assert.equal(result.activity.detailAcceptance.status,'pending');assert.equal(result.batch.incomplete,true);assert.ok(f.contexts.some(c=>c.messages.some(m=>m.role==='toolResult'&&m.isError&&m.toolName==='audit_model_detail')));
@@ -179,7 +185,7 @@ try{
   const multi={name:'capture_multiview',args:{views:['front','back']}};
   const f=fake([[edit,multi],()=>[audit('fail'),{name:'edit_scene',args:{summary:'修正比例',operations:[{op:'setTransform',targetId:d.nodes[0].id,transform:{scale:[1,.8,1]}}]}},audit('pass')],context=>{assert.ok(context.messages.some(m=>m.role==='toolResult'&&m.isError&&JSON.stringify(m.content).includes('近景')));return [multi]},()=>[audit('pass'),review,submit]]);
   const o=opts(f);o.onPreview=x=>d=x;const captures=[];o.capture=async(doc,view)=>{captures.push([doc.revision,view]);return picture};
-  const r=await runModelingAgent(o);assert.equal(r.activity.detailAcceptance.status,'self_reviewed');assert.equal(r.batch.incomplete,undefined);assert.equal(captures.length,4);assert.notEqual(captures[0][0],captures[2][0]);assert.equal(r.result.doc.nodes[0].transform.scale[1],.8);
+  const r=await runModelingAgent(o);assert.equal(r.activity.detailAcceptance.status,'self_reviewed');assert.equal(r.batch.incomplete,true);assert.ok(r.batch.qualityIssues.some(x=>x.includes('参考图尚未拆解')));assert.equal(captures.length,4);assert.notEqual(captures[0][0],captures[2][0]);assert.equal(r.result.doc.nodes[0].transform.scale[1],.8);
  });
  await test('parallel experiment isolates child context, merges once and counts all model usage',async()=>{
   const items=['设备甲','设备乙'].map((name,i)=>({name,brief:'创建一个尺寸准确并且包含真实主体结构的独立测试设备',position:[i*2,0,0]}));
@@ -384,9 +390,30 @@ await test('renderer recovery on the next task restores required capture and lat
  await test('failed automatic capture cannot certify partial images as complete evidence',async()=>{
   const f=fake([[edit,{name:'capture_quality_review',args:{}}]]);const o=opts(f);let frames=0;o.capture=async()=>{if(++frames===2)throw Error('renderer failed');return picture;};const r=await runModelingAgent(o);assert.ok(r.batch.incomplete);assert.notEqual(r.activity.detailAcceptance.status,'self_reviewed');assert.ok(!r.activity.events.some(e=>e.startsWith('视觉检查')));
  });
+ await test('asset and connection tool groups load only when requested without losing core edit and review',async()=>{
+ const f=fake([context=>{const tools=context.messages.find(m=>m.role==='system').toolsAdded;assert.ok(!tools.some(t=>t.name==='add_saved_assets'));assert.ok(!tools.some(t=>t.name==='connect_scene_parts'));assert.ok(tools.some(t=>t.name==='edit_scene'));return [{name:'enable_modeling_tools',args:{group:'assets'}},{name:'enable_modeling_tools',args:{group:'connections'}}];},context=>{const tools=context.messages.find(m=>m.role==='system').toolsAdded;assert.ok(tools.some(t=>t.name==='add_saved_assets'));assert.ok(tools.some(t=>t.name==='connect_scene_parts'));return 'tools loaded';}]);await runModelingAgent(opts(f));
+ });
  await test('request footprint records numeric payload counts and optional tools restore next turn',async()=>{
   const f=fake([context=>{const tools=context.messages.find(m=>m.role==='system').toolsAdded;assert.ok(!tools.some(t=>t.name==='set_surfaces_batch'));return [{name:'enable_modeling_tools',args:{group:'surfaces'}}];},context=>{assert.ok(context.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='set_surfaces_batch'));return '工具已准备';}]);const o=opts(f);const r=await runModelingAgent(o);const times=r.activity.timings.filter(t=>t.kind==='model');assert.equal(times.length,2);assert.ok(times.every(t=>t.requestFootprint.totalSerializedChars>0));assert.ok(times[1].requestFootprint.toolSchemaChars>times[0].requestFootprint.toolSchemaChars);
  });
  await test('unavailable renderer never exposes automatic capture or invents captured evidence',async()=>{const f=fake([context=>{assert.ok(!context.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='capture_quality_review'));return 'no capture';}]);const o=opts(f);o.captureAvailable=()=>false;await runModelingAgent(o);});
+
+ await test('review completion submits after fresh evidence without a separate model round and keeps unknown quality',async()=>{
+ const f=fake([[edit,capture],[{name:'review_model',args:{observations:'已检查主体外形；材质细节尚未验收',issues:[],completion:{summary:'主体已生成，提交待确认',remainingIssues:['材质待验收']}}}]]);const r=await runModelingAgent(opts(f));assert.equal(f.calls,2);assert.equal(r.batch.taskStatus,'submitted');assert.equal(r.batch.incomplete,true);assert.match(r.batch.summary,/材质待验收/);assert.equal(r.activity.detailAcceptance.status,'pending');
+ });
+ await test('repeated unchanged screenshots reuse evidence without rendering or claiming new progress',async()=>{
+ const f=fake([[edit,capture],[capture],[{name:'review_model',args:{observations:'读取之前当前版本的真实画面',issues:[],completion:{summary:'复核后提交',remainingIssues:[]}}}]]);const o=opts(f);let rendered=0;o.capture=async()=>{rendered++;return picture;};const r=await runModelingAgent(o);assert.equal(rendered,1);assert.equal(r.batch.taskStatus,'submitted');assert.ok(f.contexts.some(c=>JSON.stringify(c).includes('相同目标和视角')));
+ });
+ await test('combined review cannot bypass same-turn screenshot evidence requirement',async()=>{
+ const done={name:'review_model',args:{observations:'不能提前判定刚返回的图片',issues:[],completion:{summary:'提前提交',remainingIssues:[]}}};const f=fake([[edit,capture,done],'保留未完成']);const r=await runModelingAgent(opts(f));assert.equal(r.batch.taskStatus,'partial');assert.ok(r.activity.timings.some(t=>t.failed&&t.label==='记录视觉检查'));
+ });
+
+ await test('single visible object component views satisfy whole scene submission but two objects do not',async()=>{
+  for(const multiple of [false,true]){const build={name:'edit_scene',args:{summary:'build',operations:multiple?[create,{...create,tempId:'other',name:'other',transform:{...create.transform,position:[4,0,0]}}]:[create]}};
+   const f=fake([[build],ctx=>{const node=JSON.parse(ctx.messages.find(m=>m.role==='toolResult'&&m.toolName==='edit_scene').content[0].text).scene.nodes[0];return [{name:'capture_multiview',args:{componentId:node.id,views:['front','side']}}];},[{name:'review_model',args:{observations:'核对当前真实图像后提交；质量仍待验收',issues:[],completion:{summary:'完成本次修改',remainingIssues:[]}}}],'保留未完成']);
+   const r=await runModelingAgent(opts(f));assert.equal(r.batch.taskStatus,multiple?'partial':'submitted');if(!multiple){assert.equal(f.calls,3);assert.ok(!r.activity.timings.some(t=>t.failed));}else assert.ok(r.activity.timings.some(t=>t.failed));
+  }
+ });
+ await test('empty scene omits redundant target-detail lookup but restores it after geometry exists',async()=>{const f=fake([ctx=>{assert.ok(!ctx.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='detail_quality_standard'));return [edit];},ctx=>{assert.ok(ctx.messages.find(m=>m.role==='system').toolsAdded.some(t=>t.name==='detail_quality_standard'));return '阶段草稿';}]);await runModelingAgent(opts(f));});
  console.log(`${passed} Pi agent loop checks passed; model and rendering mocked`);
 }finally{await server.close()}

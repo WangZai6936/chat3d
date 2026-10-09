@@ -1,0 +1,2 @@
+/** Chat3D's open C mark, following the selected studio concept. */
+export function BrandMark(){return <svg viewBox="0 0 48 48" fill="none" aria-hidden="true" focusable="false"><path d="M24 3 43 14v8l-10-6-9-5-12 7v13l12 7 9-5 10-6v9L24 47 5 36V14L24 3Z" fill="#548FFF"/><path d="m24 12 11 6-7 4-4-2-7 4v7l7 4 5-3 7 4-12 7-14-8V20l14-8Z" fill="#2D65D1"/><path d="m35 21 9 5v10l-9 5-9-5V26l9-5Z" fill="#EDF6FF"/><path d="m35 21 9 5-9 5-9-5 9-5Z" fill="#FFFFFF"/><path d="M35 31v10l9-5V26l-9 5Z" fill="#C3DDF4"/></svg>}

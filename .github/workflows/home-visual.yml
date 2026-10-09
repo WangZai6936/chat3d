@@ -1,0 +1,30 @@
+name: Home layout visual verification
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/visual/**'
+      - '.github/workflows/home-visual.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  layout:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node node_modules/playwright-core/cli.js install --with-deps chromium
+      - run: node tests/visual/home-browser.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: home-layout-${{ github.sha }}
+          path: home-visual-results/*
+          retention-days: 14

@@ -1,6 +1,7 @@
 import type {WorkspaceSession} from '../workspace';
 export type SessionState='running'|'review'|'draft'|'ready'|'empty';
 export function sessionState(session:WorkspaceSession,liveStatus?:string):SessionState {
+ if(session.snapshot.wasRunning)return 'running';
  if(liveStatus&&['capturing','context','generating','validating','applying'].includes(liveStatus))return 'running';
  if(session.snapshot.pendingBatch)return 'review';
  if(session.snapshot.composerText.trim()||session.snapshot.composerImages.length)return 'draft';

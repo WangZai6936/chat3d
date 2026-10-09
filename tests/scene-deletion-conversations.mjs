@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {indexedDB} from 'fake-indexeddb';
+import {createServer} from 'vite';
+globalThis.indexedDB=indexedDB;
+const requests=[];
+globalThis.fetch=async(url,init)=>new Promise(resolve=>requests.push({url,init,resolve}));
+const server=await createServer({server:{middlewareMode:true},appType:'custom'});
+const wait=async predicate=>{const deadline=Date.now()+15000;while(!predicate()&&Date.now()<deadline)await new Promise(r=>setTimeout(r,20));assert.ok(predicate(),'expected controller state');};
+const reply=(request,operations)=>request.resolve(new Response('data: '+JSON.stringify({choices:[{index:0,delta:{role:'assistant',content:JSON.stringify({summary:'删除指定模型',operations})},finish_reason:null}]})+'\n\ndata: '+JSON.stringify({choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\ndata: [DONE]\n\n',{headers:{'content-type':'text/event-stream','x-chat3d-proxy':'1'}}));
+try{
+ const {createInitialDoc,useEditorStore:ui}=await server.ssrLoadModule('/src/store.ts');
+ const {applyBatch}=await server.ssrLoadModule('/src/domain/commands.ts');
+ const workspace=await server.ssrLoadModule('/src/workspace.ts');
+ const {conversationController}=await server.ssrLoadModule('/src/runtime/conversationController.ts');
+ const assets=await server.ssrLoadModule('/src/domain/modelAssets.ts');
+ const storage=await server.ssrLoadModule('/src/domain/modelAssetStorage.ts');
+ const node={id:'original',parentId:null,name:'box',kind:'primitive',geometry:{type:'box',params:{width:1,height:1,depth:1}},transform:{position:[0,0,0],rotationQuaternion:[0,0,0,1],scale:[1,1,1]},materialId:'mat_gray',visible:true};
+ const source={...createInitialDoc(),nodes:[node]},asset=assets.createModelAsset(source,['original'],{name:'library original',category:'其他'});await storage.saveModelAsset(asset);
+ const imported=applyBatch(createInitialDoc(),{operations:[assets.instantiateAsset(asset,[0,0,0])]}).doc;
+ const config={baseURL:'https://example.test/v1',apiKey:'mock-only',model:'mock',agentMode:'single',stream:true};ui.setState({aiConfig:config});await workspace.initializeWorkspace();workspace.createSession(imported);
+ const a=workspace.useWorkspaceStore.getState().activeId,A=workspace.getSessionEditor(a),controller=conversationController(A),target=A.getState().doc.nodes[0].id;
+ A.getState().select([target]);A.getState().setComposerText('请移除指定模型并保留其余内容');const pending=controller.send();await wait(()=>requests.length===1);assert.equal(A.getState().aiStatus,'generating');
+ workspace.createSession({...createInitialDoc(),nodes:[structuredClone(node)]});const b=workspace.useWorkspaceStore.getState().activeId,B=workspace.getSessionEditor(b);ui.getState().select(['original']);assert.equal(ui.getState().deleteSelection().ok,true);assert.equal(B.getState().doc.nodes.length,0);ui.getState().undo();assert.equal(B.getState().doc.nodes.length,1);
+ reply(requests[0],[{op:'delete',targetId:target,scope:'assembly'}]);await pending;
+ assert.equal(A.getState().doc.nodes.length,1);assert.equal(A.getState().pendingResult.doc.nodes.length,0);assert.equal(ui.getState().doc.projectId,B.getState().doc.projectId);assert.equal(ui.getState().doc.nodes.length,1);assert.equal(ui.getState().pendingResult,null);
+ console.log('PASS delayed AI deletion stays in origin preview while another conversation edits and undoes');
+ controller.commit();assert.equal(A.getState().doc.nodes.length,0);assert.equal(A.getState().selection.length,0);assert.equal(ui.getState().doc.nodes.length,1);assert.equal(B.getState().past.length,0);A.getState().undo();assert.deepEqual(A.getState().doc.nodes,imported.nodes);assert.equal(B.getState().doc.nodes.length,1);A.getState().redo();assert.equal(A.getState().doc.nodes.length,0);
+ console.log('PASS applying deletion and undo / redo affect only the original conversation');
+ assert.deepEqual(await storage.readModelAsset(asset.id,1),asset);assert.equal((await storage.listModelAssets()).length,1);assert.equal((await storage.listModelAssets())[0].version,1);
+ await workspace.flushWorkspace();const stored=await (await server.ssrLoadModule('/src/domain/workspaceStorage.ts')).readWorkspace();assert.equal(stored.sessions.find(s=>s.id===a).snapshot.doc.nodes.length,0);assert.equal(stored.sessions.find(s=>s.id===b).snapshot.doc.nodes.length,1);
+ console.log('PASS autosave persists deleted scene without changing original asset-library version or other scenes');
+ workspace.switchSession(a);A.getState().undo();A.getState().setComposerText('删除那个模型然后保持其他内容');const cancelled=controller.send();await wait(()=>requests.length===2);controller.cancel();workspace.switchSession(b);reply(requests[1],[{op:'delete',targetIds:[target]}]);await cancelled;assert.equal(A.getState().doc.nodes.length,1);assert.equal(A.getState().pendingResult,null);assert.equal(B.getState().doc.nodes.length,1);await workspace.flushWorkspace();
+ console.log('PASS stopped deletion cannot be applied by a late model response after navigation');
+ console.log('4 scene deletion conversation / persistence checks passed (mocked API only)');
+}finally{await server.close()}

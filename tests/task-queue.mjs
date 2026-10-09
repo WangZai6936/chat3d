@@ -1,0 +1,57 @@
+import {readFileSync} from 'node:fs';
+import assert from 'node:assert/strict';
+import {JSDOM} from 'jsdom';
+import {indexedDB} from 'fake-indexeddb';
+import {createServer} from 'vite';
+import React from 'react';
+const dom=new JSDOM('<!doctype html><html><body></body></html>',{url:'https://example.test'});
+for(const key of ['window','document','HTMLElement','HTMLInputElement','Node','Element','DocumentFragment','NodeFilter','MutationObserver','Event','MouseEvent','CustomEvent','localStorage','location'])Object.defineProperty(globalThis,key,{value:dom.window[key],configurable:true});
+Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});globalThis.indexedDB=indexedDB;globalThis.IS_REACT_ACT_ENVIRONMENT=true;globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.ResizeObserver=class{observe(){}unobserve(){}disconnect(){}};globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);globalThis.cancelAnimationFrame=clearTimeout;window.requestAnimationFrame=globalThis.requestAnimationFrame;window.cancelAnimationFrame=clearTimeout;
+const {render,fireEvent,waitFor,act,cleanup}=await import('@testing-library/react');
+const {Theme}=await import('@radix-ui/themes');
+
+const requests=[];
+globalThis.fetch=async(input,init)=>{
+ if(String(input).includes('/models'))return new Response(JSON.stringify({data:[{id:'model-a'},{id:'model-b'}]}),{headers:{'x-chat3d-proxy':'1'}});
+ return new Promise((resolve,reject)=>{requests.push({input,init});init.signal.addEventListener('abort',()=>reject(new DOMException('Stopped','AbortError')),{once:true});});
+};
+const server=await createServer({server:{middlewareMode:true},appType:'custom'});let passed=0;
+const check=name=>{passed++;console.log('PASS '+name);};
+try{
+ const w=await server.ssrLoadModule('/src/workspace.ts'),{useEditorStore:editor}=await server.ssrLoadModule('/src/store.ts');
+ const {TaskQueue,taskSummary}=await server.ssrLoadModule('/src/ui/TaskQueue.tsx');
+ const {ModelPicker}=await server.ssrLoadModule('/src/ui/ModelPicker.tsx');
+ const {QualityPicker}=await server.ssrLoadModule('/src/ui/QualityPicker.tsx');
+ const {conversationController,useConversationRuns}=await server.ssrLoadModule('/src/runtime/conversationController.ts');
+ const cfg={baseURL:'https://example.test/v1',apiKey:'fixture-only',model:'model-a',agentMode:'single',stream:false,useMock:false,generationQuality:'fine'};
+ editor.setState({aiConfig:cfg});await w.initializeWorkspace();
+ w.createSession(undefined,{title:'A 仓库',moduleKind:'scene'});const a=w.useWorkspaceStore.getState().activeId,sa=w.getSessionEditor(a),ca=conversationController(sa);
+ sa.getState().setComposerText('创建仓库');let pa,pb;
+ await act(async()=>{pa=ca.send();});await waitFor(()=>assert.equal(requests.length,1));
+ await act(async()=>{w.createSession(undefined,{title:'B 设备',moduleKind:'asset'});});const b=w.useWorkspaceStore.getState().activeId,sb=w.getSessionEditor(b),cb=conversationController(sb);
+ sb.getState().setComposerText('创建设备');await act(async()=>{pb=cb.send();});await waitFor(()=>assert.equal(requests.length,2));
+ await act(async()=>{sa.getState().setComposerText('A 未发送的补充');sb.getState().setComposerText('B 未发送的补充');});
+ const {HomeTasks}=await server.ssrLoadModule('/src/ui/HomeTasks.tsx');let homeOpened=0,allOpened=0;
+ const home=render(React.createElement(Theme,null,React.createElement(HomeTasks,{items:[],onOpen:()=>homeOpened++,onAll:()=>allOpened++})));
+ assert.equal(home.getByRole('region',{name:/当前任务/}).querySelectorAll('article').length,2);fireEvent.click(home.getByRole('button',{name:'打开首页任务 A 仓库'}));assert.equal(w.useWorkspaceStore.getState().activeId,a);assert.equal(homeOpened,1);assert.equal(sa.getState().composerText,'A 未发送的补充');assert.equal(sb.getState().composerText,'B 未发送的补充');assert.equal(useConversationRuns.getState().activeCount,2);assert.ok(requests.every(r=>!r.init.signal.aborted));fireEvent.click(home.getByRole('button',{name:'查看全部任务'}));assert.equal(allOpened,1);check('home task region switches live runs without losing drafts or stopping work');cleanup();
+ let opened=0,history=0;
+ const ui=render(React.createElement(Theme,null,React.createElement(TaskQueue,{onOpen:()=>opened++,onHistory:()=>history++})));
+ assert.equal(ui.getByRole('button',{name:'任务',exact:true}).textContent,'2');assert.ok(ui.getByRole('button',{name:'任务',exact:true}).querySelector('.global-task-count'));check('task icon shows only running count without task text');
+ ui.rerender(React.createElement(Theme,null,React.createElement(TaskQueue,{onOpen:()=>opened++,onHistory:()=>history++,openRequest:1})));assert.ok(ui.getByRole('dialog',{name:'任务队列'}));fireEvent.click(ui.getByRole('button',{name:'关闭任务队列'}));check('home all-tasks request opens and closes the same global drawer');
+ fireEvent.click(ui.getByRole('button',{name:'任务',exact:true}));assert.ok(ui.getByRole('dialog',{name:'任务队列'}));assert.equal(ui.getByRole('region',{name:'运行中任务'}).querySelectorAll('article').length,2);check('global queue shows both real controller runs and a live count');
+ fireEvent.click(ui.getByRole('button',{name:'打开任务 A 仓库'}));assert.equal(w.useWorkspaceStore.getState().activeId,a);assert.equal(opened,1);assert.equal(sa.getState().composerText,'A 未发送的补充');assert.equal(sb.getState().composerText,'B 未发送的补充');assert.equal(useConversationRuns.getState().activeCount,2);assert.ok(requests.every(r=>!r.init.signal.aborted));check('queue navigation switches conversation without cancelling either run or losing drafts');
+ fireEvent.click(ui.getByRole('button',{name:'任务',exact:true}));fireEvent.change(ui.getByLabelText('搜索任务'),{target:{value:'B 设备'}});assert.equal(ui.queryByRole('button',{name:'打开任务 A 仓库'}),null);assert.ok(ui.getByRole('button',{name:'打开任务 B 设备'}));fireEvent.change(ui.getByLabelText('搜索任务'),{target:{value:''}});check('queue search filters names without changing the active task');
+ fireEvent.click(ui.getByRole('button',{name:'停止任务 B 设备'}));assert.ok(ui.getByRole('alertdialog'));fireEvent.click(ui.getByRole('button',{name:'继续执行'}));assert.equal(useConversationRuns.getState().activeCount,2);check('dismissed stop confirmation leaves both tasks running');
+ fireEvent.click(ui.getByRole('button',{name:'停止任务 B 设备'}));await act(async()=>{fireEvent.click(ui.getByRole('button',{name:'确认停止'}));await pb;});assert.equal(useConversationRuns.getState().activeCount,1);assert.equal(requests[1].init.signal.aborted,true);assert.equal(requests[0].init.signal.aborted,false);assert.ok(ui.getByRole('region',{name:'已结束任务'}).textContent.includes('已停止'));check('confirmed stop targets the chosen background task only and moves it out of running');
+ fireEvent.click(ui.getByRole('button',{name:'全部执行记录'}));assert.equal(history,1);cleanup();
+ const pick=render(React.createElement(Theme,null,React.createElement(ModelPicker,{forNewProject:true}),React.createElement(QualityPicker,{forNewProject:true})));
+ const modelButton=pick.getByRole('button',{name:'切换模型，当前 model-a'});assert.equal(modelButton.disabled,false);assert.equal(pick.getByRole('button',{name:'生成档位，当前精细'}).disabled,false);
+ fireEvent.click(modelButton);await waitFor(()=>assert.ok(pick.getByRole('button',{name:'使用模型 model-b'})));fireEvent.click(pick.getByRole('button',{name:'使用模型 model-b'}));assert.equal(editor.getState().aiConfig.model,'model-b');assert.equal(JSON.parse(requests[0].init.body).model,'model-a');assert.equal(ca.ui.getState().running,true);check('home model choice remains available and cannot alter an in-flight request configuration');cleanup();
+ const locked=render(React.createElement(Theme,null,React.createElement(ModelPicker),React.createElement(QualityPicker)));assert.equal(locked.getByRole('button',{name:'切换模型，当前 model-b'}).disabled,true);assert.equal(locked.getByRole('button',{name:'生成档位，当前精细'}).disabled,true);check('current workbench model and quality remain locked during its own run');cleanup();
+ await act(async()=>{ca.cancel();await pa;});
+ await act(async()=>{sb.setState({aiStatus:'previewing',pendingBatch:{projectId:sb.getState().doc.projectId,baseRevision:sb.getState().doc.revision,commands:[]}});});assert.equal(taskSummary(w.useWorkspaceStore.getState().sessions.find(s=>s.id===b)).group,'review');check('pending preview is distinguished from running and ended');
+ await act(async()=>{sb.setState({pendingBatch:null,aiStatus:'idle'});w.useWorkspaceStore.setState(s=>({sessions:s.sessions.map(x=>x.id===b?{...x,deletedAt:Date.now()}:x)}));});
+ const filtered=render(React.createElement(Theme,null,React.createElement(TaskQueue,{onOpen:()=>{},onHistory:()=>{}})));assert.equal(filtered.getByRole('button',{name:'任务',exact:true}).textContent,'');assert.equal(filtered.container.querySelector('.global-task-count'),null);check('zero running count hides the badge but preserves the task entry');fireEvent.click(filtered.getByRole('button',{name:'任务',exact:true}));assert.equal(filtered.queryByRole('button',{name:'打开任务 B 设备'}),null);check('deleted sessions are excluded from the queue');cleanup();await w.flushWorkspace();
+ const footer=readFileSync(new URL('../src/workbench-footer.css',import.meta.url),'utf8');assert.ok(!footer.includes('overflow-x:auto'));assert.match(footer,/flex-wrap:wrap/);const desktop=JSON.parse(readFileSync(new URL('../src-tauri/tauri.conf.json',import.meta.url),'utf8'));assert.equal(desktop.productName,'Chat3D');assert.equal(desktop.app.windows[0].title,'Chat3D');check('footer wraps rather than horizontally scrolling and desktop title is branded');
+ console.log(passed+' task queue checks passed with mocked transport');
+}finally{cleanup();await server.close();dom.window.close();}

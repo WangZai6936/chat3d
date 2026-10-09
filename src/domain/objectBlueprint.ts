@@ -1,7 +1,7 @@
 import {matchesGeometryApproach} from './geometryApproach';
 import type {SceneDocument} from './types';
 export type DetailLevel='closeup'|'scene'|'background';
-export interface ObjectBlueprint {dimensions?:{x?:number;y?:number;z?:number};key:string;name:string;purpose:string;detailLevel:DetailLevel;detailReason:string;silhouette:string;features:{key:string;name:string;role:'form'|'function'|'support'|'connection'|'surface';geometryApproach:'primitive'|'profile'|'lathe'|'sweep'|'mesh'|'assembly'}[];negativeSpaces:string[];views:('front'|'back'|'side'|'top'|'bottom'|'underside'|'perspective')[]}
+export interface ObjectBlueprint {dimensions?:{x?:number;y?:number;z?:number};key:string;name:string;purpose:string;detailLevel:DetailLevel;detailReason:string;silhouette:string;features:{key:string;name:string;referenceObservation?:string;role:'form'|'function'|'support'|'connection'|'surface';geometryApproach:'primitive'|'profile'|'lathe'|'sweep'|'mesh'|'assembly'}[];negativeSpaces:string[];views:('front'|'back'|'side'|'top'|'bottom'|'underside'|'perspective')[]}
 export interface FeatureBinding {blueprintKey:string;componentId:string;features:{key:string;nodeIds:string[]}[]}
 export const DETAIL_LEVEL_GUIDANCE:Record<DetailLevel,string>={
  closeup:'关键近景：优先真实轮廓曲率、开口与负空间、边缘收口、连接连续性及操作细节。细节需在指定近景辨识；不靠提高零件数代替结构。',
@@ -13,6 +13,7 @@ export function validateBlueprints(items:ObjectBlueprint[]):void{
  const text=(s:unknown,max:number)=>typeof s==='string'&&s.trim().length>0&&s.length<=max;
  for(const b of items){if(b.dimensions){const entries=Object.entries(b.dimensions);if(!entries.length||entries.some(([k,v])=>!['x','y','z'].includes(k)||typeof v!=='number'||!Number.isFinite(v)||v<=0||v>10000))throw Error('声明尺寸需至少一个有效x/y/z轴长度（米）');}if(!text(b.key,80)||!text(b.name,80)||!text(b.purpose,240)||!text(b.silhouette,360)||!text(b.detailReason,240)||!Object.prototype.hasOwnProperty.call(DETAIL_LEVEL_GUIDANCE,b.detailLevel))throw Error('对象身份、用途、轮廓与细节档位说明不完整');
   if(!Array.isArray(b.features)||!b.features.length||b.features.length>16||new Set(b.features.map(f=>f.key)).size!==b.features.length||b.features.some(f=>!text(f.key,80)||!text(f.name,240)||!['form','function','support','connection','surface'].includes(f.role)||!['primitive','profile','lathe','sweep','mesh','assembly'].includes(f.geometryApproach)))throw Error('每个对象需1–16项不重复的用途相关结构特征');
+  if(b.features.some(f=>f.referenceObservation!==undefined&&!text(f.referenceObservation,360)))throw Error('参考特征观察应为1–360字可见结构说明');
   if(!b.features.some(f=>f.role==='form'))throw Error('结构方案必须包含整体外形特征，不能只有装饰零件');
   if(!Array.isArray(b.negativeSpaces)||b.negativeSpaces.length>8||b.negativeSpaces.some(s=>!text(s,240)))throw Error('开口及负空间说明无效');
   if(!Array.isArray(b.views)||b.views.length<2||b.views.length>4||new Set(b.views).size!==b.views.length||b.views.some(v=>!['front','back','side','top','bottom','underside','perspective'].includes(v)))throw Error('需要2–4个不同验收视角');

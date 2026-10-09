@@ -1,0 +1,20 @@
+.canvas-studio.frosted-studio .navigation-utilities .global-task-trigger{width:auto;min-width:94px;gap:7px;border-radius:12px;padding:0 10px;white-space:nowrap}
+.global-task-count{min-width:20px;padding:1px 5px;border-radius:6px;background:var(--accent-a3);color:var(--accent-11);font-size:12px;line-height:18px}
+.rt-DialogContent.global-task-drawer{position:fixed;inset:76px 16px 16px auto;transform:none!important;margin:0;width:400px;max-width:calc(100vw - 32px);max-height:none;display:flex;flex-direction:column;gap:16px;padding:22px;border-radius:18px;background:var(--color-panel-solid)}
+.global-task-drawer>header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.global-task-drawer .rt-DialogTitle{margin-bottom:6px;font-size:20px}
+.global-task-drawer .rt-DialogDescription,.global-task-drawer>footer>span{color:var(--gray-11);font-size:12px}
+.global-task-list{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden}
+.global-task-list section+section{margin-top:22px}
+.global-task-list h3{display:flex;gap:8px;font-size:13px;margin:0 0 10px;color:var(--gray-11)}
+.global-task-item{display:flex;align-items:center;gap:8px;margin:8px 0;padding:12px;border:1px solid var(--gray-a5);border-radius:12px;background:var(--gray-a2)}
+.global-task-item.is-current{border-color:var(--accent-8);background:var(--accent-a2)}
+.global-task-open{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;text-align:left;cursor:pointer;color:var(--gray-12);background:transparent;border:0;padding:0}
+.global-task-open strong{font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.global-task-open small{font-size:12px;color:var(--gray-11)}
+.global-task-open:focus-visible{outline:2px solid var(--accent-8);outline-offset:4px;border-radius:4px}
+.global-task-state.is-running{color:var(--accent-11)}
+.global-task-state.is-review{color:var(--amber-11)}
+.global-task-empty{padding:24px 4px;color:var(--gray-11);font-size:14px}
+.global-task-drawer>footer{display:flex;justify-content:space-between;align-items:center;gap:8px;padding-top:14px;border-top:1px solid var(--gray-a5)}
+@media(max-width:720px){.rt-DialogContent.global-task-drawer{inset:68px 8px 8px auto;max-width:calc(100vw - 16px);padding:16px}.canvas-studio.frosted-studio .navigation-utilities .global-task-trigger{min-width:68px;padding:0 5px;gap:4px}.global-task-trigger>svg{display:none}}

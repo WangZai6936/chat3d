@@ -1,0 +1,24 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Chat3D WebGL 框选专项验收</title><style>body{font:15px system-ui;margin:24px;background:#eef1f3;color:#20252a}button{padding:10px 18px}pre{white-space:pre-wrap}canvas{max-width:100%;border:1px solid #aab4bf}</style><h1>WebGL 框选专项验收</h1><p>本页仅运行本地确定性几何测试，不读取项目、模型配置或 Key，不发起模型调用。</p><button id="run">运行真实 WebGL 检查</button><pre id="result">待运行。需要可用的 WebGL2 浏览器。</pre><div id="view"></div><script type="module">
+import * as T from 'three';
+import {rectangleObjectIds} from '../src/scene/rectangleSelection.ts';
+const output=document.querySelector('#result'),button=document.querySelector('#run'),view=document.querySelector('#view');
+button.onclick=()=>{button.disabled=true;let renderer;const geometries=[],materials=[];const lines=[];const log=text=>{lines.push(text);output.textContent=lines.join('\n')};
+try{
+ renderer=new T.WebGLRenderer({antialias:true});renderer.setPixelRatio(2);renderer.setSize(320,240);view.replaceChildren(renderer.domElement);
+ const camera=new T.PerspectiveCamera(60,4/3,.1,100);camera.updateMatrixWorld();const rect={left:-1,right:1,top:1,bottom:-1};
+ const make=(id,x,y,z,sx=1,sy=1,sz=1)=>{const geometry=new T.BoxGeometry(sx,sy,sz),material=new T.MeshBasicMaterial({color:id.includes('rear')?'#cf4a52':'#3987c9'});geometries.push(geometry);materials.push(material);const mesh=new T.Mesh(geometry,material);mesh.position.set(x,y,z);return{id,object:mesh}};
+ const front=make('front',0,0,-4),rear=make('rear',0,0,-7),objects=[rear,front];const scene=new T.Scene();scene.background=new T.Color('#edf2f4');objects.forEach(o=>scene.add(o.object));renderer.render(scene,camera);
+ const equal=(actual,expected,name)=>{if(JSON.stringify([...actual].sort())!==JSON.stringify([...expected].sort()))throw Error(name+'：'+JSON.stringify(actual)+' ≠ '+JSON.stringify(expected));log('PASS '+name)};
+ equal(rectangleObjectIds(objects,camera,rect,false,{renderer}),['front'],'DPR 2 默认遮挡剔除后方实体');
+ equal(rectangleObjectIds(objects,camera,rect,false,{renderer,through:true}),['rear','front'],'穿透显式选中前后实体');
+ const bars=Array.from({length:16},(_,i)=>make('bar-'+i,-1.5+i*.2,0,-4,.04,3,.1)),holeRear=make('hole-rear',0,0,-7,.08,.2,.3);
+ equal(rectangleObjectIds([...bars,holeRear],camera,rect,false,{renderer}),[...bars.map(o=>o.id),'hole-rear'],'细杆与真实孔洞中的后方零件');
+ const triangleGeometry=new T.BufferGeometry().setAttribute('position',new T.Float32BufferAttribute([-1,-1,-5,1,-1,-5,-1,1,-5],3));geometries.push(triangleGeometry);const triangle={id:'triangle',object:new T.Mesh(triangleGeometry,materials[0])};
+ equal(rectangleObjectIds([triangle],camera,{left:.15,right:.25,top:.25,bottom:.15},false,{renderer}),[],'投影包围盒空角不误选');
+ const many=Array.from({length:400},(_,i)=>make('id-'+i,(i%20-9.5)*.18,(Math.floor(i/20)-9.5)*.18,-5,.12,.12,.05));
+ equal(rectangleObjectIds(many,camera,rect,false,{renderer}),many.map(o=>o.id),'RGB ID 编码跨越 255');
+ const beforeColor=renderer.getClearColor(new T.Color()).getHex(),beforeTarget=renderer.getRenderTarget();rectangleObjectIds(objects,camera,rect,false,{renderer});if(renderer.getRenderTarget()!==beforeTarget||renderer.getClearColor(new T.Color()).getHex()!==beforeColor)throw Error('渲染器状态未恢复');renderer.render(scene,camera);log('PASS 检查后恢复正常场景渲染');
+ log('完成。请同时在实际货架项目测试正面/俯视/侧面、零件/整模型、Shift 追加与 Esc 取消。透明面按实体选择；亚像素边缘与抗锯齿画面可不同。');
+}catch(error){log('FAIL / BLOCKED '+(error.message??error));}finally{button.disabled=false;for(const g of geometries)g.dispose();for(const m of materials)m.dispose();renderer?.dispose();}
+};
+</script></html>

@@ -1,3 +1,4 @@
+import {generationQualityPrompt, normalizeGenerationQuality, type GenerationQuality} from './generationPolicy';
 import type {TaskBudget} from './taskBudget';
 import type {EditScope} from '../domain/editScope';
 import type {AnimationProgram} from '../domain/animation';
@@ -19,6 +20,7 @@ export interface ModelConfig {
   apiKey: string;
   model: string; // 如 gpt-4o-mini
   agentMode?: 'pi' | 'single';
+  generationQuality?: GenerationQuality; // 缺省为精细；独立于模型、代理模式和预算
   taskBudget?: Partial<TaskBudget>;
   parallelDrafts?: boolean; // 实验：最多两个隔离子草稿，默认关闭
   stream?: boolean; // 默认流式；不支持 SSE 的服务可关闭
@@ -47,14 +49,14 @@ export type ChatMessage = {
   content: string | ContentPart[];
 };
 
-// P0 已实现的命令集；模型若输出其他 op（rotate/scale/delete 等），解析层拦截
+// P0 已实现的命令集；模型若输出其他 op（rotate/scale 等），解析层拦截
 const IMPLEMENTED_OPS = new Set([
   'setAnimation','clearAnimation','transformAssembly','appendAssemblyParts','replaceAssemblyParts','createPrimitive', 'createAssembly', 'duplicateAssembly', 'translateAssembly',
   'updateParameters',
   'setTransform',
   'translate',
   'rename',
-  'setVisibility',
+  'setVisibility','delete',
   'setMaterial','setAppearance','setAssemblyMetadata',
 ]);
 
@@ -68,12 +70,12 @@ const DEFAULT_TRANSFORM = {
   scale: [1, 1, 1] as [number, number, number],
 };
 
-export function buildSystemPrompt(ctx: SceneContext): string {
+export function buildSystemPrompt(ctx: SceneContext, generationQuality: GenerationQuality = 'fine', workflow: 'single' | 'geometry' = 'single'): string {
   const nodeLines = ctx.nodes.length
     ? ctx.nodes.map((n) => `  - id:${n.id} name:${n.name} (${n.desc}) pos:[${n.position.join(',')}] rotation:${JSON.stringify(n.rotationQuaternion)} scale:${JSON.stringify(n.scale)} material:${n.materialId} visible:${n.visible} parent:${n.parentId}`).join('\n')
     : '  （空场景，还没有任何对象）';
   const sel = ctx.selectedAssemblies?.length ? `当前高亮的完整组件 id：${ctx.selectedAssemblies.join(', ')}，包含各组件全部零件。其他高亮节点：${ctx.selection.join(', ')||'无'}。` : ctx.selection.length ? `当前高亮的节点 id：${ctx.selection.join(', ')}` : '当前没有高亮对象。';
-  return `你是 chat3d 的三维建模助手，专门搭建工业设备 / 仓储设备场景。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
+  const prompt = `你是 chat3d 的三维建模助手，专门搭建工业设备 / 仓储设备场景。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
 
 # 需求优先级
 用户最新明确需求优先于默认展示设置、历史方案和模型假设。分批执行以满足完整需求，不因单次命令容量而擅自删减目标；仍需遵守真实安全边界与有效数据要求，不支持的能力应明确说明。
@@ -202,6 +204,7 @@ duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id�
 4. 移动（delta 为增量，单位米）：{"op":"translate","targetId":"t1","space":"world","mode":"delta","value":[0.5,0,0]}
 5. 重命名：{"op":"rename","targetId":"t1","name":"新名字"}
 6. 显隐：{"op":"setVisibility","targetId":"t1","visible":false}
+6a. 真正删除场景零件及其子节点：{"op":"delete","targetId":"t1"}；整组模型：{"op":"delete","targetId":"组件内任一真实节点ID","scope":"assembly"}；多个选中对象：{"op":"delete","targetIds":["t1","t2"]}。targetId 与 targetIds 二选一。删除会清理相关连接和动画引用，预览应用后可撤销恢复，永不删除资产库原件。用户要求删除时不要用隐藏代替；只删除明确目标，歧义时先澄清。
 7. 外观局部修改：{"op":"setAppearance","targetId":"真实零件ID","baseColor":"#3979AA"}；可选roughness/metalness/opacity(0–1)。整机用scope:"assembly"，仅外壳可加sourceMaterialIds:["原外壳材质ID"]，先read_scene读取材质与零件，不要把玻璃、屏幕、人物一起改色。未给出的材质属性保持原值。
 8. 补齐已有组件的设计关联：{"op":"setAssemblyMetadata","targetId":"组件零件ID","sceneRole":"equipment","planKey":"设计清单名称","zone":"区域名"}，不改变几何。
 9. 材质：{"op":"setMaterial","targetId":"t1","materialId":"mat_metal"}
@@ -211,16 +214,22 @@ duplicateAssembly：{"op":"duplicateAssembly","targetId":"组件任意零件id�
 - 引用场景里已有的节点：用真实 id（见下方场景上下文）。
 
 # 当前版本不支持
-独立 rotate/scale 命令、复制、删除、分组（reparent）及模板/资产命令尚不支持。旋转和缩放请使用 setTransform；四元数必须归一化。历史对话仅用于理解意图，不要重复执行先前创建操作；以当前场景上下文为准。
+独立 rotate/scale 命令、单零件 duplicate、分组（reparent）及模板/资产命令尚不支持。旋转和缩放请使用 setTransform；四元数必须归一化。历史对话仅用于理解意图，不要重复执行先前创建操作；以当前场景上下文为准。
 
 # 场景上下文
 ${nodeLines}
-${sel}`;
+${sel}
+
+${workflow === 'single' ? generationQualityPrompt(generationQuality, 'single') : ''}`;
+  // The detailed furniture example is not the fast mode's minimum part count.
+  return normalizeGenerationQuality(generationQuality) === 'fast'
+    ? prompt.replace(/# 参考范例[\s\S]*?# 图片/, '# 图片')
+    : prompt;
 }
 
 export interface ConversationTurn { role: 'user' | 'assistant'; text: string }
 
-export function buildMessages(text: string, ctx: SceneContext, images: string[] = [], history: ConversationTurn[] = []): ChatMessage[] {
+export function buildMessages(text: string, ctx: SceneContext, images: string[] = [], history: ConversationTurn[] = [], generationQuality: GenerationQuality = 'fine'): ChatMessage[] {
   const reminder = '\n\n（请只输出一个 JSON 命令批对象，不要 markdown 代码块或任何解释文字）';
   // 有图时 user 消息走多模态数组（OpenAI 兼容协议）；无图保持纯文本（兼容所有模型）
   const userContent: string | ContentPart[] = images.length
@@ -230,7 +239,7 @@ export function buildMessages(text: string, ctx: SceneContext, images: string[] 
       ]
     : text + reminder;
   return [
-    { role: 'system', content: buildSystemPrompt(ctx) },
+    { role: 'system', content: buildSystemPrompt(ctx, generationQuality) },
     ...history.slice(-8).map((turn): ChatMessage => ({ role: turn.role, content: turn.text.slice(0, 1500) })),
     { role: 'user', content: userContent },
   ];
@@ -445,6 +454,16 @@ function cleanCommand(opType: string, op: Record<string, unknown>,diagnostics:st
       if (!name) return null;
       return { op: 'rename', targetId, name };
     }
+    case 'delete': {
+      if(op.scope!==undefined&&op.scope!=='assembly')return null;
+      if((op.targetId!==undefined)===(op.targetIds!==undefined))return null;
+      const scope=op.scope==='assembly'?{scope:'assembly' as const}:{};
+      if(op.targetIds!==undefined){
+        if(!Array.isArray(op.targetIds)||!op.targetIds.length||op.targetIds.length>10000||op.targetIds.some(id=>typeof id!=='string'||!id.trim()))return null;
+        return {op:'delete',targetIds:[...new Set((op.targetIds as string[]).map(id=>id.trim()))],...scope};
+      }
+      const targetId=cleanTargetId(op);return targetId?{op:'delete',targetId,...scope}:null;
+    }
     case 'setVisibility': {
       const targetId = cleanTargetId(op);
       if (!targetId) return null;
@@ -510,13 +529,14 @@ export async function generateBatch(
   history: ConversationTurn[] = [],
   onProgress?: (event: GenerationProgress) => void,
 ): Promise<GeneratedBatch> {
+  cfg = {...cfg, generationQuality: normalizeGenerationQuality(cfg.generationQuality), taskBudget: cfg.taskBudget ? {...cfg.taskBudget} : undefined};
   const base = (cfg.baseURL || '').trim().replace(/\/+$/, '');
   if (!base) throw new Error('未配置 API 地址（baseURL）');
   if (!cfg.apiKey.trim()) throw new Error('未配置 API Key');
   if (!cfg.model.trim()) throw new Error('未配置模型名');
 
   const url = `${base}/chat/completions`;
-  const messages = buildMessages(text, ctx, images, history);
+  const messages = buildMessages(text, ctx, images, history, cfg.generationQuality);
 
   // 解析失败自动纠偏重试一次：把模型的错误回复顶回去，再强调格式
   let lastErr: Error | null = null;
@@ -526,7 +546,9 @@ export async function generateBatch(
     const content = await fetchChat(url, cfg, messages, signal, (characters, streaming) => report('receiving', characters, streaming));
     report('validating', content.length);
     try {
-      return parseModelResponse(content);
+      const parsed = parseModelResponse(content);
+      if (parsed.operations.length) parsed.summary = `${cfg.generationQuality === 'fast' ? '快速' : '精细'}模式数据草稿（未经视觉验收）\n${parsed.summary}`;
+      return parsed;
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
       if (attempt === 0) {

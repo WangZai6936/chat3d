@@ -9,6 +9,7 @@ const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(({mode}) => ({
+  define: {__APP_BUILD_COMMIT__: JSON.stringify(process.env.GITHUB_SHA ?? "local")},
   plugins: [react(), tailwindcss(), modelProxyPlugin(loadEnv(mode, process.cwd(), "CHAT3D_").CHAT3D_ALLOWED_UPSTREAMS)],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
@@ -18,6 +19,7 @@ export default defineConfig(({mode}) => ({
   // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,
+    allowedHosts: ["terminal.local"],
     strictPort: true,
     host: host || false,
     hmr: host

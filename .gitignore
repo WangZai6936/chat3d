@@ -31,3 +31,9 @@ e2e/shots
 .env
 .env.*
 !.env.example
+
+dist-team
+team-data
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
