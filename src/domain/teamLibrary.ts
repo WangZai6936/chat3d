@@ -1,3 +1,4 @@
+import {teamFetch} from './teamTransport';
 import {parseModelAsset,type ModelAssetVersion} from './modelAssets';
 import {parseProject,serializeProject} from './project';
 import {saveModelAsset} from './modelAssetStorage';
@@ -12,7 +13,7 @@ export class TeamClient {
  readonly base:string;private token='';user?:TeamUser;
  constructor(base:string){this.base=teamAddress(base);}
  async request<T>(path:string,body?:unknown):Promise<T>{
-  const response=await fetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
+  const response=await teamFetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
   const data=await response.json();if(!response.ok)throw Error(data.error??'团队服务请求失败');return data as T;
  }
  async login(name:string,password:string){const result=await this.request<{token:string;user:TeamUser}>('login',{name,password});this.token=result.token;this.user=result.user;return result.user;}

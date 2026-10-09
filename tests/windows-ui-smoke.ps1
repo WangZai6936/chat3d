@@ -53,6 +53,13 @@ function Dump-Controls($name) {
  @($all | ForEach-Object { @{name=$_.Current.Name; type=$_.Current.ControlType.ProgrammaticName; enabled=$_.Current.IsEnabled} }) | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out "$name.json")
 }
 try {
+ # Prove the isolated server is reachable before testing the installed UI.
+ $fixtureLogin=Invoke-RestMethod -Uri 'http://127.0.0.1:1435/api/team/login' -Method Post -ContentType 'application/json' -Body (@{name='smoke-bob';password='isolated-smoke-password-b'} | ConvertTo-Json)
+ $fixtureHeaders=@{Authorization=('Bearer '+$fixtureLogin.token)}
+ $fixtureRows=Invoke-RestMethod -Uri 'http://127.0.0.1:1435/api/team/items?kind=asset' -Headers $fixtureHeaders
+ if(@($fixtureRows | Where-Object name -eq 'NativeTestBox').Count -ne 1){throw 'Isolated team fixture asset missing'}
+ Invoke-RestMethod -Uri 'http://127.0.0.1:1435/api/team/logout' -Method Post -ContentType 'application/json' -Headers $fixtureHeaders -Body '{}' | Out-Null
+ Write-Host 'Isolated server authentication and asset readiness verified'
  $app=Start-Process $env:CHAT3D_INSTALLED_EXE -PassThru
  for($i=0;$i -lt 30;$i++) { $app.Refresh(); if($app.MainWindowHandle -ne 0){break};Start-Sleep -Seconds 1 }
  if($app.HasExited -or $app.MainWindowHandle -eq 0){throw 'Installed app failed to create window'}
@@ -124,7 +131,8 @@ try {
  Shot 'ui-diagnostics-saved';Dump-Controls 'ui-diagnostics-controls'
  $checks.Add(@{name='diagnostic download button saves redacted JSON after synthetic network failure';pass=$true;file=$diagnostic.FullName})
 
-} catch { $failure=$_.Exception.Message;try{Shot 'ui-failure';if($window){Dump-Controls 'ui-failure-controls'}}catch{};Write-Host "SMOKE FAILURE: $failure" }
+} catch { $failure=$_.Exception.Message;try{Shot 'ui-failure';if($window){Dump-Controls 'ui-failure-controls'}}catch{};Write-Host "SMOKE FAILURE: $failure"
+ foreach($diagnostic in @('ui-failure-controls.json','team-server.log','team-server-error.log')) { $path=Join-Path $out $diagnostic;if(Test-Path $path){Write-Host "DIAGNOSTIC $diagnostic";Get-Content $path | Write-Host} } }
 finally {
  @{pass=($null -eq $failure);checks=$checks;error=$failure;finishedAt=[DateTime]::UtcNow.ToString('o');limitations=@('No real model service request','Diagnostic path uses an intentional .invalid endpoint failure, not successful real generation','CI graphics differ from user GPU')} | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $out 'ui-result.json')
  if($app -and !$app.HasExited){$app.CloseMainWindow() | Out-Null;Start-Sleep -Seconds 2;if(!$app.HasExited){$app.Kill()}}

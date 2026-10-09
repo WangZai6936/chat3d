@@ -5,6 +5,11 @@ const dom=new JSDOM('<html><body></body></html>',{url:'http://localhost'});Objec
 const vite=await viteServer({server:{middlewareMode:true},appType:'custom'}),dir=await mkdtemp(join(tmpdir(),'chat3d-team-client-'));const team=openTeam(join(dir,'test.sqlite'));let server;
 try{
  const api=await vite.ssrLoadModule('/src/domain/teamLibrary.ts'),w=await vite.ssrLoadModule('/src/workspace.ts'),{createInitialDoc}=await vite.ssrLoadModule('/src/store.ts'),{applyBatch}=await vite.ssrLoadModule('/src/domain/commands.ts'),assets=await vite.ssrLoadModule('/src/domain/modelAssets.ts'),storage=await vite.ssrLoadModule('/src/domain/modelAssetStorage.ts');
+ const {createTeamTransport}=await vite.ssrLoadModule('/src/domain/teamTransport.ts');let nativeOptions;
+ const native=createTeamTransport(()=>true,async()=>({fetch:async(_input,options)=>{nativeOptions=options;return Response.json({ok:true});}}));
+ const signal=new AbortController().signal;await native('https://team.example/api/team/me',{headers:{Authorization:'Bearer isolated'},signal,redirect:'error'});assert.equal(nativeOptions.maxRedirections,0);assert.equal(nativeOptions.connectTimeout,15000);assert.equal(nativeOptions.signal,signal);assert.equal(nativeOptions.headers.Authorization,'Bearer isolated');assert.equal(nativeOptions.danger,undefined);
+ let browserCalls=0;const previousFetch=globalThis.fetch;globalThis.fetch=async()=>{browserCalls++;throw Error('browser must not run');};
+ try{await assert.rejects(createTeamTransport(()=>true,async()=>{throw Error('native unavailable');})('https://team.example'),/原生网络插件/);await assert.rejects(createTeamTransport(()=>true,async()=>({fetch:async()=>{throw Error('native denied');}}))('https://team.example'),/native denied/);assert.equal(browserCalls,0);}finally{globalThis.fetch=previousFetch;}console.log('PASS desktop uses scoped native HTTP with no redirects, no TLS bypass and no browser fallback');
  await w.initializeWorkspace();
  const doc=applyBatch(createInitialDoc(),{operations:[{op:'createPrimitive',name:'测试托盘',parentId:null,geometry:{type:'box',params:{width:1,height:1,depth:1}},transform:{position:[0,0,0],scale:[1,1,1],rotationQuaternion:[0,0,0,1]},materialId:'mat_blue'}]}).doc;
  const asset=assets.createModelAsset(doc,doc.nodes.map(n=>n.id),{name:'测试托盘',category:'设备'});await storage.saveModelAsset(asset);
