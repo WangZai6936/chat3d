@@ -38,10 +38,51 @@ jobs:
           targets: x86_64-pc-windows-msvc
       - name: Install JavaScript dependencies
         run: npm ci
+      # Signing secrets are optional. All three of TAURI_SIGNING_PRIVATE_KEY,
+      # CHAT3D_UPDATER_PUBKEY and CHAT3D_UPDATER_ENDPOINT switch this job to a
+      # signed build and a static Tauri latest.json. A partial set fails the job.
+      # Portal manifest: https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json
+      # Upload chat3d/ to /opt/1panel/www/sites/portal.jiezi-ai.com/index/desktop-updates/chat3d/
+      # Packages live in desktop-updates/chat3d/windows/, desktop-updates/chat3d/mac/ and desktop-updates/chat3d/linux/.
+      # This workflow only builds Windows. Do not publish empty macOS or Linux entries.
+      - name: Decide updater signing
+        id: updater
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          CHAT3D_UPDATER_PUBKEY: ${{ secrets.CHAT3D_UPDATER_PUBKEY }}
+          CHAT3D_UPDATER_ENDPOINT: ${{ secrets.CHAT3D_UPDATER_ENDPOINT }}
+        run: node scripts/updater-release-mode.mjs
       - name: Build unsigned Windows x64 NSIS installer
+        if: success() && steps.updater.outputs.mode == 'unsigned'
         run: npm run tauri -- build --target x86_64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.windows.conf.json -- --locked
+      - name: Build signed Windows x64 NSIS installer
+        if: success() && steps.updater.outputs.mode == 'signed'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          CHAT3D_UPDATER_PUBKEY: ${{ secrets.CHAT3D_UPDATER_PUBKEY }}
+          CHAT3D_UPDATER_ENDPOINT: ${{ secrets.CHAT3D_UPDATER_ENDPOINT }}
+          CHAT3D_UPDATE_NOTES: ${{ vars.CHAT3D_UPDATE_NOTES }}
+          CHAT3D_UPDATE_PUB_DATE: ${{ vars.CHAT3D_UPDATE_PUB_DATE }}
+        run: npm run tauri:build:windows
+      - name: Confirm generated updater config has no private key
+        if: success() && steps.updater.outputs.mode == 'signed'
+        shell: pwsh
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          CHAT3D_UPDATER_ENDPOINT: ${{ secrets.CHAT3D_UPDATER_ENDPOINT }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $text = Get-Content src-tauri/updater.generated.json -Raw
+          if ($text -notmatch 'createUpdaterArtifacts') { throw 'Updater config is missing createUpdaterArtifacts.' }
+          if ($text.Contains('TAURI_SIGNING_PRIVATE_KEY')) { throw 'Updater config names the private key variable.' }
+          if ($env:TAURI_SIGNING_PRIVATE_KEY -and $text.Contains($env:TAURI_SIGNING_PRIVATE_KEY.Trim())) { throw 'Updater config contains the private key.' }
+          if (-not $text.Contains($env:CHAT3D_UPDATER_ENDPOINT.Trim())) { throw 'Updater config is missing the endpoint.' }
       - name: Check installer and record hashes and source commit
         shell: pwsh
+        env:
+          UPDATER_MODE: ${{ steps.updater.outputs.mode }}
         run: |
           $ErrorActionPreference = 'Stop'
           if ((Test-Path 'dist/server') -or (Test-Path 'dist/_worker.js')) { throw 'Desktop frontend unexpectedly contains the Sites worker.' }
@@ -63,6 +104,11 @@ jobs:
             "$hash  $($installer.Name)"
           }
           $hashes | Set-Content 'windows-artifact/SHA256SUMS.txt' -Encoding utf8
+          $package = if ($env:UPDATER_MODE -eq 'signed') {
+            'signed NSIS installer; updater manifest is in the chat3d-desktop-update artifact; user GPU not verified'
+          } else {
+            'unsigned NSIS installer; see the dependent installed-app job for installation evidence; user GPU not verified'
+          }
           @(
             "repository=$env:GITHUB_REPOSITORY"
             "commit=$env:GITHUB_SHA"
@@ -70,13 +116,28 @@ jobs:
             "version=$version"
             "build_run_id=$env:GITHUB_RUN_ID"
             'target=x86_64-pc-windows-msvc'
-            'package=unsigned NSIS installer; see the dependent installed-app job for installation evidence; user GPU not verified'
+            "package=$package"
           ) | Set-Content 'windows-artifact/SOURCE-COMMIT.txt' -Encoding utf8
       - name: Upload installer and provenance
         uses: actions/upload-artifact@v4
         with:
           name: chat3d-windows-x64-${{ github.sha }}
           path: windows-artifact/*
+          if-no-files-found: error
+          retention-days: 30
+      - name: Assemble Tauri latest.json
+        if: success() && steps.updater.outputs.mode == 'signed'
+        env:
+          CHAT3D_UPDATER_ENDPOINT: ${{ secrets.CHAT3D_UPDATER_ENDPOINT }}
+          CHAT3D_UPDATE_NOTES: ${{ vars.CHAT3D_UPDATE_NOTES }}
+          CHAT3D_UPDATE_PUB_DATE: ${{ vars.CHAT3D_UPDATE_PUB_DATE }}
+        run: npm run desktop-update:assemble -- --bundle src-tauri/target/x86_64-pc-windows-msvc/release/bundle --out desktop-update-publish
+      - name: Upload updater manifest and packages
+        if: success() && steps.updater.outputs.mode == 'signed'
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat3d-desktop-update-${{ github.sha }}
+          path: desktop-update-publish/**
           if-no-files-found: error
           retention-days: 30
 

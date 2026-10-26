@@ -25,20 +25,41 @@
 
 未配置更新源的安装包仍可运行。检查时会说明此包未启用自动更新，不会下载任何文件。
 
-桌面构建需要 Rust 1.90 或更新版本。发布签名包时，在构建机器上设置这些环境变量。私钥不要进入仓库、镜像或 `VITE_*` 变量：
+桌面更新清单是 Tauri 的静态 `latest.json`，不是 Electron 的 `latest.yml`。同一门户以后会放多个应用，chat3d 使用自己的一级目录。
+
+门户 `https://portal.jiezi-ai.com/` 的源站监听 38008，由 Cloudflare Tunnel 提供对外 https。客户端只访问 https，不要把 38008 写进安装包。
+
+| 用途 | 路径 |
+| --- | --- |
+| 更新检查地址 | `https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json` |
+| 服务器目录 | `/opt/1panel/www/sites/portal.jiezi-ai.com/index/desktop-updates/chat3d/` |
+| Windows 安装包和 `.sig` | `desktop-updates/chat3d/windows/` |
+| macOS 安装包和 `.sig`（预留） | `desktop-updates/chat3d/mac/` |
+| Linux 安装包和 `.sig`（预留） | `desktop-updates/chat3d/linux/` |
+
+清单放在应用目录下。不要把 `latest.json` 直接放进 `desktop-updates/`，也不要使用没有应用名的 `desktop-updates/windows/`、`desktop-updates/mac/`、`desktop-updates/linux/`。
+
+当前 GitHub workflow 只有 Windows runner。没有对应产物时，清单里不要写 macOS 或 Linux，脚本也不会创建空的 `mac/`、`linux/`。本机如果自己打出这两个平台的签名包，同一脚本会放进对应目录。
+
+桌面构建需要 Rust 1.90 或更新版本。发布签名包时设置这些环境变量。私钥不要进入仓库、镜像、日志或 `VITE_*` 变量。Tauri 不读取 `.env` 文件。
 
 ```sh
 npm run tauri signer generate -- -w "$HOME/.chat3d/updater.key"
 export TAURI_SIGNING_PRIVATE_KEY="$HOME/.chat3d/updater.key"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="签名密码"
 export CHAT3D_UPDATER_PUBKEY="tauri signer 打印的单行公钥"
-export CHAT3D_UPDATER_ENDPOINT="https://updates.example.com/chat3d/latest.json"
-npm run tauri:build
+export CHAT3D_UPDATER_ENDPOINT="https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json"
+export CHAT3D_UPDATE_NOTES="修复预览保存"
+export CHAT3D_UPDATE_PUB_DATE="2026-10-26T00:00:00Z"
+npm run tauri:build:windows
+npm run desktop-update:assemble -- --bundle src-tauri/target/x86_64-pc-windows-msvc/release/bundle
 ```
 
-`npm run tauri:build` 会先写入被 git 忽略的 `src-tauri/updater.generated.json`，其中只有公钥、https 端点和安装包签名开关。端点必须是 https，不能带账号、密码或查询参数。可以使用 `{{target}}`、`{{arch}}`、`{{current_version}}` 和 `{{bundle_type}}`。
+本机的 `TAURI_SIGNING_PRIVATE_KEY` 可以是私钥文件路径，也可以是文件内容。GitHub Actions 的 runner 上没有这台机器的路径，Secret 里必须粘贴私钥文件内容。没有密码时密码可以留空。
 
-构建产物旁会生成 `.sig` 签名。把安装包和签名放到你控制的 https 地址，并发布 Tauri 静态清单：
+`npm run tauri:build` 会先写入被 git 忽略的 `src-tauri/updater.generated.json`，其中只有公钥、https 端点和安装包签名开关。`npm run tauri:build:windows` 在此之上使用现有的 Windows NSIS 配置。端点必须是 https，不能带账号、密码或查询参数。动态更新服务可以使用 `{{target}}`、`{{arch}}`、`{{current_version}}` 和 `{{bundle_type}}`；门户这份静态清单不要使用占位符。
+
+当前配置是 `createUpdaterArtifacts: true`。Windows 的更新包就是 NSIS 安装包本身，旁边有 `.exe.sig`。`signature` 必须是该 `.sig` 的全文，不能写成路径或 URL。平台键只使用 `linux`、`darwin`、`windows` 加 `x86_64`、`aarch64`、`i686`、`armv7`。上传目录名则是 `windows`、`mac`、`linux`。
 
 ```json
 {
@@ -46,20 +67,68 @@ npm run tauri:build
   "notes": "修复预览保存",
   "pub_date": "2026-10-26T00:00:00Z",
   "platforms": {
-    "linux-x86_64": {"signature": ".sig 文件的全文", "url": "https://updates.example.com/chat3d/Chat3D.AppImage"},
-    "windows-x86_64": {"signature": ".sig 文件的全文", "url": "https://updates.example.com/chat3d/Chat3D-setup.exe"},
-    "darwin-aarch64": {"signature": ".sig 文件的全文", "url": "https://updates.example.com/chat3d/Chat3D.app.tar.gz"}
+    "windows-x86_64": {
+      "signature": "<Chat3D_0.2.1_x64-setup.exe.sig 的全文>",
+      "url": "https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/Chat3D_0.2.1_x64-setup.exe"
+    }
   }
 }
 ```
 
-`signature` 是签名文件内容，不能写成路径或 URL。平台键只使用 `linux`、`darwin`、`windows` 加 `x86_64`、`aarch64`、`i686`、`armv7`。清单本身要放在 https 上。桌面端只安装签名校验通过的包。
+有 macOS 或 Linux 签名产物时才追加平台，例如 `darwin-aarch64` 指向 `desktop-updates/chat3d/mac/*.app.tar.gz`，`linux-x86_64` 指向 `desktop-updates/chat3d/linux/*.AppImage`。桌面端只安装签名校验通过的包。清单版本必须高于已经安装的版本，否则客户端会认为没有更新。
 
-也可以由 Node 从本机文件提供这份清单。设置 `CHAT3D_DESKTOP_UPDATE_MANIFEST=/var/lib/chat3d/latest.json` 后，`GET /api/desktop-update` 返回校验过的内容。这个路径只在服务端读取，不要把它指到私钥。Worker 部署没有本机清单文件，桌面端应直接使用对象存储或发布页上的 https 清单。
+`npm run desktop-update:assemble` 扫描构建目录里的更新包和 `.sig`，写出：
+
+```text
+desktop-update-publish/UPLOAD.txt
+desktop-update-publish/chat3d/latest.json
+desktop-update-publish/chat3d/windows/Chat3D_<version>_x64-setup.exe
+desktop-update-publish/chat3d/windows/Chat3D_<version>_x64-setup.exe.sig
+```
+
+把 `chat3d/` 同步到服务器，不要上传 `UPLOAD.txt` 或私钥：
+
+```sh
+rsync -a --delete desktop-update-publish/chat3d/ <用户>@<服务器>:/opt/1panel/www/sites/portal.jiezi-ai.com/index/desktop-updates/chat3d/
+curl -fsS https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json
+```
+
+`latest.json` 不要被 Cloudflare 长期缓存。安装包 URL 含版本号，可以缓存。
+
+### 静态清单和 Node 本机文件
+
+推荐客户端直接请求门户上的静态 `latest.json`。构建时把 `CHAT3D_UPDATER_ENDPOINT` 设为 `https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json`。
+
+Node 也可以读取同一份文件：设置 `CHAT3D_DESKTOP_UPDATE_MANIFEST=/opt/1panel/www/sites/portal.jiezi-ai.com/index/desktop-updates/chat3d/latest.json` 后，`GET /api/desktop-update` 返回校验过的内容。这个路径只在服务端读取，不要把它指到私钥。Worker 没有本机清单文件，不能用这条路径。
+
+两种托管可以同时存在，但每个安装包只会请求构建时写入的那一个地址。门户发版使用静态清单。只有在希望客户端走 Node 时，才把 endpoint 改成该 Node 站点的 `https://<节点>/api/desktop-update`；安装包 URL 仍然来自上面的静态目录，不要用 Node 地址运行 `desktop-update:assemble`。
 
 用户选择「立即更新」后，应用下载、校验并安装。若下载期间又开始了生成，安装完成后不会重启，需要等任务结束再点「立即重启」。
 
-Windows 安装使用 NSIS 的 passive 模式。日常 `tauri build` 不生成更新签名；只有 `npm run tauri:build` 且两个公开更新变量都存在时才生成。
+Windows 安装使用 NSIS 的 passive 模式。日常 `tauri build` 不生成更新签名；只有 `npm run tauri:build` 且 `CHAT3D_UPDATER_ENDPOINT` 与 `CHAT3D_UPDATER_PUBKEY` 都存在时才生成。
+
+### GitHub Actions
+
+`.github/workflows/windows-desktop.yml` 在 main 推送和手动运行时都会构建 Windows NSIS。签名是可选的：
+
+- 未设置更新密钥时，保持原来的未签名 `npm run tauri -- build`，不生成 `latest.json`，也不上传门户。
+- `TAURI_SIGNING_PRIVATE_KEY`、`CHAT3D_UPDATER_PUBKEY`、`CHAT3D_UPDATER_ENDPOINT` 都有值时，改为 `npm run tauri:build:windows`，并上传 artifact `chat3d-desktop-update-<sha>`。里面是可 rsync 的 `chat3d/` 目录。
+- 只配置了其中一部分时，workflow 失败并指出缺少哪一项，避免把未签名包装成已发布的自动更新。密码 Secret 可以留空。
+
+在仓库 Settings → Secrets and variables → Actions 添加：
+
+| 名称 | 种类 | 值 |
+| --- | --- | --- |
+| `TAURI_SIGNING_PRIVATE_KEY` | Secret | `updater.key` 的文件内容，不是仓库路径 |
+| `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Secret | 生成密钥时的密码；无密码则留空 |
+| `CHAT3D_UPDATER_PUBKEY` | Secret | `tauri signer generate` 打印的单行公钥 |
+| `CHAT3D_UPDATER_ENDPOINT` | Secret | `https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json` |
+| `CHAT3D_UPDATE_NOTES` | Variable，可选 | 最多 500 字的说明 |
+| `CHAT3D_UPDATE_PUB_DATE` | Variable，可选 | RFC 3339 UTC，例如 `2026-10-26T00:00:00Z`。不设则用构建时刻 |
+
+workflow 不会登录门户，也不会把私钥放进 artifact。下载 `chat3d-desktop-update-<sha>` 后，按其中的 `UPLOAD.txt` 上传。已安装的签名包会向清单地址检查更新；未签名的日常包仍只提示未配置自动更新。
+
+这次 workflow 不构建 macOS 或 Linux，也不会假装这些平台已经发布。
 
 ## 验证
 
@@ -67,6 +136,7 @@ Windows 安装使用 NSIS 的 passive 模式。日常 `tauri build` 不生成更
 
 ```sh
 node tests/app-update.mjs
+node tests/desktop-update-publish.mjs
 ```
 
 浏览器手工检查：
@@ -77,4 +147,12 @@ node tests/app-update.mjs
 4. 结束生成后选择「稍后」，提示关闭；选择「立即更新」会刷新页面。
 5. 把 `dist/version.json` 改回构建版本。
 
-桌面手工检查需要两份已签名安装包和可访问的 https 清单。安装旧版本，发布更高版本的清单后打开应用或在设置中检查。任务进行中不应重启；空闲时「立即更新」应完成安装并重启。没有配置端点的调试包应继续启动，并在手动检查时说明未配置自动更新。
+桌面发布检查：
+
+1. 确认 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 的版本一致，且高于已安装版本。
+2. 配好密钥和 `CHAT3D_UPDATER_ENDPOINT=https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json` 后运行 `npm run tauri:build:windows`，再运行 `npm run desktop-update:assemble -- --bundle src-tauri/target/x86_64-pc-windows-msvc/release/bundle`。
+3. 打开 `desktop-update-publish/chat3d/latest.json`。`windows-x86_64.url` 应指向 `https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/` 下的 `.exe`，`signature` 与同目录 `.exe.sig` 全文一致。没有 macOS、Linux 产物时，清单里不应出现这两个平台。
+4. 确认产物和 `UPLOAD.txt` 都不含私钥。把 `chat3d/` 同步到 `/opt/1panel/www/sites/portal.jiezi-ai.com/index/desktop-updates/chat3d/`。
+5. `curl -fsS https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json` 应返回刚上传的 JSON，且 `Cache-Control` 不宜长期缓存。
+6. 安装旧的签名包，打开应用或在设置中检查。任务进行中不应重启；空闲时「立即更新」应完成安装并重启。没有配置端点的调试包应继续启动，并在手动检查时说明未配置自动更新。
+7. 未配置 GitHub Secrets 时，`.github/workflows/windows-desktop.yml` 的日志应写明继续构建未签名 NSIS，且没有 `chat3d-desktop-update-*` artifact。配齐密钥后，同一次 Windows job 改为签名构建，并附带该 artifact。
