@@ -14,7 +14,7 @@ The web application never directly fetches a model provider. `getFetch()` routes
 
 `npm run build && npm start` serves the app and API proxy together. Node 24 is recommended. The default listen address is 127.0.0.1:1420. Set HOST=0.0.0.0 only when deploying behind your own access controls. Docker builds run as the node user and listen on port1420.
 
-Behind an HTTPS reverse proxy set `CHAT3D_PUBLIC_ORIGIN` to the exact external page origin (scheme, hostname, port, no trailing slash). Preserve Host and route `/api/model/*` to this Node service. Disable response buffering and permit sufficiently long streamed responses; do not put API requests behind a static SPA fallback. API credentials are supplied by each caller and are neither persisted nor logged by this proxy.
+Behind an HTTPS reverse proxy set `CHAT3D_PUBLIC_ORIGIN` to the exact external page origin (scheme, hostname, port, no trailing slash). Preserve Host and route `/api/model/*`, `/api/version` and `/api/desktop-update` to this Node service. Disable response buffering and permit sufficiently long streamed responses; do not put API requests behind a static SPA fallback. `/api/version` must stay `no-store` so an open page can see a newly deployed build. API credentials are supplied by each caller and are neither persisted nor logged by this proxy.
 
 ## Hosted Worker
 

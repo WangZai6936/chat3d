@@ -1,0 +1,10 @@
+export function parseVersion(value: unknown): {version: string; core: number[]; pre: string[] | null} | null;
+export function compareVersions(left: string, right: string): -1 | 0 | 1 | null;
+export function isNewerVersion(remote: string, current: string): boolean;
+export function cleanNotes(value: unknown): string;
+export function versionBody(version: unknown, extra?: {notes?: unknown; pubDate?: unknown; pub_date?: unknown}): {version: string; notes?: string; pub_date?: string} | null;
+export function versionResponse(body: {version: string} | null, method?: string): Response;
+export function versionFromAsset(asset: {body?: string; base64?: boolean} | null | undefined): {version: string; notes?: string; pub_date?: string} | null;
+export function desktopManifest(value: unknown): {version: string; notes?: string; pub_date?: string; platforms: Record<string, {signature: string; url: string}>} | null;
+export function updaterEndpointError(value: unknown): string;
+export function updaterPubkeyError(value: unknown): string;
