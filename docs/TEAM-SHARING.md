@@ -67,4 +67,4 @@ npm run test:team    # SQLite/HTTP、双成员客户端与发布界面测试
 npm run build        # TypeScript、前端、Worker、团队校验器构建
 ```
 
-`.github/workflows/windows-desktop.yml` 在 main 推送后先运行上述回归，再打包 **0.2.0** Windows x64 NSIS，并调用安装测试。每次制品都记录本次提交 SHA、工作流 ID、版本和 SHA256；安装测试校验这些字段与安装后的 ProductVersion，再执行现有可访问性/UI 操作。安装包与 `windows-installed-smoke-{sha}` 包含原始证据。该流程不代表用户 GPU 或公司实际 HTTPS 部署已经验证，也不能用旧0.1.3结果替代。本次 CI 结果与链接见交付记录。
+`.github/workflows/windows-desktop.yml` 在 main 推送后先运行上述回归，再打包 **0.2.1** Windows x64 NSIS，并调用安装测试。每次制品都记录本次提交 SHA、工作流 ID、版本和 SHA256；安装测试校验这些字段与安装后的 ProductVersion，再执行现有可访问性/UI 操作。安装包与 `windows-installed-smoke-{sha}` 包含原始证据。该流程不代表用户 GPU 或公司实际 HTTPS 部署已经验证，也不能用旧0.1.3结果替代。本次 CI 结果与链接见交付记录。

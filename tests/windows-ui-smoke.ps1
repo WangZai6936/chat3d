@@ -92,13 +92,13 @@ try {
  $checks.Add(@{name='new asset opens workbench';pass=$true})
  Click-Control '导出与更多';Shot 'ui-export-menu';Dump-Controls 'ui-export-controls';Click-Control '备份与恢复';Shot 'ui-after-menu-selection';Find-Control '下载工作台备份' | Out-Null
  $downloads=(New-Object -ComObject Shell.Application).NameSpace('shell:Downloads').Self.Path
- $folder=Join-Path $downloads 'Chat3D'
- $before=@(Get-ChildItem $folder -Filter 'chat3d-workspace-*.json' -ErrorAction SilentlyContinue | ForEach-Object FullName)
+ $folder=Join-Path $downloads 'Scenivo'
+ $before=@(Get-ChildItem $folder -Filter 'scenivo-workspace-*.json' -ErrorAction SilentlyContinue | ForEach-Object FullName)
  $saved=@()
  for($repeat=0;$repeat -lt 2;$repeat++) {
   Click-Control '下载工作台备份'
   $new=$null
-  for($i=0;$i -lt 30;$i++) { $new=Get-ChildItem $folder -Filter 'chat3d-workspace-*.json' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notin $before -and $_.FullName -notin $saved } | Select-Object -First 1;if($new){break};Start-Sleep -Milliseconds 500 }
+  for($i=0;$i -lt 30;$i++) { $new=Get-ChildItem $folder -Filter 'scenivo-workspace-*.json' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notin $before -and $_.FullName -notin $saved } | Select-Object -First 1;if($new){break};Start-Sleep -Milliseconds 500 }
   if(!$new){throw 'Native backup click did not produce a new file'}
   $data=Get-Content $new.FullName -Raw | ConvertFrom-Json
   if($data.format -ne 'chat3d-workspace-backup'){throw 'Saved backup format mismatch'}
@@ -120,10 +120,10 @@ try {
  Click-Control '任务记录'
  Click-Control '问题排查'
  Find-Control '下载脱敏诊断记录' | Out-Null
- $diagnosticBefore=@(Get-ChildItem $folder -Filter 'chat3d-diagnostics-*.json' -ErrorAction SilentlyContinue | ForEach-Object FullName)
+ $diagnosticBefore=@(Get-ChildItem $folder -Filter 'scenivo-diagnostics-*.json' -ErrorAction SilentlyContinue | ForEach-Object FullName)
  Click-Control '下载脱敏诊断记录'
  $diagnostic=$null
- for($i=0;$i -lt 30;$i++){ $diagnostic=Get-ChildItem $folder -Filter 'chat3d-diagnostics-*.json' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notin $diagnosticBefore } | Select-Object -First 1;if($diagnostic){break};Start-Sleep -Milliseconds 500 }
+ for($i=0;$i -lt 30;$i++){ $diagnostic=Get-ChildItem $folder -Filter 'scenivo-diagnostics-*.json' -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notin $diagnosticBefore } | Select-Object -First 1;if($diagnostic){break};Start-Sleep -Milliseconds 500 }
  if(!$diagnostic){throw 'Diagnostic button did not save a file'}
  $diagnosticText=Get-Content $diagnostic.FullName -Raw
  $diagnosticData=$diagnosticText | ConvertFrom-Json

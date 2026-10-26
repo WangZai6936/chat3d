@@ -90,8 +90,8 @@ jobs:
           if ($installers.Count -ne 1) { throw 'Expected exactly one NSIS installer.' }
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $tauriVersion = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
-          if ($version -ne '0.2.0' -or $tauriVersion -ne $version) { throw 'Expected consistent 0.2.0 versions.' }
-          if ($installers[0].Name -cne "Chat3D_${version}_x64-setup.exe") { throw 'Unexpected installer version or architecture.' }
+          if ($version -ne '0.2.1' -or $tauriVersion -ne $version) { throw 'Expected consistent 0.2.1 versions.' }
+          if ($installers[0].Name -cne "Scenivo_${version}_x64-setup.exe") { throw 'Unexpected installer version or architecture.' }
           New-Item -ItemType Directory -Path 'windows-artifact' -Force | Out-Null
           $hashes = foreach ($installer in $installers) {
             if ($installer.Length -eq 0) { throw "Empty installer: $($installer.Name)" }

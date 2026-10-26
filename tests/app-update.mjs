@@ -34,7 +34,7 @@ assert.equal(versionFromAsset({base64: true, body: '{}'}), null);
 const signature = 'A'.repeat(80);
 const manifest = desktopManifest({version: '1.2.3', notes: '桌面', platforms: {'linux-x86_64': {url: 'https://updates.example.test/chat3d/app.AppImage', signature}, 'windows-x86_64': {url: 'http://updates.example.test/app.exe', signature}}});
 assert.equal(manifest, null);
-const accepted = desktopManifest({version: 'v1.2.3', pub_date: '2026-10-26T00:00:00Z', platforms: {'darwin-aarch64': {url: 'https://updates.example.test/chat3d/Chat3D.app.tar.gz', signature}}});
+const accepted = desktopManifest({version: 'v1.2.3', pub_date: '2026-10-26T00:00:00Z', platforms: {'darwin-aarch64': {url: 'https://updates.example.test/chat3d/Scenivo.app.tar.gz', signature}}});
 assert.equal(accepted.version, '1.2.3');
 assert.equal(desktopManifest({version: '1.2.3', platforms: {'linux-x86_64': {url: 'https://user:secret@updates.example.test/app', signature}}}), null);
 assert.equal(desktopManifest({version: '1.2.3', platforms: {'linux-x86_64': {url: 'https://updates.example.test/app', signature: '../secret.key'}}}), null);

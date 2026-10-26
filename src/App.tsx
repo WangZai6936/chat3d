@@ -84,7 +84,7 @@ export default function App() {
     try {
       const data = await exportGlb(structuredClone(useEditorStore.getState().doc));
       const url = URL.createObjectURL(new Blob([data], { type: 'model/gltf-binary' }));
-      const a = document.createElement('a'); a.href = url; a.download = 'chat3d-model.glb';
+      const a = document.createElement('a'); a.href = url; a.download = 'scenivo-model.glb';
       document.body.appendChild(a); a.click(); a.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       setProjectNotice('已发起 GLB 下载：包含可见模型及材质，不包含背景、灯光、选中框或动画。保存动画与编辑工程请下载项目 JSON。');
     } catch (e) { setProjectNotice(`GLB 导出失败：${e instanceof Error ? e.message : String(e)}`); }
@@ -95,7 +95,7 @@ export default function App() {
       const doc = useEditorStore.getState().doc;
       const url = URL.createObjectURL(new Blob([serializeProject(doc)], { type: 'application/json' }));
       const link = document.createElement('a');
-      link.href = url; link.download = `chat3d-${doc.projectId.slice(0, 8)}.chat3d.json`;
+      link.href = url; link.download = `scenivo-${doc.projectId.slice(0, 8)}.chat3d.json`;
       document.body.appendChild(link); link.click(); link.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       useEditorStore.getState().markSaved();
@@ -146,7 +146,7 @@ export default function App() {
   return <AppearanceProvider>
     <div style={{'--chat-width':`${assistantWidth}px`,'--chat-space':assistantOpen?`${assistantWidth}px`:'0px'} as CSSProperties} className={`studio redesigned-studio canvas-studio frosted-studio ${modulePage==='workbench'?'editor-mode':'manager-mode'} ${focusScene?'focus-scene':''}`}>
       <nav className="app-navigation" aria-label="主导航">
-        <div className="app-brand"><BrandMark/><strong>Chat3D</strong></div>
+        <div className="app-brand"><BrandMark/><strong>Scenivo</strong></div>
 
         <div className="navigation-pages">{([['home','首页','首页'],['asset','资产','资产库'],['scene','场景','场景库'],['workbench','工作台','建模工作台']] as const).map(([page,label,accessibleLabel])=><Button variant="ghost" color="gray" key={page} title={accessibleLabel} aria-label={accessibleLabel} disabled={librarySaving||!workspace.ready} aria-current={modulePage===page?'page':undefined} onClick={()=>{setModulePage(page);setFocusScene(false);}}><span>{label}</span></Button>)}</div>
         <div className="navigation-utilities"><AppearanceMenu/><TaskQueue openRequest={taskQueueRequest} disabled={librarySaving||!workspace.ready} onOpen={()=>{setModulePage('workbench');setFocusScene(false);setAssistantOpen(true);setAssistantTab('chat');}} onHistory={()=>{setModulePage('tasks');setFocusScene(false);}}/><Button variant="ghost" color="gray" title="设置" aria-label="设置" disabled={librarySaving||!workspace.ready} aria-current={modulePage==='settings'?'page':undefined} onClick={()=>setModulePage('settings')}><GearIcon/></Button></div>

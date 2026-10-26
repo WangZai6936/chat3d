@@ -8,7 +8,7 @@ if (context?.registerTool) {
   try {
     void Promise.resolve(context.registerTool({
       name: 'read_scene_status',
-      description: 'Read the current chat3d scene object count, selected object IDs, and preview status. Does not disclose model credentials or send a model request.',
+      description: 'Read the current Scenivo scene object count, selected object IDs, and preview status. Does not disclose model credentials or send a model request.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true },
       execute(input) {
