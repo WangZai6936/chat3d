@@ -2,6 +2,8 @@
 
 更新日期：2026-10-26。适用包：`chat3d-server-4c16cad.tar.gz`。
 
+这是已经发出的 0.2.0 部署记录。0.2.1 起桌面端对外名称是 Scenivo；本文里的路径、服务账号和 `Chat3D_0.2.0_x64-setup.exe` 仍对应该次安装包，不要按新名称改已有服务器目录。
+
 本文部署的是 **公司内部团队共享服务**，供 Windows 客户端连接、发布和复用资产/场景。使用已编译部署包，不执行 `npm install`、`npm ci` 或 `npm run build`。模型 API 配置与团队账号独立；本文不启用公网模型代理，不涉及 MES/WMS 业务联动。
 
 主线方案：**Linux + Node.js 24 + systemd + 宿主机 Nginx HTTPS**。命令针对首次部署，使用 Bash。每一步检查通过再继续，不要整篇一次性粘贴执行。
@@ -114,7 +116,7 @@ printf '%s  %s\n' \
 
 出现 `OK` 后继续；否则重新下载/上传，不使用损坏文件。
 
-创建专用低权限服务账号与目录。下面账号仅供系统服务使用，不是 Chat3D 登录账号；如果已有同名账号，先确认其用途。
+创建专用低权限服务账号与目录。下面账号仅供系统服务使用，不是 Scenivo 登录账号；如果已有同名账号，先确认其用途。
 
 ```bash
 id chat3d >/dev/null 2>&1 || useradd --system --user-group --home-dir /var/lib/chat3d --shell /usr/sbin/nologin chat3d
@@ -421,7 +423,7 @@ systemctl status chat3d-team --no-pager
 本文已核对实际包结构、启动程序、账号 CLI 和接口路径；未在你的服务器执行部署，不保证未知发行版/面板网络可直接照搬。先做内部试用和备份恢复验证，再决定正式上线。
 
 参考：
-- [Chat3D 团队共享部署与使用说明](https://github.com/WangZai6936/chat3d/blob/main/docs/TEAM-SHARING.md)
+- [Scenivo 团队共享部署与使用说明](https://github.com/WangZai6936/chat3d/blob/main/docs/TEAM-SHARING.md)
 - 部署包内 `README-RUNTIME.txt`、`DEPLOYMENT.md`、`SOURCE-COMMIT.txt`
 - [Node.js 24.22.1 官方发布与下载](https://nodejs.org/en/blog/release/v24.22.1)
 - [Nginx 反向代理指令](https://nginx.org/en/docs/http/ngx_http_proxy_module.html)

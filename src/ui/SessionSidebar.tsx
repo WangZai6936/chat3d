@@ -12,7 +12,7 @@ export function SessionSidebar({onClose}:{locked:boolean;onClose:()=>void}){
  const state=(s:WorkspaceSession)=>sessionState(s,s.id===activeId?liveStatus:undefined);
  const shown=sessions.filter(s=>!!s.deletedAt===trash&&s.title.toLowerCase().includes(query.toLowerCase())&&(trash||filter==='all'||state(s)===filter)).sort((a,b)=>Number(!!b.pinned)-Number(!!a.pinned)||b.updatedAt-a.updatedAt);
  return <>
- <div className="session-brand"><div className="brand-mark"><CubeIcon width="23" height="23"/></div><div><strong>chat3d</strong><span>建模工作台</span></div><IconButton className="sidebar-close" variant="ghost" color="gray" onClick={onClose} aria-label="收起会话列表"><Cross1Icon/></IconButton></div>
+ <div className="session-brand"><div className="brand-mark"><CubeIcon width="23" height="23"/></div><div><strong>Scenivo</strong><span>建模工作台</span></div><IconButton className="sidebar-close" variant="ghost" color="gray" onClick={onClose} aria-label="收起会话列表"><Cross1Icon/></IconButton></div>
  <div className="session-controls"><Button size="3" style={{width:'100%'}} disabled={!!error||!ready} onClick={()=>{if(createSession()){setTrash(false);setFilter('all');onClose();}}}><PlusIcon/>新建会话</Button><TextField.Root value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索会话" aria-label="搜索会话"><TextField.Slot><MagnifyingGlassIcon/></TextField.Slot></TextField.Root></div>
  {!trash&&<div className="session-filters" aria-label="会话筛选">{([['all','全部'],['review','待确认'],['draft','草稿']] as const).map(([key,label])=><button key={key} aria-pressed={filter===key} onClick={()=>setFilter(key)}>{label}</button>)}</div>}
  <div className="session-section"><span>{trash?'回收站':'工作会话'}</span><span>{shown.length}</span></div>

@@ -6,7 +6,7 @@ import { SceneDocument } from '../domain/types';
 import { buildPrimitiveGeometry } from './geometry';
 
 export function buildExportScene(doc: SceneDocument): THREE.Scene {
-  const scene=new THREE.Scene();scene.name='chat3d';scene.userData={unit:doc.unit,projectId:doc.projectId};
+  const scene=new THREE.Scene();scene.name='Scenivo';scene.userData={unit:doc.unit,projectId:doc.projectId};
   for (const n of doc.nodes) {
     if (!n.visible) continue;
     if (n.kind!=='primitive'||!n.geometry||n.parentId!==null) throw new Error('当前 GLB 导出仅支持无分组的基础模型');

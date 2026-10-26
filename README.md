@@ -1,6 +1,8 @@
-# chat3d
+# Scenivo
 
 通过对话生成和修改可编辑的工业三维场景，支持静态沙盘与通用关键帧/表达式动画。前端为 React、TypeScript、Three.js；Web 使用同源模型代理，另有 Tauri 桌面端源码。
+
+0.2.1 把用户看到的产品名从 Chat3D 改为 Scenivo。仓库仍是 `WangZai6936/chat3d`，桌面更新地址仍是 `https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json`。
 
 ## 内部团队共享
 
@@ -8,7 +10,7 @@
 
 ## Agent 依赖
 
-连续建模使用 `@earendil-works/pi-agent-core` 与 `@earendil-works/pi-ai`，均固定为 `1.0.0`。项目直接使用 `Agent` 和 OpenAI-compatible 流式适配器；会话、草稿、建模工具与复核规则由 chat3d 管理，不依赖 1.0 已移出的实验性 AgentHarness。
+连续建模使用 `@earendil-works/pi-agent-core` 与 `@earendil-works/pi-ai`，均固定为 `1.0.0`。项目直接使用 `Agent` 和 OpenAI-compatible 流式适配器；会话、草稿、建模工具与复核规则由 Scenivo 管理，不依赖 1.0 已移出的实验性 AgentHarness。
 
 此升级不自动接入 Pi Coding Agent 的 Codemode、MCP 登录或终端界面，也不代表整体任务 Token 减少 40%。这些是独立能力，需要按产品需求另行集成。
 

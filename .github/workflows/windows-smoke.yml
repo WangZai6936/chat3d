@@ -28,12 +28,12 @@ jobs:
           if ($source.repository -cne $env:GITHUB_REPOSITORY -or $source.commit -cne $checkedOut) { throw 'Installer source commit or repository mismatch.' }
           if ($source.build_run_id -ne $env:GITHUB_RUN_ID) { throw 'Installer belongs to another workflow run.' }
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($version -ne '0.2.0' -or $source.version -ne $version) { throw 'Expected the 0.2.0 installer.' }
+          if ($version -ne '0.2.1' -or $source.version -ne $version) { throw 'Expected the 0.2.1 installer.' }
           if ($source.target -ne 'x86_64-pc-windows-msvc') { throw 'Installer target mismatch.' }
           $installers = @(Get-ChildItem installer-artifact -Filter '*.exe')
           if ($installers.Count -ne 1) { throw 'Expected exactly one installer.' }
           $exe = $installers[0]
-          if ($exe.Name -cne "Chat3D_${version}_x64-setup.exe") { throw 'Installer filename does not match the required version.' }
+          if ($exe.Name -cne "Scenivo_${version}_x64-setup.exe") { throw 'Installer filename does not match the required version.' }
           $hashLines = @(Get-Content installer-artifact/SHA256SUMS.txt | Where-Object { $_.Trim() })
           if ($hashLines.Count -ne 1 -or $hashLines[0] -cnotmatch '^([a-f0-9]{64})  (.+)$') { throw 'Invalid installer hash manifest.' }
           $expected = $Matches[1]
@@ -47,7 +47,7 @@ jobs:
           $app = Get-ChildItem $destination -Recurse -Filter '*.exe' | Where-Object { $_.Name -ieq 'chat3d.exe' } | Select-Object -First 1
           if (!$app) { throw 'Installed executable missing' }
           $installedVersion = $app.VersionInfo.ProductVersion
-          if ($installedVersion -notmatch '^0\.2\.0(?:\.0)?$') { throw "Installed executable version mismatch: $installedVersion" }
+          if ($installedVersion -notmatch '^0\.2\.1(?:\.0)?$') { throw "Installed executable version mismatch: $installedVersion" }
           @{ repository=$env:GITHUB_REPOSITORY; commit=$checkedOut; buildRun=$env:GITHUB_RUN_ID; version=$version; installer=$exe.Name; installerSha256=$actual; installExitCode=$p.ExitCode; installedVersion=$installedVersion; installedExeSha256=(Get-FileHash $app.FullName -Algorithm SHA256).Hash.ToLowerInvariant() } | ConvertTo-Json | Set-Content windows-smoke-results/installation.json
           "CHAT3D_INSTALLED_EXE=$($app.FullName)" >> $env:GITHUB_ENV
       - name: Install locked JavaScript test dependencies

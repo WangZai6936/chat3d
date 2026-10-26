@@ -25,7 +25,7 @@
 
 未配置更新源的安装包仍可运行。检查时会说明此包未启用自动更新，不会下载任何文件。
 
-桌面更新清单是 Tauri 的静态 `latest.json`，不是 Electron 的 `latest.yml`。同一门户以后会放多个应用，chat3d 使用自己的一级目录。
+桌面更新清单是 Tauri 的静态 `latest.json`，不是 Electron 的 `latest.yml`。同一门户以后会放多个应用，这个应用继续使用一级目录 `chat3d`。对外产品名是 Scenivo，安装包文件名因此是 `Scenivo_<version>_x64-setup.exe`。已安装的签名包仍请求下面的清单地址，不要改目录。应用 ID 仍是 `com.chat3d.app`，主程序仍是 `chat3d.exe`。NSIS 默认用产品名记住旧安装位置；`src-tauri/windows/hooks.nsh` 在默认安装目录上发现 Chat3D 0.2.0 时，会改回原来的目录、把快捷方式换成 Scenivo，并删掉旧的卸载登记。不要运行旧卸载程序来清理数据，它会删除 `$APPDATA\com.chat3d.app`。
 
 门户 `https://portal.jiezi-ai.com/` 的源站监听 38008，由 Cloudflare Tunnel 提供对外 https。客户端只访问 https，不要把 38008 写进安装包。
 
@@ -49,7 +49,7 @@ export TAURI_SIGNING_PRIVATE_KEY="$HOME/.chat3d/updater.key"
 export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="签名密码"
 export CHAT3D_UPDATER_PUBKEY="tauri signer 打印的单行公钥"
 export CHAT3D_UPDATER_ENDPOINT="https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json"
-export CHAT3D_UPDATE_NOTES="修复预览保存"
+export CHAT3D_UPDATE_NOTES="产品更名为 Scenivo。"
 export CHAT3D_UPDATE_PUB_DATE="2026-10-26T00:00:00Z"
 npm run tauri:build:windows
 npm run desktop-update:assemble -- --bundle src-tauri/target/x86_64-pc-windows-msvc/release/bundle
@@ -64,12 +64,12 @@ npm run desktop-update:assemble -- --bundle src-tauri/target/x86_64-pc-windows-m
 ```json
 {
   "version": "0.2.1",
-  "notes": "修复预览保存",
+  "notes": "产品更名为 Scenivo。",
   "pub_date": "2026-10-26T00:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "<Chat3D_0.2.1_x64-setup.exe.sig 的全文>",
-      "url": "https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/Chat3D_0.2.1_x64-setup.exe"
+      "signature": "<Scenivo_0.2.1_x64-setup.exe.sig 的全文>",
+      "url": "https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/Scenivo_0.2.1_x64-setup.exe"
     }
   }
 }
@@ -82,8 +82,8 @@ npm run desktop-update:assemble -- --bundle src-tauri/target/x86_64-pc-windows-m
 ```text
 desktop-update-publish/UPLOAD.txt
 desktop-update-publish/chat3d/latest.json
-desktop-update-publish/chat3d/windows/Chat3D_<version>_x64-setup.exe
-desktop-update-publish/chat3d/windows/Chat3D_<version>_x64-setup.exe.sig
+desktop-update-publish/chat3d/windows/Scenivo_<version>_x64-setup.exe
+desktop-update-publish/chat3d/windows/Scenivo_<version>_x64-setup.exe.sig
 ```
 
 把 `chat3d/` 同步到服务器，不要上传 `UPLOAD.txt` 或私钥：

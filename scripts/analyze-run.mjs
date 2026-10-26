@@ -2,7 +2,7 @@ import fs from 'node:fs';import {pathToFileURL} from 'node:url';
 const valid=n=>typeof n==='number'&&Number.isFinite(n)&&n>=0;
 const sum=xs=>xs.reduce((a,b)=>a+b,0);
 export function analyzeRun(document){
- if(document?.format!=='chat3d-diagnostics-v1'||!document.run||!Array.isArray(document.run.timings))throw Error('Expected a Chat3D diagnostics run');
+ if(document?.format!=='chat3d-diagnostics-v1'||!document.run||!Array.isArray(document.run.timings))throw Error('Expected a Scenivo diagnostics run');
  const run=document.run,rows=run.timings,closed=rows.filter(t=>valid(t.startedAt)&&valid(t.endedAt)&&t.endedAt>=t.startedAt),model=closed.filter(t=>t.kind==='model'),tools=closed.filter(t=>t.kind==='tool');
  const durations=rs=>rs.map(t=>(t.endedAt-t.startedAt)/1000);const modelSeconds=sum(durations(model)),toolSeconds=sum(durations(tools));
  const wallSeconds=closed.length?(Math.max(...closed.map(t=>t.endedAt))-Math.min(...closed.map(t=>t.startedAt)))/1000:null;

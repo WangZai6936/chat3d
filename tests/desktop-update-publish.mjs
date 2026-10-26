@@ -22,9 +22,9 @@ assert.equal(describeStaticEndpoint('https://portal.jiezi-ai.com/desktop-updates
 assert.equal(describeStaticEndpoint('https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json?cache=1').ok, false);
 assert.equal(describeStaticEndpoint('https://portal.jiezi-ai.com/desktop-updates/chat3d/{{target}}/latest.json').ok, false);
 assert.equal(describeStaticEndpoint('https://updates.example.com/desktop-updates/otherapp/latest.json').appName, 'otherapp');
-assert.equal(archFromFilename('Chat3D_0.2.0_x64-setup.exe'), 'x86_64');
-assert.equal(archFromFilename('Chat3D_0.2.0_amd64.AppImage'), 'x86_64');
-assert.equal(archFromFilename('Chat3D_0.2.0_x86_64.AppImage'), 'x86_64');
+assert.equal(archFromFilename('Scenivo_0.2.0_x64-setup.exe'), 'x86_64');
+assert.equal(archFromFilename('Scenivo_0.2.0_amd64.AppImage'), 'x86_64');
+assert.equal(archFromFilename('Scenivo_0.2.0_x86_64.AppImage'), 'x86_64');
 assert.equal(readProjectVersion(process.cwd()), JSON.parse(readFileSync('package.json', 'utf8')).version);
 
 function assertScoped(text, label) {
@@ -72,9 +72,9 @@ try {
   await mkdir(windows, {recursive: true});
   await mkdir(mac, {recursive: true});
   await mkdir(linux, {recursive: true});
-  const exe = 'Chat3D_0.2.0_x64-setup.exe';
-  const macArchive = 'Chat3D.app.tar.gz';
-  const image = 'Chat3D_0.2.0_amd64.AppImage';
+  const exe = 'Scenivo_0.2.0_x64-setup.exe';
+  const macArchive = 'Scenivo.app.tar.gz';
+  const image = 'Scenivo_0.2.0_amd64.AppImage';
   await writeFile(join(windows, exe), 'windows-installer');
   await writeFile(join(windows, `${exe}.sig`), signature);
   await writeFile(join(mac, macArchive), 'mac-archive');
@@ -101,13 +101,13 @@ try {
   assert.equal(published.includes(password), false);
   assert.equal(published.includes(pubkey), false);
   await assert.rejects(() => assembleDesktopUpdate({bundleDir: bundle, outDir: out, endpoint, version: '0.2.0', pubDate: 'tomorrow'}), /RFC 3339/);
-  await writeFile(join(windows, 'Chat3D_0.1.0_x64-setup.exe'), 'old');
-  await writeFile(join(windows, 'Chat3D_0.1.0_x64-setup.exe.sig'), signature);
+  await writeFile(join(windows, 'Scenivo_0.1.0_x64-setup.exe'), 'old');
+  await writeFile(join(windows, 'Scenivo_0.1.0_x64-setup.exe.sig'), signature);
   await assert.rejects(() => assembleDesktopUpdate({bundleDir: bundle, outDir: out, endpoint, version: '0.2.0', pubDate: '2026-10-26T00:00:00Z'}), /0\.1\.0/);
-  await rm(join(windows, 'Chat3D_0.1.0_x64-setup.exe'));
-  await rm(join(windows, 'Chat3D_0.1.0_x64-setup.exe.sig'));
-  await writeFile(join(windows, 'Chat3D_0.2.0_x64-setup.nsis.zip'), 'zip');
-  await writeFile(join(windows, 'Chat3D_0.2.0_x64-setup.nsis.zip.sig'), signature);
+  await rm(join(windows, 'Scenivo_0.1.0_x64-setup.exe'));
+  await rm(join(windows, 'Scenivo_0.1.0_x64-setup.exe.sig'));
+  await writeFile(join(windows, 'Scenivo_0.2.0_x64-setup.nsis.zip'), 'zip');
+  await writeFile(join(windows, 'Scenivo_0.2.0_x64-setup.nsis.zip.sig'), signature);
   await assert.rejects(() => assembleDesktopUpdate({bundleDir: bundle, outDir: out, endpoint, version: '0.2.0', pubDate: '2026-10-26T00:00:00Z'}), /多份更新包/);
 
   const windowsOnly = join(root, 'windows-only');
@@ -123,13 +123,20 @@ try {
   await assert.rejects(readFile(join(onlyOut, 'windows', exe)), /ENOENT/);
   await assert.rejects(readFile(join(onlyOut, 'latest.json')), /ENOENT/);
 
+  const cliBundle = join(root, 'cli-bundle');
+  const cliNsis = join(cliBundle, 'nsis');
+  await mkdir(cliNsis, {recursive: true});
+  const cliExe = `Scenivo_${readProjectVersion(process.cwd())}_x64-setup.exe`;
+  await writeFile(join(cliNsis, cliExe), 'cli-windows');
+  await writeFile(join(cliNsis, `${cliExe}.sig`), signature);
   const cli = await assembleFromEnvironment({
     CHAT3D_UPDATER_ENDPOINT: endpoint,
     CHAT3D_UPDATE_PUB_DATE: '2026-10-26T00:00:00Z',
     TAURI_SIGNING_PRIVATE_KEY: privateKey,
     TAURI_SIGNING_PRIVATE_KEY_PASSWORD: password,
-  }, {root: process.cwd(), bundle: windowsOnly, out: join(root, 'cli-publish')});
-  assert.equal(cli.manifest.platforms['windows-x86_64'].url.startsWith('https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/'), true);
+  }, {root: process.cwd(), bundle: cliBundle, out: join(root, 'cli-publish')});
+  assert.equal(cli.manifest.version, readProjectVersion(process.cwd()));
+  assert.equal(cli.manifest.platforms['windows-x86_64'].url, `https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/${cliExe}`);
   assert.equal((await readFile(cli.manifestPath, 'utf8')).includes(privateKey), false);
 } finally { await rm(root, {recursive: true, force: true}); }
 

@@ -75,7 +75,7 @@ export function buildSystemPrompt(ctx: SceneContext, generationQuality: Generati
     ? ctx.nodes.map((n) => `  - id:${n.id} name:${n.name} (${n.desc}) pos:[${n.position.join(',')}] rotation:${JSON.stringify(n.rotationQuaternion)} scale:${JSON.stringify(n.scale)} material:${n.materialId} visible:${n.visible} parent:${n.parentId}`).join('\n')
     : '  （空场景，还没有任何对象）';
   const sel = ctx.selectedAssemblies?.length ? `当前高亮的完整组件 id：${ctx.selectedAssemblies.join(', ')}，包含各组件全部零件。其他高亮节点：${ctx.selection.join(', ')||'无'}。` : ctx.selection.length ? `当前高亮的节点 id：${ctx.selection.join(', ')}` : '当前没有高亮对象。';
-  const prompt = `你是 chat3d 的三维建模助手，专门搭建工业设备 / 仓储设备场景。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
+  const prompt = `你是 Scenivo 的三维建模助手，专门搭建工业设备 / 仓储设备场景。用户用中文描述需求，你把它转换成结构化的命令批 JSON。
 
 # 需求优先级
 用户最新明确需求优先于默认展示设置、历史方案和模型假设。分批执行以满足完整需求，不因单次命令容量而擅自删减目标；仍需遵守真实安全边界与有效数据要求，不支持的能力应明确说明。
