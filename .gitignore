@@ -26,6 +26,7 @@ dist-ssr
 # chat3d build & test artifacts
 src-tauri/target
 src-tauri/updater.generated.json
+desktop-update-publish/
 e2e/shots
 *.tmp.ps1
 
