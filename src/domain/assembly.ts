@@ -1,3 +1,4 @@
+import {STRUCTURED_PART_LIMIT} from './structureLimits';
 import {validateBlueprints,type ObjectBlueprint} from './objectBlueprint';
 import {Matrix4,Quaternion as Q,Vector3} from 'three';
 import {SCENE_ROLE_MATERIALS} from './materials';
@@ -25,7 +26,7 @@ export function buildAssembly(def:AssemblyDefinition):SceneNode[]{
   if(!t)throw Error(where+'缺少transform');
   const transformErrors=[...validateVec3(t.position,'transform.position'),...validateVec3(t.scale,'transform.scale'),...validateQuaternion(t.rotationQuaternion,'transform.rotationQuaternion')];if(transformErrors.length)throw Error(where+transformErrors.map(e=>e.message).join('；'));
   if(t.scale.some(n=>n<=0))throw Error(where+'transform.scale各轴必须大于0');
-  if(repeat&&(!Number.isSafeInteger(repeat.count)||repeat.count<1||repeat.count>100||validateVec3(repeat.step,'repeat.step').length))throw Error(where+'repeat.count需为1–100整数，repeat.step需为三维间距');total+=repeat?.count??1;
+  if(repeat&&(!Number.isSafeInteger(repeat.count)||repeat.count<1||repeat.count>STRUCTURED_PART_LIMIT||validateVec3(repeat.step,'repeat.step').length))throw Error(where+'repeat.count需为1–1000整数，repeat.step需为三维间距');total+=repeat?.count??1;
  }catch(error){issues.push(error instanceof Error?error.message:String(error));}}
  if(issues.length)throw new AssemblyValidationError(issues);
  if(total>2000)throw new Error('单个组合超过2000零件上限');
