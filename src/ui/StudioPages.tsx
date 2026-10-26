@@ -1,3 +1,4 @@
+import {AppUpdateSettings} from './AppUpdateNotice';
 import {AppearanceSettings} from './Appearance';
 import {Button,TextField} from '@radix-ui/themes';
 import {useState} from 'react';
@@ -8,6 +9,6 @@ export function TaskCenter({onOpen}:{onOpen:()=>void;locked:boolean}){const w=us
 export function StudioSettings({onModel,onBackup,onHistory}:{onModel:()=>void;onBackup:()=>void;onAssets:()=>void;onHistory:()=>void}){return <main className="settings-page settings-refresh">
  <header className="resource-heading"><div><span className="resource-eyebrow">偏好与管理</span><h1>设置</h1><p>让 Chat3D 按你的习惯工作。</p></div></header>
  <div className="settings-groups"><section className="settings-group"><header><h2>通用</h2><p>外观和建模服务</p></header><div className="settings-row"><span className="settings-icon"><GearIcon/></span><div><h3>外观</h3><p>选择浅色、深色或跟随系统</p></div><AppearanceSettings/></div><div className="settings-row"><span className="settings-icon"><GearIcon/></span><div><h3>模型与执行</h3><p>连接模型服务，调整生成方式与任务预算</p></div><Button variant="soft" color="blue" onClick={onModel}>模型配置</Button></div></section>
- <section className="settings-group"><header><h2>数据管理</h2><p>备份项目，找回历史内容</p></header><div className="settings-row"><span className="settings-icon"><DownloadIcon/></span><div><h3>备份与恢复</h3><p>导出项目与对话，或从备份新增项目</p></div><Button variant="soft" color="gray" onClick={onBackup}>管理项目备份</Button></div><div className="settings-row"><span className="settings-icon"><ActivityLogIcon/></span><div><h3>项目与回收站</h3><p>查找旧项目，恢复已删除的内容</p></div><Button variant="soft" color="gray" onClick={onHistory}>管理项目</Button></div></section></div>
+ <section className="settings-group"><header><h2>数据管理</h2><p>备份项目，找回历史内容</p></header><div className="settings-row"><span className="settings-icon"><DownloadIcon/></span><div><h3>备份与恢复</h3><p>导出项目与对话，或从备份新增项目</p></div><Button variant="soft" color="gray" onClick={onBackup}>管理项目备份</Button></div><div className="settings-row"><span className="settings-icon"><ActivityLogIcon/></span><div><h3>项目与回收站</h3><p>查找旧项目，恢复已删除的内容</p></div><Button variant="soft" color="gray" onClick={onHistory}>管理项目</Button></div></section><AppUpdateSettings/></div>
  <p className="settings-storage-note">数据保存在当前设备，不会自动同步。清理应用数据或更换设备前，请先备份。资产的导入与备份在资产库中管理。</p>
  </main>;}

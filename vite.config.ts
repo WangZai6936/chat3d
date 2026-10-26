@@ -3,14 +3,29 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 // @ts-expect-error type error without @types/node package
 import process from "node:process";
+// @ts-expect-error type error without @types/node package
+import {readFileSync} from "node:fs";
 // @ts-expect-error JavaScript server plugin has no declaration file
 import {modelProxyPlugin} from "./server/node-adapter.mjs";
+// @ts-expect-error JavaScript server plugin has no declaration file
+import {appVersionPlugin} from "./server/app-version.mjs";
+// @ts-expect-error JavaScript release metadata has no declaration file
+import {versionBody} from "./shared/app-version.mjs";
 const host = process.env.TAURI_DEV_HOST;
 
 // https://vite.dev/config/
 export default defineConfig(({mode}) => ({
   define: {__APP_BUILD_COMMIT__: JSON.stringify(process.env.GITHUB_SHA ?? "local")},
-  plugins: [react(), tailwindcss(), modelProxyPlugin(loadEnv(mode, process.cwd(), "CHAT3D_").CHAT3D_ALLOWED_UPSTREAMS)],
+  plugins: [react(), tailwindcss(), modelProxyPlugin(loadEnv(mode, process.cwd(), "CHAT3D_").CHAT3D_ALLOWED_UPSTREAMS), appVersionPlugin(), {
+    name: "chat3d-emit-app-version",
+    apply: "build",
+    generateBundle() {
+      const version = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")).version;
+      const body = versionBody(version, {notes: process.env.CHAT3D_UPDATE_NOTES ?? "", pubDate: process.env.CHAT3D_UPDATE_PUB_DATE ?? ""});
+      if (!body) this.error("package.json version is not a supported release version");
+      this.emitFile({type: "asset", fileName: "version.json", source: JSON.stringify(body)});
+    },
+  }],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

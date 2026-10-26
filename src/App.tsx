@@ -1,3 +1,5 @@
+import {usePublishUpdateContext} from './ui/appUpdateContext';
+import {AppUpdateNotice} from './ui/AppUpdateNotice';
 import {SaveToast,isLibrarySaveNotice} from './ui/SaveToast';
 import {TaskQueue} from './ui/TaskQueue';
 import {BrandMark} from './ui/BrandMark';
@@ -139,6 +141,7 @@ export default function App() {
   useEffect(()=>{setProjectNotice('');},[modulePage]);
   useEffect(()=>{const key=(e:KeyboardEvent)=>{if(e.key==='Escape'){setFocusScene(false);}};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[]);
   useEffect(()=>{if(locked)setAssistantOpen(true);},[locked]);
+  usePublishUpdateContext();
 
   return <AppearanceProvider>
     <div style={{'--chat-width':`${assistantWidth}px`,'--chat-space':assistantOpen?`${assistantWidth}px`:'0px'} as CSSProperties} className={`studio redesigned-studio canvas-studio frosted-studio ${modulePage==='workbench'?'editor-mode':'manager-mode'} ${focusScene?'focus-scene':''}`}>
@@ -150,6 +153,7 @@ export default function App() {
       </nav>
       <section className="studio-main">
 
+        <AppUpdateNotice onBackup={()=>setShowTools(true)}/>
         {saveNotice&&!workspace.error&&<SaveToast message={projectNotice} onClose={closeSaveNotice}/>}
         {(workspace.error||autosaveError||(projectNotice&&!saveNotice))&&<div role="status" className={`workspace-notice ${workspace.error||autosaveError?'is-error':''}`}><span>{workspace.error||autosaveError||projectNotice}</span>{!workspace.error&&!autosaveError&&<IconButton size="1" variant="ghost" color="gray" aria-label="关闭通知" onClick={()=>setProjectNotice('')}><Cross1Icon/></IconButton>}</div>}
         {!workspace.ready&&<div className="workspace-loading"><Spinner size="3"/><p>正在恢复项目…</p></div>}

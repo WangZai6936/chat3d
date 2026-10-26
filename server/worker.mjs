@@ -1,3 +1,4 @@
+import {versionFromAsset,versionResponse} from '../shared/app-version.mjs';
 import {handleModelProxy} from './model-proxy.mjs';
 // Build replaces this module with a generated, immutable map of public client files.
 import {assets} from 'chat3d-built-assets';
@@ -8,6 +9,7 @@ export default {async fetch(request,env){
  if(url.pathname==='/api/blender/status')return Response.json({available:false,reason:'This hosting environment does not run Blender processes'},{headers:{'cache-control':'no-store'}});
  if(url.pathname.startsWith('/api/blender/'))return Response.json({error:'Blender service is not configured'},{status:503});
  if(url.pathname.startsWith('/api/model/'))return handleModelProxy(request,{allowed:env.CHAT3D_ALLOWED_UPSTREAMS,fetchImpl:(url,init)=>fetch(url,init)});
+ if(url.pathname==='/api/version'){if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405});return versionResponse(versionFromAsset(assets['/version.json']),request.method);}
  if(url.pathname.startsWith('/api/'))return new Response('Not found',{status:404});
  if(!['GET','HEAD'].includes(request.method))return new Response('Method not allowed',{status:405});
  const path=url.pathname==='/'?'/index.html':url.pathname;

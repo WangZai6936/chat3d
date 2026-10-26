@@ -38,9 +38,16 @@ fn save_support_json(app: tauri::AppHandle, contents: String, kind: String) -> R
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_http::init());
+    // Desktop updates are inactive until a release build supplies an https endpoint
+    // and minisign public key. The private signing key stays in the build environment.
+    #[cfg(desktop)]
+    let builder = builder
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build());
+    builder
         .invoke_handler(tauri::generate_handler![greet, save_support_json])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
