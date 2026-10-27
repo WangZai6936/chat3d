@@ -1,0 +1,133 @@
+/* Top chrome — token-driven; loads after frosted-studio to refine, not duplicate, layout grid. */
+.canvas-studio.frosted-studio > .app-navigation.studio-shell {
+  height: 64px;
+  min-height: 64px;
+  padding: 0 var(--sc-space-5);
+  gap: var(--sc-space-4);
+  background: var(--sc-surface-elevated);
+  border-bottom: 1px solid var(--sc-border-subtle);
+  box-shadow: 0 1px 0 var(--gray-a2);
+  backdrop-filter: blur(18px);
+}
+
+.canvas-studio.frosted-studio .studio-shell-brand {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  color: var(--sc-ink);
+}
+
+.canvas-studio.frosted-studio .studio-shell-brand > svg {
+  width: 32px;
+  height: 32px;
+}
+
+.canvas-studio.frosted-studio .navigation-pages.studio-shell-nav {
+  padding: 3px;
+  gap: 2px;
+  border-radius: var(--sc-radius-pill);
+  border: 1px solid var(--sc-border-subtle);
+  background: var(--sc-surface-muted);
+  box-shadow: inset 0 1px 0 var(--gray-a2);
+}
+
+.canvas-studio.frosted-studio .navigation-pages.studio-shell-nav > .rt-Button.studio-nav-item {
+  min-width: 68px;
+  height: 34px;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: var(--sc-radius-pill);
+  font-size: var(--sc-text-md);
+  font-weight: 500;
+  color: var(--sc-ink-muted);
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.canvas-studio.frosted-studio .navigation-pages.studio-shell-nav > .rt-Button.studio-nav-item:hover {
+  background: var(--gray-a3);
+  color: var(--sc-ink);
+}
+
+.canvas-studio.frosted-studio .navigation-pages.studio-shell-nav > .rt-Button.studio-nav-item[aria-current='page'] {
+  color: var(--sc-ink);
+  background: var(--sc-surface-elevated);
+  border-color: var(--sc-border);
+  box-shadow: 0 1px 2px var(--gray-a3);
+  font-weight: 600;
+}
+
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities {
+  gap: var(--sc-space-3);
+}
+
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities > .rt-Button.studio-utility-btn,
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .appearance-menu {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: var(--sc-radius-md);
+  border: 1px solid var(--sc-border-subtle);
+  background: var(--sc-surface-muted);
+  color: var(--sc-ink);
+}
+
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities > .rt-Button.studio-utility-btn:hover,
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .appearance-menu:hover {
+  background: var(--gray-a3);
+}
+
+.canvas-studio.frosted-studio .navigation-utilities button.global-task-trigger.rt-Button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  flex: 0 0 40px;
+  gap: 6px;
+  padding: 0;
+  border-radius: var(--sc-radius-md);
+  border: 1px solid var(--sc-border-subtle);
+  background: var(--sc-surface-muted);
+  color: var(--sc-ink);
+  overflow: visible;
+}
+
+.canvas-studio.frosted-studio .navigation-utilities .global-task-count {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 18px;
+  border-radius: var(--sc-radius-pill);
+  background: var(--sc-accent);
+  color: var(--sc-accent-ink);
+}
+
+.canvas-studio.frosted-studio .navigation-utilities .global-task-trigger > svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+@media (max-width: 900px) {
+  .canvas-studio.frosted-studio > .app-navigation.studio-shell {
+    height: auto;
+    min-height: 88px;
+    padding: var(--sc-space-2) var(--sc-space-3);
+  }
+}
+
+@media (max-width: 560px) {
+  .canvas-studio.frosted-studio .navigation-utilities button.global-task-trigger.rt-Button {
+    min-width: 40px;
+    padding: 0;
+  }
+}

@@ -1,0 +1,40 @@
+.canvas-studio.frosted-studio .studio-shell-main {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--sc-surface-page);
+}
+
+.canvas-studio.frosted-studio .workspace-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sc-space-3);
+  padding: var(--sc-space-6);
+  color: var(--sc-ink-muted);
+  font-size: var(--sc-text-md);
+}
+
+.canvas-studio.frosted-studio .workspace-notice {
+  margin: var(--sc-space-3) var(--sc-space-5) 0;
+  padding: var(--sc-space-2) var(--sc-space-3);
+  border-radius: var(--sc-radius-md);
+  border: 1px solid var(--sc-border-subtle);
+  background: var(--sc-surface-elevated);
+  font-size: var(--sc-text-sm);
+  color: var(--sc-ink);
+}
+
+.canvas-studio.frosted-studio .workspace-notice.is-error {
+  background: var(--red-3);
+  border-color: var(--red-6);
+  color: var(--red-11);
+}
+
+.canvas-studio.frosted-studio .rt-DialogContent.settings-module {
+  border-radius: var(--sc-radius-lg);
+  border-color: var(--sc-border-subtle);
+  box-shadow: var(--sc-shadow-panel);
+}

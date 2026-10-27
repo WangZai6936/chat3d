@@ -1,8 +1,7 @@
 import {usePublishUpdateContext} from './ui/appUpdateContext';
-import {AppUpdateDialog, AppUpdateNavEntry, AppUpdateNotice} from './ui/AppUpdateNotice';
+import {AppUpdateDialog, AppUpdateNotice} from './ui/AppUpdateNotice';
 import {SaveToast,isLibrarySaveNotice} from './ui/SaveToast';
-import {TaskQueue} from './ui/TaskQueue';
-import {BrandMark} from './ui/BrandMark';
+import {StudioShell,StudioMain,type StudioNavPage} from './ui/studio';
 import {useSelectionTool} from './ui/selectionTool';
 import {DeleteSelectionAction} from './ui/DeleteSelectionAction';
 import {ToolbarAction} from './ui/ToolbarAction';
@@ -13,7 +12,7 @@ import {Button as HeroButton} from '@heroui/react';
 import {CanvasAssetShelf,CanvasInspector,CanvasSelectionSummary,type CanvasPropertyTab} from './ui/CanvasPanels';
 import {focusSceneObjects} from './scene/focus';
 import {CursorArrowIcon,MoveIcon,RotateCounterClockwiseIcon,SizeIcon,EnterFullScreenIcon} from '@radix-ui/react-icons';
-import {AppearanceProvider,AppearanceMenu} from './ui/Appearance';
+import {AppearanceProvider} from './ui/Appearance';
 import {ProjectLibrary} from './ui/ProjectLibrary';
 import {TeamStudioPage} from './ui/TeamStudioPage';
 import {LibraryProjectSaveDialog} from './ui/LibraryMetadataDialog';
@@ -56,6 +55,12 @@ import './workbench-footer.css';
 import './thumbnail-layout.css';
 import './home-command-center.css';
 import './settings-refresh.css';
+import './ui/studio/tokens.css';
+import './ui/studio/studio-shell.css';
+import './ui/studio/studio-home.css';
+import './ui/studio/studio-pages.css';
+import './ui/studio/studio-workbench.css';
+import './ui/studio/studio-shared.css';
 import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning} from './workspace';
 import { MAX_PROJECT_BYTES, parseProject, serializeProject } from './domain/project';
 
@@ -76,7 +81,7 @@ export default function App() {
   const [projectNotice, setProjectNotice] = useState('');
   const closeSaveNotice=useCallback(()=>setProjectNotice(''),[]);
   const saveNotice=isLibrarySaveNotice(projectNotice)&&!autosaveError;
-  const [modulePage,setModulePage]=useState<'home'|'workbench'|'asset'|'scene'|'team'|'tasks'|'settings'>('home');const [libraryRefresh,setLibraryRefresh]=useState(0);
+  const [modulePage,setModulePage]=useState<StudioNavPage>('home');const [libraryRefresh,setLibraryRefresh]=useState(0);
   const [librarySaving,setLibrarySaving]=useState(false),[showLibrarySave,setShowLibrarySave]=useState(false);
 
   const [exporting, setExporting] = useState(false);
@@ -137,6 +142,7 @@ export default function App() {
   useEffect(()=>{!selection.length&&setInspectorOpen(false)},[selection.join('|')]);
   const [assistantTab,setAssistantTab]=useState<'chat'|'tasks'>('chat');
   const [focusScene,setFocusScene]=useState(false);
+  const navigateStudio=useCallback((page:StudioNavPage)=>{setModulePage(page);setFocusScene(false);},[]);
   useEffect(()=>{void probeServerRenderer();void initializeWorkspace();},[]);
   useEffect(()=>{setAssistantTab('chat');},[workspace.activeId]);
   useEffect(()=>{setProjectNotice('');},[modulePage]);
@@ -146,13 +152,8 @@ export default function App() {
 
   return <AppearanceProvider>
     <div style={{'--chat-width':`${assistantWidth}px`,'--chat-space':assistantOpen?`${assistantWidth}px`:'0px'} as CSSProperties} className={`studio redesigned-studio canvas-studio frosted-studio ${modulePage==='workbench'?'editor-mode':'manager-mode'} ${focusScene?'focus-scene':''}`}>
-      <nav className="app-navigation" aria-label="主导航">
-        <div className="app-brand"><BrandMark/><strong>Scenivo</strong></div>
-
-        <div className="navigation-pages">{([['home','首页','首页'],['asset','资产','资产库'],['scene','场景','场景库'],['team','团队','团队库'],['workbench','工作台','建模工作台']] as const).map(([page,label,accessibleLabel])=><Button variant="ghost" color="gray" key={page} title={accessibleLabel} aria-label={accessibleLabel} disabled={librarySaving||!workspace.ready} aria-current={modulePage===page?'page':undefined} onClick={()=>{setModulePage(page);setFocusScene(false);}}><span>{label}</span></Button>)}</div>
-        <div className="navigation-utilities"><AppearanceMenu/><AppUpdateNavEntry disabled={librarySaving||!workspace.ready}/><TaskQueue openRequest={taskQueueRequest} disabled={librarySaving||!workspace.ready} onOpen={()=>{setModulePage('workbench');setFocusScene(false);setAssistantOpen(true);setAssistantTab('chat');}} onHistory={()=>{setModulePage('tasks');setFocusScene(false);}}/><Button variant="ghost" color="gray" title="设置" aria-label="设置" disabled={librarySaving||!workspace.ready} aria-current={modulePage==='settings'?'page':undefined} onClick={()=>setModulePage('settings')}><GearIcon/></Button></div>
-      </nav>
-      <section className="studio-main">
+      <StudioShell activePage={modulePage} disabled={librarySaving||!workspace.ready} taskQueueRequest={taskQueueRequest} onNavigate={navigateStudio} onTaskOpen={()=>{setModulePage('workbench');setFocusScene(false);setAssistantOpen(true);setAssistantTab('chat');}} onTaskHistory={()=>{setModulePage('tasks');setFocusScene(false);}}/>
+      <StudioMain>
 
         <AppUpdateNotice onBackup={()=>setShowTools(true)}/>
         {saveNotice&&!workspace.error&&<SaveToast message={projectNotice} onClose={closeSaveNotice}/>}
@@ -212,7 +213,7 @@ export default function App() {
         </div><div className="assistant-dock-bar"><Button variant="soft" color="gray" aria-expanded={assistantOpen} aria-label={assistantOpen?'收起 AI 助手':'打开 AI 助手'} title="描述需求，开始建模" onClick={()=>{setAssistantOpen(!assistantOpen);setAssistantTab('chat')}}><ChatBubbleIcon/>AI 助手</Button><span>{previewing?'修改已生成，待确认':locked?'正在执行':nodeCount+' 个零件'}</span><button onClick={()=>{setModulePage('tasks');}}>查看任务</button></div>
           <aside className="conversation-region" hidden={!assistantOpen}><ConversationResize width={assistantWidth} onChange={setAssistantWidth}/><header className="conversation-panel-title"><strong>AI 建模</strong><HeroButton isIconOnly variant="ghost" aria-label="收起对话区" onPress={()=>setAssistantOpen(false)}><Cross1Icon/></HeroButton></header><div className="conversation-heading"><div className="assistant-tabs" role="tablist" aria-label="助手工作区" onKeyDown={e=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();const next=e.key==='Home'?'chat':e.key==='End'?'tasks':assistantTab==='chat'?'tasks':'chat';setAssistantTab(next);document.getElementById(next==='chat'?'chat-tab':'task-tab')?.focus();}}}><button role="tab" id="chat-tab" tabIndex={assistantTab==='chat'?0:-1} aria-controls="chat-content" aria-selected={assistantTab==='chat'} onClick={()=>setAssistantTab('chat')}><ChatBubbleIcon/>对话</button><button role="tab" id="task-tab" tabIndex={assistantTab==='tasks'?0:-1} aria-controls="task-content" aria-selected={assistantTab==='tasks'} onClick={()=>setAssistantTab('tasks')}>任务记录{locked&&<span className="tab-activity"/>}</button></div></div><div role="tabpanel" id="chat-content" aria-labelledby="chat-tab" hidden={assistantTab!=='chat'} className="assistant-content"><ChatPanel autoStartRequest={autoStartRequest} onAutoStartConsumed={id=>setAutoStartRequest(current=>current?.id===id?null:current)} key={workspace.activeId} canvasMode expanded onExpand={()=>setAssistantOpen(true)} executionDetails={false} onAssets={()=>setShowAssets(true)} onConfigure={()=>setShowSettings(true)}/></div><div role="tabpanel" id="task-content" aria-labelledby="task-tab" hidden={assistantTab!=='tasks'} className="assistant-content"><TaskPanel onConversation={()=>setAssistantTab('chat')}/></div></aside>
         </div>}
-      </section>
+      </StudioMain>
       {advancedOpen&&<Dialog.Root open onOpenChange={setAdvancedOpen}><Dialog.Content className="canvas-advanced-dialog" style={{maxWidth:640,maxHeight:'85vh',overflow:'auto'}}><Dialog.Title>对象与属性</Dialog.Title><Dialog.Description>精确编辑几何参数、外观和组件关系。</Dialog.Description><PropertiesPanel/><Button onClick={()=>setAdvancedOpen(false)}>关闭高级属性</Button></Dialog.Content></Dialog.Root>}
       {showLibrarySave&&<LibraryProjectSaveDialog onClose={()=>setShowLibrarySave(false)} onBusyChange={setLibrarySaving} onSaved={notice=>{setProjectNotice(notice);setLibraryRefresh(v=>v+1);}}/>}
       {showAssets&&<AssetLibrary intent={modulePage==='workbench'?'insert':'manage'} targetName={active?.title} onClose={()=>{setShowAssets(false);setLibraryRefresh(v=>v+1);}}/>}
