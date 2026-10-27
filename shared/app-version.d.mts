@@ -8,3 +8,4 @@ export function versionFromAsset(asset: {body?: string; base64?: boolean} | null
 export function desktopManifest(value: unknown): {version: string; notes?: string; pub_date?: string; platforms: Record<string, {signature: string; url: string}>} | null;
 export function updaterEndpointError(value: unknown): string;
 export function updaterPubkeyError(value: unknown): string;
+export function updaterDownloadOriginError(value: unknown): string;

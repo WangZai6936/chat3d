@@ -4,7 +4,7 @@ import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createServer} from 'node:http';
-import {compareVersions, desktopManifest, isNewerVersion, updaterEndpointError, updaterPubkeyError, versionBody, versionFromAsset, versionResponse} from '../shared/app-version.mjs';
+import {compareVersions, desktopManifest, isNewerVersion, updaterDownloadOriginError, updaterEndpointError, updaterPubkeyError, versionBody, versionFromAsset, versionResponse} from '../shared/app-version.mjs';
 import {appVersionMiddleware, readPublishedVersion} from '../server/app-version.mjs';
 import {buildUpdaterConfig} from '../scripts/updater-config.mjs';
 
@@ -33,7 +33,10 @@ assert.equal(versionFromAsset({base64: true, body: '{}'}), null);
 
 const signature = 'A'.repeat(80);
 const manifest = desktopManifest({version: '1.2.3', notes: '桌面', platforms: {'linux-x86_64': {url: 'https://updates.example.test/chat3d/app.AppImage', signature}, 'windows-x86_64': {url: 'http://updates.example.test/app.exe', signature}}});
-assert.equal(manifest, null);
+assert.equal(manifest.version, '1.2.3');
+assert.equal(manifest.platforms['windows-x86_64'].url, 'http://updates.example.test/app.exe');
+assert.equal(desktopManifest({version: '1.2.3', platforms: {'linux-x86_64': {url: 'ftp://updates.example.test/app', signature}}}), null);
+assert.equal(desktopManifest({version: '1.2.3', platforms: {'linux-x86_64': {url: 'http://user:secret@updates.example.test/app', signature}}}), null);
 const accepted = desktopManifest({version: 'v1.2.3', pub_date: '2026-10-26T00:00:00Z', platforms: {'darwin-aarch64': {url: 'https://updates.example.test/chat3d/Scenivo.app.tar.gz', signature}}});
 assert.equal(accepted.version, '1.2.3');
 assert.equal(desktopManifest({version: '1.2.3', platforms: {'linux-x86_64': {url: 'https://user:secret@updates.example.test/app', signature}}}), null);
@@ -43,6 +46,10 @@ assert.equal(updaterEndpointError('https://updates.example.test/{{target}}/{{arc
 assert.ok(updaterEndpointError('https://updates.example.test/{{password}}'));
 assert.ok(updaterPubkeyError('short'));
 assert.equal(updaterPubkeyError(signature), '');
+assert.equal(updaterDownloadOriginError(''), '');
+assert.equal(updaterDownloadOriginError('http://36.133.218.210:38008'), '');
+assert.equal(updaterDownloadOriginError('http://36.133.218.210:38008/'), '安装包下载源不能以斜杠结尾');
+assert.equal(updaterDownloadOriginError('http://36.133.218.210:38008/path'), '安装包下载源只能包含协议、主机和端口');
 
 const secret = 'SUPER-PRIVATE-KEY-DO-NOT-LEAK';
 const disabled = buildUpdaterConfig({});
@@ -55,6 +62,7 @@ assert.equal(enabled.config.bundle.createUpdaterArtifacts, true);
 assert.equal(JSON.stringify(enabled).includes(secret), false);
 assert.equal(JSON.stringify(enabled).includes('PRIVATE'), false);
 assert.deepEqual(enabled.config.plugins.updater.endpoints, ['https://updates.example.test/chat3d/latest.json']);
+assert.equal(enabled.config.plugins.updater.dangerousInsecureTransportProtocol, true);
 
 const root = await mkdtemp(join(tmpdir(), 'chat3d-update-'));
 try {

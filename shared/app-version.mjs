@@ -82,6 +82,14 @@ function httpsUrl(value) {
   return url;
 }
 
+function installerUrl(value) {
+  if (typeof value !== 'string' || value.length > 500) return null;
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username || url.password) return null;
+  return url;
+}
+
 export function desktopManifest(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const version = versionBody(value.version, value);
@@ -93,7 +101,7 @@ export function desktopManifest(value) {
   for (const key of keys) {
     if (!PLATFORM.test(key)) return null;
     const item = platforms[key];
-    if (!item || typeof item !== 'object' || !httpsUrl(item.url) || typeof item.signature !== 'string') return null;
+    if (!item || typeof item !== 'object' || !installerUrl(item.url) || typeof item.signature !== 'string') return null;
     if (item.signature.length < 40 || item.signature.length > 4000) return null;
     if (/^\s*(?:https?:|file:|[A-Za-z]:\\|\/|\.\.?\/)/.test(item.signature)) return null;
     clean[key] = {signature: item.signature, url: item.url};
@@ -116,5 +124,22 @@ export function updaterEndpointError(value) {
 
 export function updaterPubkeyError(value) {
   if (typeof value !== 'string' || !/^[A-Za-z0-9+/=]{80,500}$/.test(value)) return '签名公钥必须是 tauri signer 打印的单行公钥';
+  return '';
+}
+
+export function updaterDownloadOriginError(value) {
+  if (value === undefined || value === null || value === '') return '';
+  if (typeof value !== 'string') return '安装包下载源无效';
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (trimmed.length > 500) return '安装包下载源无效';
+  if (trimmed.endsWith('/')) return '安装包下载源不能以斜杠结尾';
+  let url;
+  try { url = new URL(trimmed); } catch { return '安装包下载源无效'; }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') return '安装包下载源必须是 http 或 https 地址';
+  if (url.username || url.password) return '安装包下载源不能包含账号密码';
+  if (url.search || url.hash) return '安装包下载源不能包含查询参数';
+  if (url.pathname !== '/') return '安装包下载源只能包含协议、主机和端口';
+  if (!/^https?:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?$/.test(trimmed)) return '安装包下载源包含不支持的字符';
   return '';
 }

@@ -28,7 +28,7 @@ jobs:
           if ($source.repository -cne $env:GITHUB_REPOSITORY -or $source.commit -cne $checkedOut) { throw 'Installer source commit or repository mismatch.' }
           if ($source.build_run_id -ne $env:GITHUB_RUN_ID) { throw 'Installer belongs to another workflow run.' }
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          if ($version -ne '0.2.1' -or $source.version -ne $version) { throw 'Expected the 0.2.1 installer.' }
+          if ($version -ne '0.2.2' -or $source.version -ne $version) { throw 'Expected the 0.2.2 installer.' }
           if ($source.target -ne 'x86_64-pc-windows-msvc') { throw 'Installer target mismatch.' }
           $installers = @(Get-ChildItem installer-artifact -Filter '*.exe')
           if ($installers.Count -ne 1) { throw 'Expected exactly one installer.' }

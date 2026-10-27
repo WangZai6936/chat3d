@@ -57,19 +57,21 @@ npm run desktop-update:assemble -- --bundle src-tauri/target/x86_64-pc-windows-m
 
 本机的 `TAURI_SIGNING_PRIVATE_KEY` 可以是私钥文件路径，也可以是文件内容。GitHub Actions 的 runner 上没有这台机器的路径，Secret 里必须粘贴私钥文件内容。没有密码时密码可以留空。
 
-`npm run tauri:build` 会先写入被 git 忽略的 `src-tauri/updater.generated.json`，其中只有公钥、https 端点和安装包签名开关。`npm run tauri:build:windows` 在此之上使用现有的 Windows NSIS 配置。端点必须是 https，不能带账号、密码或查询参数。动态更新服务可以使用 `{{target}}`、`{{arch}}`、`{{current_version}}` 和 `{{bundle_type}}`；门户这份静态清单不要使用占位符。
+`npm run tauri:build` 会先写入被 git 忽略的 `src-tauri/updater.generated.json`，其中只有公钥、https 检查端点、`dangerousInsecureTransportProtocol`（允许清单里的 http 安装包直链）和安装包签名开关。`npm run tauri:build:windows` 在此之上使用现有的 Windows NSIS 配置。检查端点必须是 https，不能带账号、密码或查询参数。动态更新服务可以使用 `{{target}}`、`{{arch}}`、`{{current_version}}` 和 `{{bundle_type}}`；门户这份静态清单不要使用占位符。
+
+发布时可选 `CHAT3D_UPDATER_DOWNLOAD_ORIGIN`（无末尾斜杠，例如 `http://36.133.218.210:38008`）：只替换 `latest.json` 里各平台 `url` 的 origin，检查地址仍是 `CHAT3D_UPDATER_ENDPOINT`。未设置时安装包 url 与清单同源。
 
 当前配置是 `createUpdaterArtifacts: true`。Windows 的更新包就是 NSIS 安装包本身，旁边有 `.exe.sig`。`signature` 必须是该 `.sig` 的全文，不能写成路径或 URL。平台键只使用 `linux`、`darwin`、`windows` 加 `x86_64`、`aarch64`、`i686`、`armv7`。上传目录名则是 `windows`、`mac`、`linux`。
 
 ```json
 {
-  "version": "0.2.1",
+  "version": "0.2.2",
   "notes": "产品更名为 Scenivo。",
   "pub_date": "2026-10-26T00:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "<Scenivo_0.2.1_x64-setup.exe.sig 的全文>",
-      "url": "https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/Scenivo_0.2.1_x64-setup.exe"
+      "signature": "<Scenivo_0.2.2_x64-setup.exe.sig 的全文>",
+      "url": "http://36.133.218.210:38008/desktop-updates/chat3d/windows/Scenivo_0.2.2_x64-setup.exe"
     }
   }
 }

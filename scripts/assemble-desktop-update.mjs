@@ -21,6 +21,7 @@ export async function assembleFromEnvironment(env, args) {
     bundleDir: resolve(root, args.bundle || 'src-tauri/target'),
     outDir: resolve(root, args.out || 'desktop-update-publish'),
     endpoint,
+    downloadOrigin: (env.CHAT3D_UPDATER_DOWNLOAD_ORIGIN ?? '').trim(),
     version: readProjectVersion(root),
     notes: env.CHAT3D_UPDATE_NOTES ?? '',
     pubDate: (env.CHAT3D_UPDATE_PUB_DATE ?? '').trim(),

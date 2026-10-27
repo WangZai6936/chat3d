@@ -2,7 +2,7 @@ import {createHash} from 'node:crypto';
 import {copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile} from 'node:fs/promises';
 import {readFileSync} from 'node:fs';
 import {basename, dirname, isAbsolute, join, relative, resolve} from 'node:path';
-import {desktopManifest, updaterEndpointError, versionBody} from '../shared/app-version.mjs';
+import {desktopManifest, updaterDownloadOriginError, updaterEndpointError, versionBody} from '../shared/app-version.mjs';
 
 export const PORTAL_UPDATER_ENDPOINT = 'https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json';
 export const PORTAL_PUBLISH_DIR = '/opt/1panel/www/sites/portal.jiezi-ai.com/index/desktop-updates/chat3d';
@@ -59,13 +59,15 @@ export function describeStaticEndpoint(endpoint) {
   return {ok: true, endpoint: value, appName};
 }
 
-export function artifactPublicUrl(endpoint, folder, filename) {
-  const url = new URL(endpoint);
-  const directory = url.pathname.slice(0, -'/latest.json'.length);
-  url.pathname = `${directory}/${folder}/${filename}`;
-  url.search = '';
-  url.hash = '';
-  return url.toString();
+export function artifactPublicUrl(endpoint, folder, filename, downloadOrigin = '') {
+  const endpointUrl = new URL(endpoint);
+  const directory = endpointUrl.pathname.slice(0, -'/latest.json'.length);
+  const path = `${directory}/${folder}/${filename}`;
+  const base = downloadOrigin.trim() ? new URL(downloadOrigin.trim()) : endpointUrl;
+  base.pathname = path;
+  base.search = '';
+  base.hash = '';
+  return base.toString();
 }
 
 export function readProjectVersion(root) {
@@ -155,15 +157,24 @@ function assertNoSecrets(text, secrets) {
   if (secrets.some(secret => text.includes(secret))) throw new Error('发布产物包含签名私钥或密码，已停止');
 }
 
-function uploadText({endpoint, appName, artifacts, hashes}) {
+function uploadText({endpoint, appName, artifacts, hashes, downloadOrigin = ''}) {
   const lines = [
     '只上传应用目录。不要上传本文件、私钥或 src-tauri/updater.generated.json。',
     `应用目录：${appName}/`,
     `清单：${endpoint}`,
   ];
+  const origin = downloadOrigin.trim();
+  if (origin) {
+    lines.push(`安装包下载源（latest.json 内 url 的 origin）：${origin}`);
+    lines.push('检查更新仍使用上面的 https 清单；仅安装包直链可为 http。发布时设置 CHAT3D_UPDATER_DOWNLOAD_ORIGIN（无末尾斜杠）。');
+  }
   if (endpoint === PORTAL_UPDATER_ENDPOINT) {
     lines.push(`服务器目录：${PORTAL_PUBLISH_DIR}/`);
-    lines.push(`源站监听 ${PORTAL_ORIGIN_PORT}，经 Cloudflare Tunnel 对外提供 https。客户端只访问上面的清单，不要把 ${PORTAL_ORIGIN_PORT} 写进安装包。`);
+    if (!origin) {
+      lines.push(`源站监听 ${PORTAL_ORIGIN_PORT}，经 Cloudflare Tunnel 对外提供 https。未设置 CHAT3D_UPDATER_DOWNLOAD_ORIGIN 时，清单与安装包 url 同源。`);
+    } else {
+      lines.push(`源站监听 ${PORTAL_ORIGIN_PORT}。国内用户可从 ${origin} 直链下载安装包；清单仍走 Cloudflare https。`);
+    }
     lines.push(`rsync -a --delete ${appName}/ <用户>@<服务器>:${PORTAL_PUBLISH_DIR}/`);
     lines.push(`上传后执行：curl -fsS ${endpoint}`);
   } else {
@@ -178,20 +189,23 @@ function uploadText({endpoint, appName, artifacts, hashes}) {
   return `${lines.join('\n')}\n`;
 }
 
-export async function assembleDesktopUpdate({bundleDir, outDir, endpoint, version, notes = '', pubDate = '', privateKey = '', password = ''} = {}) {
+export async function assembleDesktopUpdate({bundleDir, outDir, endpoint, version, notes = '', pubDate = '', privateKey = '', password = '', downloadOrigin = ''} = {}) {
   const described = describeStaticEndpoint(endpoint);
   if (!described.ok) throw new Error(described.error);
+  const origin = typeof downloadOrigin === 'string' ? downloadOrigin.trim() : '';
+  const originError = updaterDownloadOriginError(origin);
+  if (originError) throw new Error(originError);
   const secrets = secretValues([privateKey, password]);
   const explicitDate = typeof pubDate === 'string' ? pubDate.trim() : '';
   const stamp = explicitDate || new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   const artifacts = await collectUpdaterArtifacts(bundleDir, version);
   const platforms = {};
-  for (const item of artifacts) platforms[item.platform] = {signature: item.signature, url: artifactPublicUrl(described.endpoint, item.folder, item.filename)};
+  for (const item of artifacts) platforms[item.platform] = {signature: item.signature, url: artifactPublicUrl(described.endpoint, item.folder, item.filename, origin)};
   const body = versionBody(version, {notes, pubDate: stamp});
   if (!body) throw new Error('版本号无效');
   if (!body.pub_date) throw new Error('CHAT3D_UPDATE_PUB_DATE 必须是 RFC 3339 UTC，例如 2026-10-26T00:00:00Z');
   const manifest = desktopManifest({...body, platforms});
-  if (!manifest) throw new Error('生成的 latest.json 未通过清单校验。signature 必须是 .sig 全文，url 必须是 https');
+  if (!manifest) throw new Error('生成的 latest.json 未通过清单校验。signature 必须是 .sig 全文，url 必须是 http 或 https');
   const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
   assertNoSecrets(serialized, secrets);
   const output = resolve(outDir);
@@ -217,7 +231,7 @@ export async function assembleDesktopUpdate({bundleDir, outDir, endpoint, versio
     hashes.unshift({hash: await sha256(manifestPath), name: `${described.appName}/latest.json`});
     const checked = desktopManifest(JSON.parse(await readFile(manifestPath, 'utf8')));
     if (!checked) throw new Error('写入后的 latest.json 校验失败');
-    const note = uploadText({endpoint: described.endpoint, appName: described.appName, artifacts, hashes});
+    const note = uploadText({endpoint: described.endpoint, appName: described.appName, artifacts, hashes, downloadOrigin: origin});
     assertNoSecrets(note, secrets);
     await rm(appDir, {recursive: true, force: true});
     await rename(staging, appDir);
