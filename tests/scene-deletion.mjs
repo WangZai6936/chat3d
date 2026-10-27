@@ -31,6 +31,16 @@ try{
  await test('large partial multiselect is one transaction, deduplicates roots and removes descendants once',()=>{
   const before=doc(Array.from({length:400},(_,i)=>node('p'+i,{assemblyId:'p0'}))),store=createEditorStore({doc:before,selection:before.nodes.slice(0,300).map(n=>n.id)});assert.equal(store.getState().deleteSelection().ok,true);assert.equal(store.getState().doc.nodes.length,100);assert.equal(store.getState().past.length,1);store.getState().undo();assert.deepEqual(store.getState().doc.nodes,before.nodes);const nested=doc([node('parent'),node('child',{parentId:'parent'}),node('grandchild',{parentId:'child'})]);const r=applyBatch(nested,{operations:[{op:'delete',targetIds:['parent','child','parent']}]});assert.equal(r.errors.length,0);assert.equal(r.doc.nodes.length,0);
  });
+ await test('more than ten thousand selected parts delete atomically and undo / redo preserve the entire scene',()=>{
+  const before=doc(Array.from({length:10001},(_,i)=>node('large_'+i))),ids=before.nodes.map(n=>n.id);
+  const operations=parseModelResponse(JSON.stringify({summary:'删除全部选中零件',operations:[{op:'delete',targetIds:ids}]})).operations;
+  const failed=applyBatch(before,{operations:[{...operations[0],targetIds:[...ids,'missing']}]});
+  assert.ok(failed.errors.length);assert.equal(failed.doc,before);assert.deepEqual(failed.applied,[]);
+  const store=createEditorStore({doc:before,selection:ids});
+  assert.equal(store.getState().deleteSelection().ok,true);assert.deepEqual(store.getState().doc.nodes,[]);assert.deepEqual(store.getState().selection,[]);assert.equal(store.getState().past.length,1);
+  store.getState().undo();assert.deepEqual(store.getState().doc.nodes,before.nodes);assert.deepEqual(store.getState().doc.materials,before.materials);
+  store.getState().redo();assert.deepEqual(store.getState().doc.nodes,[]);assert.equal(store.getState().past.length,1);
+ });
  await test('deleting all animation targets removes empty program and undo fully restores it',()=>{
   const before=animated(),store=createEditorStore({doc:before,selection:before.nodes.map(n=>n.id)});store.getState().deleteSelection();assert.equal(store.getState().doc.nodes.length,0);assert.equal(store.getState().doc.animation,undefined);store.getState().undo();assert.deepEqual(store.getState().doc.animation,before.animation);
  });

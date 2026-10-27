@@ -226,7 +226,8 @@ export const createEditorStore = (initial: Partial<EditorState> = {}) => create<
 
   deleteSelection: () => {
     const state=get();
-    const ids=[...new Set(state.selection.filter(id=>state.doc.nodes.some(n=>n.id===id)))];
+    const existingIds=new Set(state.doc.nodes.map(n=>n.id));
+    const ids=[...new Set(state.selection.filter(id=>existingIds.has(id)))];
     if(!ids.length)return {ok:false,error:'请先选中要删除的场景对象'};
     return state.applyCommandBatch([{op:'delete',targetIds:ids}],`删除选中的 ${ids.length} 个场景零件`);
   },

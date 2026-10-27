@@ -459,7 +459,7 @@ function cleanCommand(opType: string, op: Record<string, unknown>,diagnostics:st
       if((op.targetId!==undefined)===(op.targetIds!==undefined))return null;
       const scope=op.scope==='assembly'?{scope:'assembly' as const}:{};
       if(op.targetIds!==undefined){
-        if(!Array.isArray(op.targetIds)||!op.targetIds.length||op.targetIds.length>10000||op.targetIds.some(id=>typeof id!=='string'||!id.trim()))return null;
+        if(!Array.isArray(op.targetIds)||!op.targetIds.length||op.targetIds.some(id=>typeof id!=='string'||!id.trim()))return null;
         return {op:'delete',targetIds:[...new Set((op.targetIds as string[]).map(id=>id.trim()))],...scope};
       }
       const targetId=cleanTargetId(op);return targetId?{op:'delete',targetId,...scope}:null;

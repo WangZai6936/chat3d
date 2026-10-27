@@ -44,16 +44,28 @@ export async function writeWorkspace(data:Omit<WorkspaceEnvelope,'revision'>,exp
   const nextCache=new Map<string,Record<string,unknown>>();
   get.onsuccess=()=>{
    if((get.result?.revision??0)!==expectedRevision){conflict=true;tx.abort();return;}
-   const reuse=get.result?.storageVersion===2&&committedRevision===expectedRevision;
-   const manifest:Manifest={storageVersion:2,version:1,revision:expectedRevision+1,activeId:data.activeId,sessions:[]};
-   for(const session of sessions){
-    const {snapshot,...metadata}=session;const previous=reuse?committed.get(session.id):undefined;
-    manifest.sessions.push({metadata,fields:Object.keys(snapshot)});
-    for(const [field,value] of Object.entries(snapshot))if(!previous||!Object.prototype.hasOwnProperty.call(previous,field)||previous[field]!==value)target.put({value},fieldKey(session.id,field));
-    nextCache.set(session.id,{...snapshot});
-   }
-   // Metadata and changed fields commit atomically; unchanged geometry/history is never cloned.
-   target.put(manifest,'current');
+   try{
+    const reuse=get.result?.storageVersion===2&&committedRevision===expectedRevision;
+    const manifest:Manifest={storageVersion:2,version:1,revision:expectedRevision+1,activeId:data.activeId,sessions:[]};
+    const referenced=new Set<string>();
+    for(const session of sessions){
+     const {snapshot,...metadata}=session;const previous=reuse?committed.get(session.id):undefined;
+     manifest.sessions.push({metadata,fields:Object.keys(snapshot)});
+     for(const [field,value] of Object.entries(snapshot)){
+      const key=fieldKey(session.id,field);referenced.add(key);
+      if(!previous||!Object.prototype.hasOwnProperty.call(previous,field)||previous[field]!==value)target.put({value},key);
+     }
+     nextCache.set(session.id,{...snapshot});
+    }
+    // Metadata, changed fields, and reclamation commit atomically; unchanged geometry/history is never cloned.
+    target.put(manifest,'current');
+    // Scan keys, not geometry values, including orphans left by earlier versions.
+    const keys=target.openKeyCursor();keys.onsuccess=()=>{
+     const cursor=keys.result;if(!cursor)return;
+     const key=cursor.key;if(typeof key==='string'&&key.startsWith('["session",')&&!referenced.has(key))target.delete(key);
+     cursor.continue();
+    };
+   }catch{tx.abort();}
   };
   tx.oncomplete=()=>{db.close();committedRevision=expectedRevision+1;committed=nextCache;resolve(expectedRevision+1);};
   tx.onabort=()=>{db.close();reject(new Error(conflict?'另一个标签页已更新会话。请先下载本页项目备份，再刷新；本页不会覆盖其他标签页的数据。':'会话保存失败，可能存储空间不足或浏览器禁止写入。请下载项目备份。'))};

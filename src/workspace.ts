@@ -143,13 +143,13 @@ export function exportWorkspaceBackup():string{
 export function importWorkspaceBackup(text:string):number{
  if(busy()||blocked||!useWorkspaceStore.getState().ready)throw Error('请先结束当前任务并解决存储错误');
  if(new TextEncoder().encode(text).length>50*1024*1024)throw Error('备份超过50MB');
- const pack=JSON.parse(text);if(pack?.format!=='chat3d-workspace-backup'||pack.version!==1||!Array.isArray(pack.sessions)||pack.sessions.length>100)throw Error('备份格式错误，或会话超过100');
+ const pack=JSON.parse(text);if(pack?.format!=='chat3d-workspace-backup'||pack.version!==1||!Array.isArray(pack.sessions))throw Error('备份格式错误');
  const next:WorkspaceSession[]=[];
  for(const item of pack.sessions){
-  if(typeof item.title!=='string'||!Array.isArray(item.messages)||item.messages.length>10000||typeof item.composerText!=='string')throw Error('备份会话格式无效');
-  const messages=item.messages.map((m:{role:string;text:string;createdAt:number})=>{if(!m||!['user','assistant','system'].includes(m.role)||typeof m.text!=='string'||m.text.length>200000)throw Error('备份消息格式无效');return {id:makeId(),role:m.role as 'user'|'assistant'|'system',text:m.text,createdAt:Number.isFinite(m.createdAt)?m.createdAt:Date.now()};});
+  if(!item||typeof item!=='object'||typeof item.title!=='string'||!Array.isArray(item.messages)||typeof item.composerText!=='string')throw Error('备份会话格式无效');
+  const messages=item.messages.map((m:{role:string;text:string;createdAt:number})=>{if(!m||!['user','assistant','system'].includes(m.role)||typeof m.text!=='string')throw Error('备份消息格式无效');return {id:makeId(),role:m.role as 'user'|'assistant'|'system',text:m.text,createdAt:Number.isFinite(m.createdAt)?m.createdAt:Date.now()};});
   const doc=parseProject(JSON.stringify(item.project));
-  const r=record({...fresh(),doc,messages,composerText:item.composerText.slice(0,200000)},item.title.slice(0,80)+'（导入）');r.pinned=!!item.pinned;r.moduleKind=item.moduleKind==='asset'?'asset':'scene';r.assetCategory=validCategory(item.assetCategory)?item.assetCategory:undefined;r.sceneCategory=validCategory(item.sceneCategory)?item.sceneCategory:undefined;r.libraryDescription=typeof item.libraryDescription==='string'?item.libraryDescription.slice(0,1000):undefined;next.push(r);
+  const r=record({...fresh(),doc,messages,composerText:item.composerText},item.title.slice(0,80)+'（导入）');r.pinned=!!item.pinned;r.moduleKind=item.moduleKind==='asset'?'asset':'scene';r.assetCategory=validCategory(item.assetCategory)?item.assetCategory:undefined;r.sceneCategory=validCategory(item.sceneCategory)?item.sceneCategory:undefined;r.libraryDescription=typeof item.libraryDescription==='string'?item.libraryDescription.slice(0,1000):undefined;next.push(r);
   // Pending work is imported as a separate explicitly-labelled recovery project,
   // never silently committed to the original or trusted as an executable batch.
   if(item.draft){const draft=parseProject(JSON.stringify(item.draft));next.push(record({...fresh(),doc:draft},item.title.slice(0,65)+'（未确认草稿副本）'));}

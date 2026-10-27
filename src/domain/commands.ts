@@ -361,9 +361,10 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
     if(op.scope!==undefined&&op.scope!=='assembly')return {doc,error:new Error('删除范围无效')};
     if((op.targetId!==undefined)===(op.targetIds!==undefined))return {doc,error:new Error('删除需指定 targetId 或 targetIds，不能同时使用')};
     const rawIds=op.targetIds??[op.targetId];
-    if(!Array.isArray(rawIds)||!rawIds.length||rawIds.length>10000||rawIds.some(id=>typeof id!=='string'||!id.trim()))return {doc,error:new Error('删除目标列表无效')};
+    if(!Array.isArray(rawIds)||!rawIds.length||rawIds.some(id=>typeof id!=='string'||!id.trim()))return {doc,error:new Error('删除目标列表无效')};
     const ids=[...new Set(rawIds.map(id=>tempIdMap.get(id!)??id!))];
-    if(ids.some(id=>!findNode(doc,id)))return {doc,error:new Error('删除目标已不存在，请重新选择对象')};
+    const existingIds=new Set(doc.nodes.map(n=>n.id));
+    if(ids.some(id=>!existingIds.has(id)))return {doc,error:new Error('删除目标已不存在，请重新选择对象')};
     op={op:'delete',targetIds:ids,...(op.scope?{scope:op.scope}:{})};
   }
   // 材质引用
@@ -398,7 +399,9 @@ export function applyCommand(doc: SceneDocument, op: Command, tempIdMap: Map<str
   switch (op.op) {
     case 'delete': {
       const removed=new Set(deletionNodeIds(doc,op));
-      for(let i=nodes.length-1;i>=0;i--)if(removed.has(nodes[i].id))nodes.splice(i,1);
+      let kept=0;
+      for(const n of nodes)if(!removed.has(n.id))nodes[kept++]=n;
+      nodes.length=kept;
       for(const n of nodes)if(n.connection&&removed.has(n.connection.targetId))delete n.connection;
       // A partial delete must not erase the surviving component's only blueprint.
       for(const old of beforeSnapshot.nodes){

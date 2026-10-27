@@ -4,6 +4,8 @@ The recovered machining-workshop fixture contains 634 nodes and about 15.46 mill
 
 v56 stores a small revision manifest plus individual session snapshot fields. Progress-only writes preserve geometry/history references and write only changed activity/messages. Geometry edits, checkpoints and the manifest are committed in one IndexedDB transaction. The existing revision guard remains. A failed transaction does not advance the in-memory cache. Legacy workspace data is read and migrated at the next successful atomic save. Database version 2 prevents an older app version from reopening and overwriting the new schema. No credentials are stored and no sessions are deleted.
 
+Each successful save now scans only record keys and removes session fields absent from the new manifest, including orphans left by earlier versions. Reclamation shares the manifest/field write transaction and revision guard: an abort restores both the old records and manifest, and does not advance the identity cache. Soft-deleted sessions still listed in the manifest remain fully restorable; this is not a permanent-delete operation on the recycle bin.
+
 ## Local evidence (2026-10-03)
 
 Node + fake-indexeddb benchmark on one recovered 634-node workshop session, five repeated activity-only saves:
@@ -12,4 +14,4 @@ Node + fake-indexeddb benchmark on one recovered 634-node workshop session, five
 
 This is a persistence microbenchmark, not browser performance, generation speed, model quality or Token consumption. It establishes a removed expensive path, not the sole cause of the observed browser attach/read timeouts.
 
-Regression coverage: old-schema migration, undefined snapshot fields, unchanged geometry omission, joint geometry/checkpoint saves, stale-tab rejection, old-version rejection and rollback on uncloneable data. Existing workspace switching, recovery, backup and checkpoint tests also pass. End-to-end workshop validation remains separate.
+Regression coverage: old-schema migration, undefined snapshot fields, unchanged geometry omission, joint geometry/checkpoint saves, session/field and historical-orphan reclamation, recycle-bin preservation, stale-tab rejection, old-version rejection, rollback after reclamation, and retrying unchanged object identities after an aborted transaction. Browser rendering and model generation quality remain separate from these IndexedDB checks.
