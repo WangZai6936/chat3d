@@ -1,13 +1,13 @@
-/* Top chrome — token-driven; loads after frosted-studio to refine, not duplicate, layout grid. */
+/* Top chrome — token-driven; loads late to override legacy frosted icon-only nav rules. */
 .canvas-studio.frosted-studio > .app-navigation.studio-shell {
-  height: 64px;
-  min-height: 64px;
+  height: var(--sc-nav-height);
+  min-height: var(--sc-nav-height);
   padding: 0 var(--sc-space-5);
   gap: var(--sc-space-4);
-  background: var(--sc-surface-elevated);
+  background: color-mix(in srgb, var(--sc-surface-elevated) 92%, transparent);
   border-bottom: 1px solid var(--sc-border-subtle);
   box-shadow: 0 1px 0 var(--gray-a2);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(20px) saturate(1.15);
 }
 
 .canvas-studio.frosted-studio .studio-shell-brand {
@@ -20,6 +20,7 @@
 .canvas-studio.frosted-studio .studio-shell-brand > svg {
   width: 32px;
   height: 32px;
+  filter: drop-shadow(0 2px 6px var(--accent-a4));
 }
 
 .canvas-studio.frosted-studio .navigation-pages.studio-shell-nav {
@@ -28,7 +29,7 @@
   border-radius: var(--sc-radius-pill);
   border: 1px solid var(--sc-border-subtle);
   background: var(--sc-surface-muted);
-  box-shadow: inset 0 1px 0 var(--gray-a2);
+  box-shadow: var(--sc-shadow-inset);
 }
 
 .canvas-studio.frosted-studio .navigation-pages.studio-shell-nav > .rt-Button.studio-nav-item {
@@ -53,20 +54,32 @@
   color: var(--sc-ink);
   background: var(--sc-surface-elevated);
   border-color: var(--sc-border);
-  box-shadow: 0 1px 2px var(--gray-a3);
+  box-shadow: 0 1px 3px var(--gray-a4);
   font-weight: 600;
 }
 
+/* Utilities: each control owns its box — no shared 36px circle crushing text labels. */
 .canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: var(--sc-space-3);
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities > *,
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .appearance-menu {
+  flex: 0 0 auto;
+  flex-shrink: 0;
 }
 
 .canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities > .rt-Button.studio-utility-btn,
 .canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .appearance-menu {
-  width: 36px;
-  min-width: 36px;
-  height: 36px;
-  min-height: 36px;
+  width: var(--sc-utility-size);
+  min-width: var(--sc-utility-size);
+  height: var(--sc-utility-size);
+  min-height: var(--sc-utility-size);
   padding: 0;
   border-radius: var(--sc-radius-md);
   border: 1px solid var(--sc-border-subtle);
@@ -79,16 +92,53 @@
   background: var(--gray-a3);
 }
 
-.canvas-studio.frosted-studio .navigation-utilities button.global-task-trigger.rt-Button {
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .app-update-nav-entry.rt-Button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  min-width: 40px;
-  height: 40px;
-  min-height: 40px;
-  flex: 0 0 40px;
+  width: auto;
+  min-width: 8.75rem;
+  max-width: none;
+  height: var(--sc-utility-size);
+  min-height: var(--sc-utility-size);
+  padding: 0 12px;
   gap: 6px;
+  border-radius: var(--sc-radius-md);
+  border: 1px solid var(--sc-border-subtle);
+  background: var(--sc-surface-muted);
+  color: var(--sc-ink);
+  white-space: nowrap;
+  overflow: visible;
+}
+
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .app-update-nav-entry:hover {
+  background: var(--gray-a3);
+}
+
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .app-update-nav-label {
+  font-size: var(--sc-text-base);
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .app-update-nav-badge {
+  top: -5px;
+  right: -4px;
+}
+
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities button.global-task-trigger.rt-Button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--sc-utility-size);
+  min-width: var(--sc-utility-size);
+  height: var(--sc-utility-size);
+  min-height: var(--sc-utility-size);
+  flex: 0 0 var(--sc-utility-size);
+  flex-shrink: 0;
+  gap: 0;
   padding: 0;
   border-radius: var(--sc-radius-md);
   border: 1px solid var(--sc-border-subtle);
@@ -97,7 +147,11 @@
   overflow: visible;
 }
 
-.canvas-studio.frosted-studio .navigation-utilities .global-task-count {
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities button.global-task-trigger:hover {
+  background: var(--gray-a3);
+}
+
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .global-task-count {
   position: absolute;
   top: -4px;
   right: -4px;
@@ -105,16 +159,30 @@
   height: 18px;
   padding: 0 4px;
   font-size: 10px;
+  font-weight: 700;
   line-height: 18px;
   border-radius: var(--sc-radius-pill);
+  border: 2px solid var(--color-panel-solid);
   background: var(--sc-accent);
   color: var(--sc-accent-ink);
+  pointer-events: none;
 }
 
-.canvas-studio.frosted-studio .navigation-utilities .global-task-trigger > svg {
+.canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .global-task-trigger > svg {
   display: block;
   width: 18px;
   height: 18px;
+}
+
+@media (max-width: 960px) {
+  .canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .app-update-nav-entry.rt-Button {
+    min-width: var(--sc-utility-size);
+    padding: 0;
+  }
+
+  .canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities .app-update-nav-label {
+    display: none;
+  }
 }
 
 @media (max-width: 900px) {
@@ -126,8 +194,7 @@
 }
 
 @media (max-width: 560px) {
-  .canvas-studio.frosted-studio .navigation-utilities button.global-task-trigger.rt-Button {
-    min-width: 40px;
-    padding: 0;
+  .canvas-studio.frosted-studio .navigation-utilities.studio-shell-utilities {
+    gap: 6px;
   }
 }

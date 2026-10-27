@@ -1,13 +1,17 @@
 /* Workbench UI chrome (not Three.js viewport internals) */
+.canvas-studio.frosted-studio.editor-mode .studio-shell-main {
+  background: var(--gray-1);
+}
+
 .canvas-studio.frosted-studio.editor-mode .canvas-surface {
   --canvas-surface: var(--sc-surface-elevated);
   --canvas-ink: var(--sc-ink);
   --canvas-line: var(--sc-border-subtle);
-  background: var(--sc-surface-elevated);
+  background: color-mix(in srgb, var(--sc-surface-elevated) 94%, transparent);
   color: var(--sc-ink);
   border: 1px solid var(--sc-border-subtle);
-  box-shadow: var(--sc-shadow-panel);
-  backdrop-filter: blur(16px);
+  box-shadow: var(--sc-shadow-float);
+  backdrop-filter: blur(18px) saturate(1.1);
 }
 
 .canvas-studio.frosted-studio.editor-mode .workbench-project-actions {

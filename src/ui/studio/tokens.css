@@ -32,6 +32,15 @@
   --sc-accent-ink: var(--accent-contrast, #fff);
   --sc-focus: var(--accent-8);
   --sc-shadow-panel: 0 1px 0 var(--gray-a3), 0 8px 24px var(--gray-a2);
+  --sc-shadow-float: 0 12px 40px var(--gray-a4), 0 2px 8px var(--gray-a3);
+  --sc-shadow-inset: inset 0 1px 0 var(--gray-a2);
+  --sc-gradient-page: radial-gradient(1200px 600px at 12% -8%, var(--accent-a2), transparent 55%),
+    radial-gradient(900px 480px at 88% 0%, var(--blue-a2), transparent 50%),
+    linear-gradient(180deg, var(--gray-2), var(--gray-1));
+  --sc-gradient-accent: linear-gradient(135deg, var(--accent-9), var(--blue-9));
+  --sc-gradient-panel: linear-gradient(180deg, var(--sc-surface-elevated), var(--sc-surface-muted));
+  --sc-nav-height: 64px;
+  --sc-utility-size: 40px;
   /* Bridge legacy frosted names to Radix scales */
   --studio-page: var(--sc-surface-page);
   --studio-surface: var(--sc-surface-elevated);

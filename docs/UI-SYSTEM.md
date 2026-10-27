@@ -24,6 +24,9 @@ Defined in `src/ui/studio/tokens.css` on `.redesigned-studio.canvas-studio.frost
 - **Surfaces** — `--sc-surface-page`, `--sc-surface-elevated`, `--sc-surface-muted`
 - **Ink** — `--sc-ink`, `--sc-ink-muted`, borders `--sc-border`, `--sc-border-subtle`
 - **Accent** — `--sc-accent`, `--sc-accent-soft` (maps to Radix `--accent-*`)
+- **Atmosphere** — `--sc-gradient-page`, `--sc-gradient-accent`, `--sc-gradient-panel` (page background + primary actions)
+- **Elevation** — `--sc-shadow-panel`, `--sc-shadow-float`, `--sc-shadow-inset`
+- **Chrome** — `--sc-nav-height`, `--sc-utility-size` (top bar and utility control sizing)
 
 Legacy `--studio-*` and `--glass-*` names in frosted CSS are bridged to the same Radix scales so older rules keep working.
 
@@ -92,4 +95,8 @@ Workbench 3D viewport and modeling engine are unchanged; `studio-workbench.css` 
 
 1. Add or adjust tokens in `tokens.css` first.
 2. Update `studio-shell.css` / `studio-home.css` before editing scattered legacy files.
-3. Run `node tests/home-layout.mjs`, `node tests/studio-redesign.mjs`, and `node tests/appearance.mjs`.
+3. Run `node tests/home-layout.mjs` (includes header utility overlap regression), `node tests/studio-redesign.mjs`, and `node tests/appearance.mjs`.
+
+### Top bar utilities
+
+`StudioShell` utilities must each reserve their own flex box. The 「关于与更新」 entry (`app-update-nav-entry`) uses a text pill width; the task queue trigger stays a compact icon (`--sc-utility-size`). Do not reintroduce shared `.navigation-utilities .rt-Button { width: 36px }` rules that crush labels — override in `studio-shell.css` if legacy frosted CSS is touched.
