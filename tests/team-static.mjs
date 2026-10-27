@@ -1,0 +1,21 @@
+import assert from 'node:assert/strict';
+import {createServer} from 'node:http';
+import {mkdtemp,writeFile,mkdir} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createSpaStatic} from '../server/static.mjs';
+
+const dir=await mkdtemp(join(tmpdir(),'team-web-static-'));
+await mkdir(join(dir,'assets'),{recursive:true});
+await writeFile(join(dir,'index.html'),'<html><body>team spa</body></html>');
+await writeFile(join(dir,'assets','app.js'),'console.log(1)');
+const serve=createSpaStatic(dir,'/team');
+const server=createServer((req,res)=>{const pathname=new URL(req.url,'http://localhost').pathname;void serve(req,res,pathname).then(ok=>{if(!ok&&!res.headersSent)res.writeHead(404).end('missing');});});
+await new Promise(r=>server.listen(0,'127.0.0.1',r));
+const base=`http://127.0.0.1:${server.address().port}`;
+assert.equal((await fetch(base+'/team',{redirect:'manual'})).status,302);
+assert.match(await (await fetch(base+'/team/')).text(),/team spa/);
+assert.equal((await fetch(base+'/team/assets/app.js')).headers.get('content-type'),'text/javascript; charset=utf-8');
+const deep=await fetch(base+'/team/browse/anything');assert.match(await deep.text(),/team spa/);
+server.close();
+console.log('PASS /team SPA static handler redirects and falls back to index.html');

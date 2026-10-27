@@ -71,9 +71,9 @@ try {
  Start-Sleep -Seconds 4;Shot 'ui-home';Dump-Controls 'ui-home-controls'
  Find-Control '资产库' | Out-Null
  $checks.Add(@{name='installed app home renders with accessible navigation';pass=$true})
- Click-Control '资产库';Find-Control '新建资产' | Out-Null;Shot 'ui-library'
- $checks.Add(@{name='asset library opens';pass=$true})
- Click-Control '打开团队资产库'
+ Click-Control '团队库';Find-Control '登录团队' | Out-Null;Shot 'ui-team-page'
+ $checks.Add(@{name='team library page opens from navigation';pass=$true})
+ Click-Control '团队资产'
  Set-Input '团队服务地址' $teamBase
  Set-Input '团队账号' 'smoke-bob'
  Set-Input '团队密码' 'isolated-smoke-password-b'
@@ -83,7 +83,7 @@ try {
  Shot 'ui-team-preview'
  Click-Control '复制到本地'
  Find-Control '已复制为独立本地副本；重新打开本地库即可查看。' | Out-Null
- Click-Control '收起团队库'
+ Click-Control '资产库'
  Find-Control '查看资产 NativeTestBox 副本' | Out-Null
  Shot 'ui-team-local-copy'
  $checks.Add(@{name='installed app member B logs into isolated server, previews member A asset and copies it into local library';pass=$true})

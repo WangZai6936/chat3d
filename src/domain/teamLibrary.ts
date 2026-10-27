@@ -1,3 +1,4 @@
+import {buildTeamCopyExport} from './teamCopyExport';
 import {teamFetch} from './teamTransport';
 import {parseModelAsset,type ModelAssetVersion} from './modelAssets';
 import {parseProject,serializeProject} from './project';
@@ -8,7 +9,17 @@ export interface TeamUser {id:string;name:string;role:'admin'|'member'|'viewer'}
 export interface TeamItem {id:string;owner:string;kind:'asset'|'scene';version:number;name:string;description:string;created:string}
 export interface TeamVersion extends TeamItem {payload:unknown}
 export interface TeamPublish {kind:'asset'|'scene';name:string;description:string;payload:unknown;key:string;itemId?:string;expectedVersion:number}
+const TEAM_ADDRESS_KEY='chat3d.team.address';
 export function teamAddress(value:string){const url=new URL(value);if(url.username||url.password||url.search||url.hash||url.pathname!=='/'||(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))))throw Error('请输入 HTTPS 服务根地址（本机测试可用 HTTP localhost）');return url.origin;}
+export function defaultTeamServiceBase(){
+ if(typeof window==='undefined')return '';
+ try{
+  const path=window.location.pathname;
+  if(path==='/team'||path.startsWith('/team/'))return window.location.origin;
+ }catch{/* ignore */}
+ return localStorage.getItem(TEAM_ADDRESS_KEY)??'';
+}
+export function rememberTeamServiceBase(base:string){localStorage.setItem(TEAM_ADDRESS_KEY,teamAddress(base));}
 export class TeamClient {
  readonly base:string;private token='';user?:TeamUser;
  constructor(base:string){this.base=teamAddress(base);}
@@ -30,10 +41,10 @@ export function assetPublication(source:ModelAssetVersion):ModelAssetVersion {
 export async function copyTeamVersion(item:TeamVersion){
  assertLibraryReady();
  if(item.kind==='asset'){
-  const asset=parseModelAsset(JSON.stringify(item.payload));asset.id=crypto.randomUUID();asset.version=1;asset.name=item.name.slice(0,76)+' 副本';asset.createdAt=new Date().toISOString();
+  const asset=parseModelAsset(buildTeamCopyExport({...item,kind:'asset'}));
   await saveModelAsset(asset);return asset.id;
  }
- const doc=parseProject(JSON.stringify(item.payload));doc.projectId=crypto.randomUUID();doc.revision=0;
+ const doc=parseProject(buildTeamCopyExport({...item,kind:'scene'}));
  if(!createSession(doc,{moduleKind:'scene',title:item.name+' 副本',libraryDescription:item.description}))throw Error('无法创建本地副本');
  await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('副本已创建，但本地保存失败，请先修复存储再继续');return doc.projectId;
 }
