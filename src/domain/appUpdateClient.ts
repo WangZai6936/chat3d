@@ -15,6 +15,7 @@ interface AppUpdateState {
   remind: string | null;
   phase: 'idle' | 'installing' | 'installed' | 'failed';
   progress: string;
+  progressMetrics: UpdateProgressState | null;
   error: string;
   checking: boolean;
   checkMessage: string;
@@ -29,7 +30,7 @@ const remember = (key: string, value: string | null) => {
 
 export const useAppUpdate = create<AppUpdateState>(() => ({
   busy: false, dirty: false, release: null, dismissed: stored(DISMISS_KEY), remind: stored(REMIND_KEY),
-  phase: 'idle', progress: '', error: '', checking: false, checkMessage: '',
+  phase: 'idle', progress: '', progressMetrics: null, error: '', checking: false, checkMessage: '',
 }));
 
 export function setAppUpdateContext(input: {busy: boolean; dirty: boolean}) {
@@ -119,14 +120,14 @@ export async function checkForAppUpdate(options?: {manual?: boolean}) {
   }
 }
 
-async function installDesktopUpdate(onProgress: (label: string) => void) {
+async function installDesktopUpdate(onProgress: (progress: UpdateProgressState) => void) {
   const {check} = await import('@tauri-apps/plugin-updater');
   const update = await check();
   if (!update || !isNewerVersion(update.version, APP_VERSION)) throw new Error('没有可安装的新版本');
   let progress: UpdateProgressState = {loaded: 0, total: null, label: '正在下载更新…'};
   await update.downloadAndInstall(event => {
     progress = reduceUpdateProgress(progress, event as UpdateProgressEvent);
-    onProgress(progress.label);
+    onProgress(progress);
   });
 }
 
@@ -140,9 +141,10 @@ export async function applyAppUpdate() {
   const state = useAppUpdate.getState();
   if (state.busy || state.phase === 'installing' || !state.release) return;
   if (!isTauri()) { window.location.reload(); return; }
-  useAppUpdate.setState({phase: 'installing', progress: '正在下载更新…', error: ''});
+  const initial: UpdateProgressState = {loaded: 0, total: null, label: '正在下载更新…'};
+  useAppUpdate.setState({phase: 'installing', progress: initial.label, progressMetrics: initial, error: ''});
   try {
-    await installDesktopUpdate(progress => useAppUpdate.setState({progress}));
+    await installDesktopUpdate(progress => useAppUpdate.setState({progress: progress.label, progressMetrics: progress}));
     if (useAppUpdate.getState().busy) {
       useAppUpdate.setState({phase: 'installed', progress: '更新已安装。请先结束当前任务，并确认项目备份已保存在电脑上，再重启应用。'});
       return;
@@ -150,7 +152,7 @@ export async function applyAppUpdate() {
     useAppUpdate.setState({phase: 'installed', progress: '正在重启以完成更新…'});
     await relaunchInstalledUpdate();
   } catch (error) {
-    useAppUpdate.setState({phase: 'failed', error: publicUpdateError(error), progress: ''});
+    useAppUpdate.setState({phase: 'failed', error: publicUpdateError(error), progress: '', progressMetrics: null});
   }
 }
 
