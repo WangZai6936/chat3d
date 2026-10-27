@@ -1,5 +1,9 @@
 use tauri::Manager;
 use std::io::Write;
+
+#[cfg(desktop)]
+#[macro_use]
+mod updater_mirror;
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -47,8 +51,19 @@ pub fn run() {
     let builder = builder
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build());
+    #[cfg(desktop)]
+    let builder = {
+        use updater_mirror::{download_and_install_mirrored_update, update_download_url};
+        builder.invoke_handler(tauri::generate_handler![
+            greet,
+            save_support_json,
+            update_download_url,
+            download_and_install_mirrored_update
+        ])
+    };
+    #[cfg(not(desktop))]
+    let builder = builder.invoke_handler(tauri::generate_handler![greet, save_support_json]);
     builder
-        .invoke_handler(tauri::generate_handler![greet, save_support_json])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

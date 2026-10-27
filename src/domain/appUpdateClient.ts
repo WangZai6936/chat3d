@@ -1,7 +1,8 @@
-import {isTauri} from '@tauri-apps/api/core';
+import {Channel, invoke, isTauri} from '@tauri-apps/api/core';
 import {create} from 'zustand';
 import {APP_VERSION, classifyUpdaterError, deriveUpdateView, publicUpdateError, reduceUpdateProgress, type ReleaseNotice, type UpdateProgressEvent, type UpdateProgressState, type UpdateView} from './appUpdate';
 import {cleanNotes, isNewerVersion, parseVersion} from '../../shared/app-version.mjs';
+import {DOWNLOAD_PROBE_BYTES, candidateDownloadUrls, installerTotalBytes, platformMirrorList, sameDownloadUrl, selectFastestDownloadUrl, type DownloadProbeSample} from '../../shared/update-mirrors.mjs';
 
 const DISMISS_KEY = 'chat3d.update.dismissed';
 const REMIND_KEY = 'chat3d.update.remind';
@@ -134,15 +135,86 @@ export async function checkForAppUpdate(options?: {manual?: boolean}) {
   }
 }
 
+function shouldRetryPrimary(error: unknown) {
+  const message = (error instanceof Error ? error.message : String(error ?? '')).toLowerCase();
+  return !/failed to install|authentication failed|invalid updater binary|temp directory|binary for the current target|not on the same mount/.test(message);
+}
+
+async function probeInstallerUrl(url: string, timeoutMs: number): Promise<DownloadProbeSample> {
+  const started = Date.now();
+  const failed = (status = 0): DownloadProbeSample => ({status, bytes: 0, elapsedMs: Math.max(1, Date.now() - started), totalBytes: null, contentType: null});
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const {fetch} = await import('@tauri-apps/plugin-http');
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {Range: `bytes=0-${DOWNLOAD_PROBE_BYTES - 1}`, Accept: 'application/octet-stream'},
+      connectTimeout: timeoutMs,
+      signal: controller.signal,
+    });
+    const status = response.status;
+    const contentType = response.headers.get('content-type');
+    const totalBytes = installerTotalBytes(status, response.headers);
+    if (status !== 200 && status !== 206) {
+      await response.body?.cancel();
+      return {status, bytes: 0, elapsedMs: Math.max(1, Date.now() - started), totalBytes, contentType};
+    }
+    const reader = response.body?.getReader();
+    if (!reader) return {status, bytes: 0, elapsedMs: Math.max(1, Date.now() - started), totalBytes, contentType};
+    let bytes = 0;
+    while (bytes < DOWNLOAD_PROBE_BYTES) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      bytes += value?.byteLength ?? 0;
+    }
+    await reader.cancel().catch(() => undefined);
+    return {status, bytes, elapsedMs: Math.max(1, Date.now() - started), totalBytes, contentType};
+  } catch {
+    return failed();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function downloadCheckedUpdate(update: {downloadAndInstall: (onEvent: (event: UpdateProgressEvent) => void) => Promise<void>}, onProgress: (progress: UpdateProgressState) => void) {
+  let progress: UpdateProgressState = {loaded: 0, total: null, label: '正在下载更新…'};
+  await update.downloadAndInstall(event => {
+    progress = reduceUpdateProgress(progress, event);
+    onProgress(progress);
+  });
+}
+
+async function downloadMirroredUpdate(rid: number, url: string, onProgress: (progress: UpdateProgressState) => void) {
+  const channel = new Channel<UpdateProgressEvent>();
+  let progress: UpdateProgressState = {loaded: 0, total: null, label: '正在下载更新…'};
+  channel.onmessage = event => {
+    progress = reduceUpdateProgress(progress, event);
+    onProgress(progress);
+  };
+  await invoke('download_and_install_mirrored_update', {rid, url, onEvent: channel});
+}
+
 async function installDesktopUpdate(onProgress: (progress: UpdateProgressState) => void) {
   const {check} = await import('@tauri-apps/plugin-updater');
   const update = await check();
   if (!update || !isNewerVersion(update.version, APP_VERSION)) throw new Error('没有可安装的新版本');
-  let progress: UpdateProgressState = {loaded: 0, total: null, label: '正在下载更新…'};
-  await update.downloadAndInstall(event => {
-    progress = reduceUpdateProgress(progress, event as UpdateProgressEvent);
-    onProgress(progress);
-  });
+  const downloadPrimary = () => downloadCheckedUpdate(update, onProgress);
+  let primary = '';
+  try { primary = await invoke<string>('update_download_url', {rid: update.rid}); }
+  catch { await downloadPrimary(); return; }
+  const candidates = candidateDownloadUrls(primary, platformMirrorList(update.rawJson, primary));
+  let chosen = primary;
+  if (candidates.length > 1) {
+    onProgress({loaded: 0, total: null, label: '正在选择较快的下载线路…'});
+    chosen = await selectFastestDownloadUrl(candidates, probeInstallerUrl);
+  }
+  if (!chosen || sameDownloadUrl(chosen, primary)) { await downloadPrimary(); return; }
+  try { await downloadMirroredUpdate(update.rid, chosen, onProgress); }
+  catch (error) {
+    if (!shouldRetryPrimary(error)) throw error;
+    await downloadPrimary();
+  }
 }
 
 export async function relaunchInstalledUpdate() {

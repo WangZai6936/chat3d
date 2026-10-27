@@ -7,6 +7,7 @@ import {join} from 'node:path';
 import {desktopManifest, updaterEndpointError} from '../shared/app-version.mjs';
 import {assembleFromEnvironment} from '../scripts/assemble-desktop-update.mjs';
 import {PORTAL_ORIGIN_PORT, PORTAL_PUBLISH_DIR, PORTAL_UPDATER_ENDPOINT, archFromFilename, artifactPublicUrl, assembleDesktopUpdate, describeStaticEndpoint, readProjectVersion} from '../scripts/desktop-update-publish.mjs';
+import {parseMirrorOrigins} from '../shared/update-mirrors.mjs';
 import {updaterReleaseMode} from '../scripts/updater-release-mode.mjs';
 
 const signature = `untrusted comment: signature from tauri secret key\n${'R'.repeat(80)}`;
@@ -50,6 +51,10 @@ assert.ok(doc.includes(String(PORTAL_ORIGIN_PORT)));
 assert.match(workflow, /npm run tauri -- build/);
 assert.match(workflow, /npm run tauri:build:windows/);
 assert.match(workflow, /desktop-update:assemble/);
+assert.match(workflow, /CHAT3D_UPDATER_DOWNLOAD_ORIGIN/);
+assert.match(workflow, /CHAT3D_UPDATER_DOWNLOAD_MIRRORS/);
+assert.equal(parseMirrorOrigins('').ok, true);
+assert.equal(parseMirrorOrigins('http://36.133.218.210:38008/').ok, false);
 assert.equal(workflow.includes(privateKey), false);
 const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts;
 assert.match(scripts['tauri:build:windows'], /prepare-updater-config/);
@@ -90,8 +95,11 @@ try {
   assert.equal(manifest.notes, '修复预览');
   assert.equal(manifest.pub_date, '2026-10-26T00:00:00Z');
   assert.equal(manifest.platforms['windows-x86_64'].url, `https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/${exe}`);
+  assert.deepEqual(manifest.platforms['windows-x86_64'].mirrors, [`http://36.133.218.210:38008/desktop-updates/chat3d/windows/${exe}`]);
   assert.equal(manifest.platforms['darwin-aarch64'].url, `https://portal.jiezi-ai.com/desktop-updates/chat3d/mac/${macArchive}`);
+  assert.deepEqual(manifest.platforms['darwin-aarch64'].mirrors, [`http://36.133.218.210:38008/desktop-updates/chat3d/mac/${macArchive}`]);
   assert.equal(manifest.platforms['linux-x86_64'].url, `https://portal.jiezi-ai.com/desktop-updates/chat3d/linux/${image}`);
+  assert.deepEqual(manifest.platforms['linux-x86_64'].mirrors, [`http://36.133.218.210:38008/desktop-updates/chat3d/linux/${image}`]);
   assert.equal(manifest.platforms['windows-x86_64'].signature, signature);
   assert.equal(await readFile(join(out, 'chat3d', 'windows', exe), 'utf8'), 'windows-installer');
   assert.equal(await readFile(join(out, 'chat3d', 'windows', `${exe}.sig`), 'utf8'), signature);
@@ -127,15 +135,24 @@ try {
   });
   const httpManifest = JSON.parse(await readFile(httpResult.manifestPath, 'utf8'));
   assert.equal(httpManifest.platforms['windows-x86_64'].url, `http://36.133.218.210:38008/desktop-updates/chat3d/windows/${exe}`);
+  assert.deepEqual(httpManifest.platforms['windows-x86_64'].mirrors, [`https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/${exe}`]);
   const httpUpload = await readFile(httpResult.uploadPath, 'utf8');
   assert.ok(httpUpload.includes('CHAT3D_UPDATER_DOWNLOAD_ORIGIN'));
   assert.ok(httpUpload.includes('http://36.133.218.210:38008'));
+  assert.ok(httpUpload.includes('镜像'));
 
   const onlyOut = join(root, 'only-publish');
   await assembleDesktopUpdate({bundleDir: windowsOnly, outDir: onlyOut, endpoint: 'https://portal.jiezi-ai.com/desktop-updates/otherapp/latest.json', version: '0.2.0', pubDate: '2026-10-26T00:00:00Z'});
   const onlyManifest = JSON.parse(await readFile(join(onlyOut, 'otherapp', 'latest.json'), 'utf8'));
   assert.deepEqual(Object.keys(onlyManifest.platforms), ['windows-x86_64']);
   assert.equal(onlyManifest.platforms['windows-x86_64'].url, `https://portal.jiezi-ai.com/desktop-updates/otherapp/windows/${exe}`);
+  assert.deepEqual(onlyManifest.platforms['windows-x86_64'].mirrors, [`http://36.133.218.210:38008/desktop-updates/otherapp/windows/${exe}`]);
+  const foreignOut = join(root, 'foreign-publish');
+  const foreign = await assembleDesktopUpdate({bundleDir: windowsOnly, outDir: foreignOut, endpoint: 'https://updates.example.com/desktop-updates/otherapp/latest.json', version: '0.2.0', pubDate: '2026-10-26T00:00:00Z'});
+  assert.equal(foreign.manifest.platforms['windows-x86_64'].mirrors, undefined);
+  const cdn = await assembleDesktopUpdate({bundleDir: windowsOnly, outDir: join(root, 'cdn-publish'), endpoint: 'https://updates.example.com/desktop-updates/otherapp/latest.json', version: '0.2.0', pubDate: '2026-10-26T00:00:00Z', downloadOrigin: 'https://downloads.example.com', mirrorOrigins: ['https://backup.example.com']});
+  assert.equal(cdn.manifest.platforms['windows-x86_64'].url, `https://downloads.example.com/desktop-updates/otherapp/windows/${exe}`);
+  assert.deepEqual(cdn.manifest.platforms['windows-x86_64'].mirrors, [`https://updates.example.com/desktop-updates/otherapp/windows/${exe}`, `https://backup.example.com/desktop-updates/otherapp/windows/${exe}`]);
   await assert.rejects(readFile(join(onlyOut, 'otherapp', 'mac', '.keep')), /ENOENT/);
   await assert.rejects(readFile(join(onlyOut, 'windows', exe)), /ENOENT/);
   await assert.rejects(readFile(join(onlyOut, 'latest.json')), /ENOENT/);
@@ -155,7 +172,13 @@ try {
   }, {root: process.cwd(), bundle: cliBundle, out: join(root, 'cli-publish')});
   assert.equal(cli.manifest.version, readProjectVersion(process.cwd()));
   assert.equal(cli.manifest.platforms['windows-x86_64'].url, `http://36.133.218.210:38008/desktop-updates/chat3d/windows/${cliExe}`);
+  assert.deepEqual(cli.manifest.platforms['windows-x86_64'].mirrors, [`https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/${cliExe}`]);
   assert.equal((await readFile(cli.manifestPath, 'utf8')).includes(privateKey), false);
+  await assert.rejects(() => assembleFromEnvironment({
+    CHAT3D_UPDATER_ENDPOINT: endpoint,
+    CHAT3D_UPDATER_DOWNLOAD_MIRRORS: 'http://36.133.218.210:38008/',
+    CHAT3D_UPDATE_PUB_DATE: '2026-10-26T00:00:00Z',
+  }, {root: process.cwd(), bundle: cliBundle, out: join(root, 'bad-mirrors')}), /镜像源/);
 } finally { await rm(root, {recursive: true, force: true}); }
 
 const outputFile = join(tmpdir(), `chat3d-updater-mode-${process.pid}.txt`);
