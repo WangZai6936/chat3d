@@ -1,0 +1,48 @@
+/* Scenivo studio tokens — aliases on Radix Themes, Tailwind, and frosted-studio variables. */
+.redesigned-studio.canvas-studio.frosted-studio {
+  --sc-font: var(--default-font-family, Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif);
+  --sc-text-xs: 11px;
+  --sc-text-sm: 12px;
+  --sc-text-base: 13px;
+  --sc-text-md: 14px;
+  --sc-text-lg: 16px;
+  --sc-text-xl: 21px;
+  --sc-text-2xl: 24px;
+  --sc-leading-tight: 1.35;
+  --sc-leading-normal: 1.55;
+  --sc-space-1: 4px;
+  --sc-space-2: 8px;
+  --sc-space-3: 12px;
+  --sc-space-4: 16px;
+  --sc-space-5: 20px;
+  --sc-space-6: 24px;
+  --sc-radius-sm: var(--radius-2, 6px);
+  --sc-radius-md: var(--radius-3, 8px);
+  --sc-radius-lg: var(--radius-4, 12px);
+  --sc-radius-pill: 999px;
+  --sc-surface-page: var(--gray-2);
+  --sc-surface-elevated: var(--color-panel-solid, var(--gray-1));
+  --sc-surface-muted: var(--gray-a2);
+  --sc-border: var(--gray-6);
+  --sc-border-subtle: var(--gray-a5);
+  --sc-ink: var(--gray-12);
+  --sc-ink-muted: var(--gray-11);
+  --sc-accent: var(--accent-9);
+  --sc-accent-soft: var(--accent-a3);
+  --sc-accent-ink: var(--accent-contrast, #fff);
+  --sc-focus: var(--accent-8);
+  --sc-shadow-panel: 0 1px 0 var(--gray-a3), 0 8px 24px var(--gray-a2);
+  /* Bridge legacy frosted names to Radix scales */
+  --studio-page: var(--sc-surface-page);
+  --studio-surface: var(--sc-surface-elevated);
+  --studio-card: var(--sc-surface-elevated);
+  --studio-line: var(--sc-border);
+  --studio-ink: var(--sc-ink);
+  --studio-muted: var(--sc-ink-muted);
+  --studio-primary: var(--sc-accent);
+  --studio-primary-ink: var(--sc-accent-ink);
+  --panel-fill: var(--sc-surface-elevated);
+  --glass-line: var(--sc-border);
+  --glass-text: var(--sc-ink);
+  --glass-muted: var(--sc-ink-muted);
+}

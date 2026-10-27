@@ -1,0 +1,98 @@
+/* Workbench UI chrome (not Three.js viewport internals) */
+.canvas-studio.frosted-studio.editor-mode .canvas-surface {
+  --canvas-surface: var(--sc-surface-elevated);
+  --canvas-ink: var(--sc-ink);
+  --canvas-line: var(--sc-border-subtle);
+  background: var(--sc-surface-elevated);
+  color: var(--sc-ink);
+  border: 1px solid var(--sc-border-subtle);
+  box-shadow: var(--sc-shadow-panel);
+  backdrop-filter: blur(16px);
+}
+
+.canvas-studio.frosted-studio.editor-mode .workbench-project-actions {
+  border-radius: var(--sc-radius-lg);
+  border-color: var(--sc-border-subtle);
+  background: var(--sc-surface-elevated) !important;
+  box-shadow: var(--sc-shadow-panel);
+}
+
+.canvas-studio.frosted-studio .workbench-project-actions .rt-Button,
+.canvas-studio.frosted-studio .workbench-project-actions > .button {
+  border-radius: var(--sc-radius-md);
+  border-color: var(--sc-border-subtle);
+  background: var(--sc-surface-muted);
+  color: var(--sc-ink);
+  font-size: var(--sc-text-sm);
+}
+
+.canvas-studio.frosted-studio.editor-mode .canvas-tool-rail .button,
+.canvas-studio.frosted-studio.editor-mode .canvas-tool-rail [data-slot='button'] {
+  border-radius: var(--sc-radius-md);
+  color: var(--sc-ink-muted);
+}
+
+.canvas-studio.frosted-studio.editor-mode .canvas-tool-rail .button[aria-pressed='true'],
+.canvas-studio.frosted-studio.editor-mode .canvas-tool-rail [data-slot='button'][aria-pressed='true'] {
+  background: var(--sc-accent-soft);
+  color: var(--sc-ink);
+}
+
+.canvas-studio.frosted-studio .canvas-transform-tools {
+  border-radius: var(--sc-radius-lg);
+  padding: var(--sc-space-2) var(--sc-space-3);
+  gap: var(--sc-space-2);
+}
+
+.canvas-studio.frosted-studio .canvas-transform-tools .button[aria-pressed='true'] {
+  background: var(--sc-accent);
+  color: var(--sc-accent-ink);
+  box-shadow: none;
+}
+
+.canvas-studio.frosted-studio .conversation-region {
+  border-left: 1px solid var(--sc-border-subtle);
+  background: var(--sc-surface-page);
+}
+
+.canvas-studio.frosted-studio .conversation-panel-title {
+  border-bottom: 1px solid var(--sc-border-subtle);
+  padding: var(--sc-space-2) var(--sc-space-3);
+  font-size: var(--sc-text-base);
+}
+
+.canvas-studio.frosted-studio .assistant-tabs button[aria-selected='true'] {
+  color: var(--sc-ink);
+  border-color: var(--sc-accent);
+}
+
+.canvas-studio.frosted-studio .chat-composer {
+  border-radius: var(--sc-radius-md);
+  border-color: var(--sc-border-subtle);
+  background: var(--sc-surface-elevated);
+}
+
+.canvas-studio.frosted-studio .assistant-dock-bar {
+  border-top: 1px solid var(--sc-border-subtle);
+  background: var(--sc-surface-elevated);
+  font-size: var(--sc-text-base);
+}
+
+.canvas-studio.frosted-studio .scene-footer {
+  border-top: 1px solid var(--sc-border-subtle);
+  background: var(--sc-surface-muted);
+  font-size: var(--sc-text-sm);
+  color: var(--sc-ink-muted);
+}
+
+.canvas-studio.frosted-studio .editor-panel-heading {
+  border-color: var(--sc-border-subtle);
+  color: var(--sc-ink-muted);
+  font-size: var(--sc-text-base);
+}
+
+.rt-DialogContent.global-task-drawer {
+  border-radius: var(--sc-radius-lg);
+  border: 1px solid var(--sc-border-subtle);
+  box-shadow: var(--sc-shadow-panel);
+}
