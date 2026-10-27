@@ -47,6 +47,10 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
  // A new visit can start another project; repeated submit events within the current visit cannot.
  useEffect(()=>{if(!hidden)creating.current=false;},[hidden]);
  return <StudioPage className="home-page home-command-center" hidden={hidden}>
+  <header className="home-hero">
+   <p className="home-hero-kicker">Scenivo 工作室</p>
+   <p className="home-hero-lead">用自然语言创建可编辑 3D 资产与场景，在同一工作区完成生成、预览与迭代。</p>
+  </header>
   <section className="home-creation" aria-labelledby="home-title">
    <StudioPanel as="div" className="home-create-column">
    <StudioSectionHeader id="home-title" level={1} title="开始新的创作"/>
@@ -67,8 +71,10 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
    <HomeTasks items={items} disabled={locked} hidden={hidden} onOpen={onOpen} onAll={onTasks}/>
 
   </section>
-  <div className="home-section-title"><h2>最近项目 <span className="home-project-count">{recent.length}</span></h2><div><Button variant="ghost" color="gray" disabled={locked} aria-label="查看全部资产" onClick={()=>onLibrary('asset')}>资产库 <ArrowRightIcon/></Button><Button variant="ghost" color="gray" disabled={locked} aria-label="查看全部场景" onClick={()=>onLibrary('scene')}>场景库 <ArrowRightIcon/></Button></div></div>
-  <div className="home-recent">{recent.map(s=><Card asChild key={s.id}><article><button className="home-project-link" aria-label={`继续编辑 ${s.title}`} disabled={locked} onClick={()=>{if(switchSession(s.id))onOpen();else setError('请先处理工作区保存异常');}}><ProjectThumb src={s.sceneThumbnail??items.find(a=>a.id===s.assetSource?.id)?.thumbnail} name={s.title} kind={s.moduleKind??'scene'}/><div className="home-project-caption"><h3>{s.title}</h3><p className="home-project-updated">{new Date(s.updatedAt).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} · {s.snapshot.doc.nodes.length} 个零件</p><div><Badge variant="soft" color="gray" className="home-kind">{s.moduleKind==='asset'?<CubeIcon/>:<LayersIcon/>}{s.moduleKind==='asset'?'资产':'场景'}</Badge><span>{projectLabel(s)}</span></div></div></button></article></Card>)}</div>
+  <section className="home-recent-section" aria-labelledby="home-recent-title">
+   <StudioSectionHeader id="home-recent-title" title="最近项目" count={recent.length} actions={<div className="home-library-links"><Button variant="soft" color="gray" disabled={locked} aria-label="查看全部资产" onClick={()=>onLibrary('asset')}>资产库 <ArrowRightIcon/></Button><Button variant="soft" color="gray" disabled={locked} aria-label="查看全部场景" onClick={()=>onLibrary('scene')}>场景库 <ArrowRightIcon/></Button></div>}/>
+   <div className="home-recent">{recent.map(s=><Card asChild key={s.id}><article><button className="home-project-link" aria-label={`继续编辑 ${s.title}`} disabled={locked} onClick={()=>{if(switchSession(s.id))onOpen();else setError('请先处理工作区保存异常');}}><ProjectThumb src={s.sceneThumbnail??items.find(a=>a.id===s.assetSource?.id)?.thumbnail} name={s.title} kind={s.moduleKind??'scene'}/><div className="home-project-caption"><h3>{s.title}</h3><p className="home-project-updated">{new Date(s.updatedAt).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} · {s.snapshot.doc.nodes.length} 个零件</p><div><Badge variant="soft" color="gray" className="home-kind">{s.moduleKind==='asset'?<CubeIcon/>:<LayersIcon/>}{s.moduleKind==='asset'?'资产':'场景'}</Badge><span>{projectLabel(s)}</span></div></div></button></article></Card>)}</div>
+  </section>
   {!recent.length&&<StudioEmptyState className="resource-empty home-empty" icon={<LayersIcon/>} title="开始你的第一个项目" description="在上方描述你的想法，选择资产或场景。"/>}
   <footer className="resource-footer">当前浏览器保存 · 资产与场景独立管理 · 对话保留在对应项目中</footer>
   <Dialog.Root open={!!preview} onOpenChange={open=>{if(!open)setPreview(null)}}><Dialog.Content maxWidth="800px"><Dialog.Title>参考图</Dialog.Title>{preview&&<img src={preview} alt="首页参考图大图" style={{maxHeight:'65vh',width:'100%',objectFit:'contain'}}/>}<Dialog.Close><Button>关闭参考图</Button></Dialog.Close></Dialog.Content></Dialog.Root>

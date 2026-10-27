@@ -3,7 +3,30 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: var(--sc-surface-page);
+  background: var(--sc-gradient-page);
+}
+
+.canvas-studio.frosted-studio .studio-page {
+  position: relative;
+}
+
+.canvas-studio.frosted-studio .studio-panel {
+  border: 1px solid var(--sc-border-subtle);
+  border-radius: var(--sc-radius-lg);
+  background: var(--sc-gradient-panel);
+  box-shadow: var(--sc-shadow-panel);
+}
+
+.canvas-studio.frosted-studio .studio-panel-flat {
+  background: var(--sc-surface-muted);
+  box-shadow: none;
+}
+
+.canvas-studio.frosted-studio .studio-inset-card.rt-Card {
+  border-radius: var(--sc-radius-md);
+  border: 1px solid var(--sc-border-subtle);
+  background: var(--sc-surface-elevated);
+  box-shadow: var(--sc-shadow-inset);
 }
 
 .canvas-studio.frosted-studio .workspace-loading {
@@ -33,8 +56,32 @@
   color: var(--red-11);
 }
 
-.canvas-studio.frosted-studio .rt-DialogContent.settings-module {
+.canvas-studio.frosted-studio .rt-DialogContent.settings-module,
+.canvas-studio.frosted-studio .rt-DialogContent.global-task-drawer {
   border-radius: var(--sc-radius-lg);
-  border-color: var(--sc-border-subtle);
-  box-shadow: var(--sc-shadow-panel);
+  border: 1px solid var(--sc-border-subtle);
+  box-shadow: var(--sc-shadow-float);
+}
+
+.canvas-studio.frosted-studio .studio-text-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent-11);
+  font-size: var(--sc-text-sm);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.canvas-studio.frosted-studio .studio-text-link:hover:not(:disabled) {
+  color: var(--accent-12);
+  text-decoration: underline;
+}
+
+.canvas-studio.frosted-studio .studio-text-link:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
