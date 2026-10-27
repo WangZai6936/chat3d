@@ -1,5 +1,5 @@
 import {usePublishUpdateContext} from './ui/appUpdateContext';
-import {AppUpdateNotice} from './ui/AppUpdateNotice';
+import {AppUpdateDialog, AppUpdateNavEntry, AppUpdateNotice} from './ui/AppUpdateNotice';
 import {SaveToast,isLibrarySaveNotice} from './ui/SaveToast';
 import {TaskQueue} from './ui/TaskQueue';
 import {BrandMark} from './ui/BrandMark';
@@ -149,7 +149,7 @@ export default function App() {
         <div className="app-brand"><BrandMark/><strong>Scenivo</strong></div>
 
         <div className="navigation-pages">{([['home','首页','首页'],['asset','资产','资产库'],['scene','场景','场景库'],['workbench','工作台','建模工作台']] as const).map(([page,label,accessibleLabel])=><Button variant="ghost" color="gray" key={page} title={accessibleLabel} aria-label={accessibleLabel} disabled={librarySaving||!workspace.ready} aria-current={modulePage===page?'page':undefined} onClick={()=>{setModulePage(page);setFocusScene(false);}}><span>{label}</span></Button>)}</div>
-        <div className="navigation-utilities"><AppearanceMenu/><TaskQueue openRequest={taskQueueRequest} disabled={librarySaving||!workspace.ready} onOpen={()=>{setModulePage('workbench');setFocusScene(false);setAssistantOpen(true);setAssistantTab('chat');}} onHistory={()=>{setModulePage('tasks');setFocusScene(false);}}/><Button variant="ghost" color="gray" title="设置" aria-label="设置" disabled={librarySaving||!workspace.ready} aria-current={modulePage==='settings'?'page':undefined} onClick={()=>setModulePage('settings')}><GearIcon/></Button></div>
+        <div className="navigation-utilities"><AppearanceMenu/><AppUpdateNavEntry disabled={librarySaving||!workspace.ready}/><TaskQueue openRequest={taskQueueRequest} disabled={librarySaving||!workspace.ready} onOpen={()=>{setModulePage('workbench');setFocusScene(false);setAssistantOpen(true);setAssistantTab('chat');}} onHistory={()=>{setModulePage('tasks');setFocusScene(false);}}/><Button variant="ghost" color="gray" title="设置" aria-label="设置" disabled={librarySaving||!workspace.ready} aria-current={modulePage==='settings'?'page':undefined} onClick={()=>setModulePage('settings')}><GearIcon/></Button></div>
       </nav>
       <section className="studio-main">
 
@@ -217,6 +217,7 @@ export default function App() {
       {showHistory&&<Dialog.Root open onOpenChange={setShowHistory}><Dialog.Content className="settings-module history-settings-module" style={{maxWidth:600}}><Dialog.Title>项目与回收站</Dialog.Title><Dialog.Description>历史项目仍保留，可重命名、恢复或继续编辑。</Dialog.Description><div className="history-management"><SessionSidebar locked={locked} onClose={()=>{setShowHistory(false);setModulePage('workbench');}}/></div><Button onClick={()=>{setShowHistory(false);setModulePage('workbench');}}>进入选中项目</Button></Dialog.Content></Dialog.Root>}
       {showTools&&<WorkspaceTools onClose={()=>setShowTools(false)}/>}
       {showSettings&&<SettingsDialog onClose={()=>setShowSettings(false)}/>}
+      <AppUpdateDialog/>
     </div>
   </AppearanceProvider>;
 }

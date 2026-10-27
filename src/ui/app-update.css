@@ -15,3 +15,23 @@
 .app-update-actions{display:flex;flex-wrap:wrap;gap:8px;flex-shrink:0}
 .app-update-notice .rt-Button{min-height:30px}
 @media(max-width:760px){.app-update-notice{align-items:flex-start;flex-direction:column}}
+.app-update-primary-action{min-height:36px!important;padding-left:16px!important;padding-right:16px!important;font-weight:650}
+.app-update-panel{display:flex;flex-direction:column;gap:12px;width:100%}
+.app-update-panel-lead,.app-update-release-notes,.app-update-status{margin:0;font-size:13px;line-height:1.65;color:var(--gray-10)}
+.app-update-release-notes{padding:10px 12px;border-radius:10px;background:var(--gray-2);border:1px solid var(--gray-4);color:var(--gray-11)}
+.app-update-status-error{color:var(--red-11)}
+.app-update-version-compare{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.app-update-version-chip{display:flex;flex-direction:column;gap:2px;padding:10px 14px;border-radius:12px;background:var(--gray-2);border:1px solid var(--gray-4);min-width:108px}
+.app-update-version-chip strong{font-size:18px;font-weight:700;letter-spacing:-.3px;color:var(--gray-12)}
+.app-update-version-chip-new{border-color:var(--blue-6);background:var(--blue-2)}
+.app-update-version-label{font-size:11px;color:var(--gray-10);text-transform:uppercase;letter-spacing:.04em}
+.app-update-version-arrow{font-size:20px;color:var(--blue-9);font-weight:700}
+.app-update-panel-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:4px}
+.app-update-panel-dialog .app-update-panel-actions{margin-top:8px}
+.app-update-settings-row{align-items:flex-start!important;flex-direction:column}
+.app-update-settings-group{border-color:var(--blue-5)}
+.app-update-dialog .app-update-dialog-footer{display:flex;justify-content:flex-end;margin-top:18px}
+.canvas-studio.frosted-studio .navigation-utilities .app-update-nav-entry{position:relative;gap:6px;padding-inline:10px}
+.canvas-studio.frosted-studio .navigation-utilities .app-update-nav-label{font-size:13px}
+.canvas-studio.frosted-studio .navigation-utilities .app-update-nav-badge{position:absolute;top:-4px;right:-2px;min-width:17px;height:17px;padding:0 4px;border:2px solid var(--color-panel-solid);border-radius:9px;font-size:10px;font-weight:700;line-height:13px;text-align:center;background:var(--blue-9);color:#fff;pointer-events:none}
+@media(max-width:960px){.canvas-studio.frosted-studio .navigation-utilities .app-update-nav-label{display:none}}
