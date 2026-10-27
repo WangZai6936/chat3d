@@ -45,6 +45,8 @@ jobs:
       # Upload chat3d/ to /opt/1panel/www/sites/portal.jiezi-ai.com/index/desktop-updates/chat3d/
       # Packages live in desktop-updates/chat3d/windows/, desktop-updates/chat3d/mac/ and desktop-updates/chat3d/linux/.
       # This workflow only builds Windows. Do not publish empty macOS or Linux entries.
+      # latest.json `url` stays the primary. Portal publishes also list the other of
+      # https://portal.jiezi-ai.com and the direct origin in optional `mirrors`.
       - name: Decide updater signing
         id: updater
         env:
@@ -132,6 +134,8 @@ jobs:
           CHAT3D_UPDATER_ENDPOINT: ${{ secrets.CHAT3D_UPDATER_ENDPOINT }}
           CHAT3D_UPDATE_NOTES: ${{ vars.CHAT3D_UPDATE_NOTES }}
           CHAT3D_UPDATE_PUB_DATE: ${{ vars.CHAT3D_UPDATE_PUB_DATE }}
+          CHAT3D_UPDATER_DOWNLOAD_ORIGIN: ${{ vars.CHAT3D_UPDATER_DOWNLOAD_ORIGIN }}
+          CHAT3D_UPDATER_DOWNLOAD_MIRRORS: ${{ vars.CHAT3D_UPDATER_DOWNLOAD_MIRRORS }}
         run: npm run desktop-update:assemble -- --bundle src-tauri/target/x86_64-pc-windows-msvc/release/bundle --out desktop-update-publish
       - name: Upload updater manifest and packages
         if: success() && steps.updater.outputs.mode == 'signed'

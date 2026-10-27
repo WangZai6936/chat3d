@@ -90,6 +90,34 @@ function installerUrl(value) {
   return url;
 }
 
+export function isInstallerUrl(value) {
+  return installerUrl(value) !== null;
+}
+
+function mirrorKey(url) {
+  return `${url.origin}${url.pathname}${url.search}`;
+}
+
+// `mirrors` is optional. A present but malformed list rejects the manifest so a bad publish fails closed.
+// Duplicate entries and copies of `url` are dropped. Old clients ignore the field and keep using `url`.
+function cleanMirrors(value, primary) {
+  if (!Array.isArray(value) || value.length > 6) return null;
+  const primaryUrl = installerUrl(primary);
+  const primaryNorm = primaryUrl ? mirrorKey(primaryUrl) : '';
+  const mirrors = [];
+  const seen = new Set();
+  for (const entry of value) {
+    if (typeof entry !== 'string') return null;
+    const url = installerUrl(entry.trim());
+    if (!url) return null;
+    const key = mirrorKey(url);
+    if (key === primaryNorm || seen.has(key)) continue;
+    seen.add(key);
+    mirrors.push(entry.trim());
+  }
+  return mirrors;
+}
+
 export function desktopManifest(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const version = versionBody(value.version, value);
@@ -104,7 +132,13 @@ export function desktopManifest(value) {
     if (!item || typeof item !== 'object' || !installerUrl(item.url) || typeof item.signature !== 'string') return null;
     if (item.signature.length < 40 || item.signature.length > 4000) return null;
     if (/^\s*(?:https?:|file:|[A-Za-z]:\\|\/|\.\.?\/)/.test(item.signature)) return null;
-    clean[key] = {signature: item.signature, url: item.url};
+    const platform = {signature: item.signature, url: item.url};
+    if (Object.prototype.hasOwnProperty.call(item, 'mirrors')) {
+      const mirrors = cleanMirrors(item.mirrors, item.url);
+      if (!mirrors) return null;
+      if (mirrors.length) platform.mirrors = mirrors;
+    }
+    clean[key] = platform;
   }
   return {...version, platforms: clean};
 }

@@ -59,23 +59,32 @@ npm run desktop-update:assemble -- --bundle src-tauri/target/x86_64-pc-windows-m
 
 `npm run tauri:build` 会先写入被 git 忽略的 `src-tauri/updater.generated.json`，其中只有公钥、https 检查端点、`dangerousInsecureTransportProtocol`（允许清单里的 http 安装包直链）和安装包签名开关。`npm run tauri:build:windows` 在此之上使用现有的 Windows NSIS 配置。检查端点必须是 https，不能带账号、密码或查询参数。动态更新服务可以使用 `{{target}}`、`{{arch}}`、`{{current_version}}` 和 `{{bundle_type}}`；门户这份静态清单不要使用占位符。
 
-发布时可选 `CHAT3D_UPDATER_DOWNLOAD_ORIGIN`（无末尾斜杠，例如 `http://36.133.218.210:38008`）：只替换 `latest.json` 里各平台 `url` 的 origin，检查地址仍是 `CHAT3D_UPDATER_ENDPOINT`。未设置时安装包 url 与清单同源。
+发布时可选 `CHAT3D_UPDATER_DOWNLOAD_ORIGIN`（无末尾斜杠，例如 `http://36.133.218.210:38008`）：只替换 `latest.json` 里各平台 `url` 的 origin，检查地址仍是 `CHAT3D_UPDATER_ENDPOINT`。未设置时安装包 url 与清单同源。可选 `CHAT3D_UPDATER_DOWNLOAD_MIRRORS`：逗号分隔的额外 origin（同样不能带路径、账号或末尾斜杠），写入各平台的 `mirrors`。
 
 当前配置是 `createUpdaterArtifacts: true`。Windows 的更新包就是 NSIS 安装包本身，旁边有 `.exe.sig`。`signature` 必须是该 `.sig` 的全文，不能写成路径或 URL。平台键只使用 `linux`、`darwin`、`windows` 加 `x86_64`、`aarch64`、`i686`、`armv7`。上传目录名则是 `windows`、`mac`、`linux`。
 
 ```json
 {
-  "version": "0.2.2",
-  "notes": "产品更名为 Scenivo。",
+  "version": "0.2.7",
+  "notes": "安装包可从较快的镜像下载。",
   "pub_date": "2026-10-26T00:00:00Z",
   "platforms": {
     "windows-x86_64": {
-      "signature": "<Scenivo_0.2.2_x64-setup.exe.sig 的全文>",
-      "url": "http://36.133.218.210:38008/desktop-updates/chat3d/windows/Scenivo_0.2.2_x64-setup.exe"
+      "signature": "<Scenivo_0.2.7_x64-setup.exe.sig 的全文>",
+      "url": "http://36.133.218.210:38008/desktop-updates/chat3d/windows/Scenivo_0.2.7_x64-setup.exe",
+      "mirrors": [
+        "https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/Scenivo_0.2.7_x64-setup.exe"
+      ]
     }
   }
 }
 ```
+
+`mirrors` 可选，最多 6 个 http(s) 地址，不能带账号密码。它们必须是**同一份**已签名安装包，只是传输地址不同。`url` 仍是主地址：0.2.6 及更早的客户端忽略 `mirrors`，继续只下载 `url`。签名覆盖安装包内容，不覆盖 URL，所以换地址不会、也不应该换掉 `signature`。
+
+门户这条发布路径会同时从 Cloudflare（`https://portal.jiezi-ai.com`）和源站直连（`http://36.133.218.210:38008`）提供同一个文件。`desktop-update:assemble` 在清单端点或主下载地址落在这一对 origin 上、且路径包含 `/desktop-updates/` 时，会把另一侧写进 `mirrors`。主地址仍由 `CHAT3D_UPDATER_DOWNLOAD_ORIGIN` 决定；没设时 `url` 与清单同源，直连地址进 `mirrors`。设了直连源时，`url` 保持直连，门户 https 进 `mirrors`。
+
+0.2.7 客户端在「立即更新」之后、正式下载之前，对 `url`、`mirrors`，以及上面这一对已知地址（路径必须相同）做一次并行探测：每个地址最多读取 16KB，约 3.5 秒。能返回安装包样本的地址里选吞吐更高的一个。探测都失败时仍用 `url`。选中的地址交给 Tauri 更新插件下载；插件用清单里的 `signature` 和构建时写入的公钥校验，失败则不安装。校验逻辑没有放宽。关于页和更新条仍是原来的进度文案，探测期间显示「正在选择较快的下载线路…」。镜像下载如果在安装开始前失败，会再试一次主地址。
 
 有 macOS 或 Linux 签名产物时才追加平台，例如 `darwin-aarch64` 指向 `desktop-updates/chat3d/mac/*.app.tar.gz`，`linux-x86_64` 指向 `desktop-updates/chat3d/linux/*.AppImage`。桌面端只安装签名校验通过的包。清单版本必须高于已经安装的版本，否则客户端会认为没有更新。
 
@@ -127,6 +136,8 @@ Windows 安装使用 NSIS 的 passive 模式。日常 `tauri build` 不生成更
 | `CHAT3D_UPDATER_ENDPOINT` | Secret | `https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json` |
 | `CHAT3D_UPDATE_NOTES` | Variable，可选 | 最多 500 字的说明 |
 | `CHAT3D_UPDATE_PUB_DATE` | Variable，可选 | RFC 3339 UTC，例如 `2026-10-26T00:00:00Z`。不设则用构建时刻 |
+| `CHAT3D_UPDATER_DOWNLOAD_ORIGIN` | Variable，可选 | 无末尾斜杠的 http(s) origin。只替换 `latest.json` 里的 `url`；不设则与清单同源 |
+| `CHAT3D_UPDATER_DOWNLOAD_MIRRORS` | Variable，可选 | 逗号分隔的额外 origin，写入 `mirrors`。门户地址会自动带上另一侧镜像 |
 
 workflow 不会登录门户，也不会把私钥放进 artifact。下载 `chat3d-desktop-update-<sha>` 后，按其中的 `UPLOAD.txt` 上传。已安装的签名包会向清单地址检查更新；未签名的日常包仍只提示未配置自动更新。
 
@@ -153,7 +164,7 @@ node tests/desktop-update-publish.mjs
 
 1. 确认 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 的版本一致，且高于已安装版本。
 2. 配好密钥和 `CHAT3D_UPDATER_ENDPOINT=https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json` 后运行 `npm run tauri:build:windows`，再运行 `npm run desktop-update:assemble -- --bundle src-tauri/target/x86_64-pc-windows-msvc/release/bundle`。
-3. 打开 `desktop-update-publish/chat3d/latest.json`。`windows-x86_64.url` 应指向 `https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/` 下的 `.exe`，`signature` 与同目录 `.exe.sig` 全文一致。没有 macOS、Linux 产物时，清单里不应出现这两个平台。
+3. 打开 `desktop-update-publish/chat3d/latest.json`。未设置下载源时，`windows-x86_64.url` 应指向 `https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/` 下的 `.exe`，`mirrors` 含同一路径的 `http://36.133.218.210:38008` 地址。`signature` 与同目录 `.exe.sig` 全文一致。没有 macOS、Linux 产物时，清单里不应出现这两个平台。
 4. 确认产物和 `UPLOAD.txt` 都不含私钥。把 `chat3d/` 同步到 `/opt/1panel/www/sites/portal.jiezi-ai.com/index/desktop-updates/chat3d/`。
 5. `curl -fsS https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json` 应返回刚上传的 JSON，且 `Cache-Control` 不宜长期缓存。
 6. 安装旧的签名包，打开应用或在设置中检查。任务进行中不应重启；空闲时「立即更新」应完成安装并重启。没有配置端点的调试包应继续启动，并在手动检查时说明未配置自动更新。

@@ -1,6 +1,7 @@
 import {resolve} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {assembleDesktopUpdate, readProjectVersion} from './desktop-update-publish.mjs';
+import {parseMirrorOrigins} from '../shared/update-mirrors.mjs';
 
 function option(name) {
   const index = process.argv.indexOf(name);
@@ -16,12 +17,15 @@ function option(name) {
 export async function assembleFromEnvironment(env, args) {
   const endpoint = (env.CHAT3D_UPDATER_ENDPOINT ?? '').trim();
   if (!endpoint) throw new Error('请设置 CHAT3D_UPDATER_ENDPOINT=https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json');
+  const mirrors = parseMirrorOrigins(env.CHAT3D_UPDATER_DOWNLOAD_MIRRORS ?? '');
+  if (!mirrors.ok) throw new Error(mirrors.error);
   const root = resolve(args.root || process.cwd());
   const result = await assembleDesktopUpdate({
     bundleDir: resolve(root, args.bundle || 'src-tauri/target'),
     outDir: resolve(root, args.out || 'desktop-update-publish'),
     endpoint,
     downloadOrigin: (env.CHAT3D_UPDATER_DOWNLOAD_ORIGIN ?? '').trim(),
+    mirrorOrigins: mirrors.origins,
     version: readProjectVersion(root),
     notes: env.CHAT3D_UPDATE_NOTES ?? '',
     pubDate: (env.CHAT3D_UPDATE_PUB_DATE ?? '').trim(),
@@ -34,7 +38,10 @@ export async function assembleFromEnvironment(env, args) {
 async function main() {
   const result = await assembleFromEnvironment(process.env, {root: option('--root'), bundle: option('--bundle'), out: option('--out')});
   console.log(`已生成 ${result.manifestPath}`);
-  for (const [platform, item] of Object.entries(result.manifest.platforms)) console.log(`${platform} ${item.url}`);
+  for (const [platform, item] of Object.entries(result.manifest.platforms)) {
+    console.log(`${platform} ${item.url}`);
+    for (const mirror of item.mirrors ?? []) console.log(`${platform} mirror ${mirror}`);
+  }
   console.log(`上传说明：${result.uploadPath}`);
 }
 

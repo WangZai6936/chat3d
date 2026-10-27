@@ -3,6 +3,7 @@ import {copyFile, mkdir, readFile, readdir, rename, rm, stat, writeFile} from 'n
 import {readFileSync} from 'node:fs';
 import {basename, dirname, isAbsolute, join, relative, resolve} from 'node:path';
 import {desktopManifest, updaterDownloadOriginError, updaterEndpointError, versionBody} from '../shared/app-version.mjs';
+import {mirrorListForPublishedUrl} from '../shared/update-mirrors.mjs';
 
 export const PORTAL_UPDATER_ENDPOINT = 'https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json';
 export const PORTAL_PUBLISH_DIR = '/opt/1panel/www/sites/portal.jiezi-ai.com/index/desktop-updates/chat3d';
@@ -168,6 +169,7 @@ function uploadText({endpoint, appName, artifacts, hashes, downloadOrigin = ''})
     lines.push(`安装包下载源（latest.json 内 url 的 origin）：${origin}`);
     lines.push('检查更新仍使用上面的 https 清单；仅安装包直链可为 http。发布时设置 CHAT3D_UPDATER_DOWNLOAD_ORIGIN（无末尾斜杠）。');
   }
+  lines.push('mirrors 是同一份已签名安装包的备用地址。0.2.7 及以上客户端下载前会短时探测并选用较快的一个；更早的客户端只使用 url。签名不随地址变化。');
   if (endpoint === PORTAL_UPDATER_ENDPOINT) {
     lines.push(`服务器目录：${PORTAL_PUBLISH_DIR}/`);
     if (!origin) {
@@ -183,13 +185,17 @@ function uploadText({endpoint, appName, artifacts, hashes, downloadOrigin = ''})
   }
   lines.push('latest.json 不要被 Cloudflare 长期缓存。安装包文件名包含版本，可以缓存。');
   lines.push('本次平台（没有产物的 mac、linux 不会出现，也不要手写空平台）：');
-  for (const item of artifacts) lines.push(`- ${item.platform} -> ${item.folder}/${item.filename}`);
+  for (const item of artifacts) {
+    lines.push(`- ${item.platform} -> ${item.folder}/${item.filename}`);
+    const mirrors = item.mirrors ?? [];
+    if (mirrors.length) lines.push(`  镜像：${mirrors.join(' ')}`);
+  }
   lines.push('SHA256：');
   for (const item of hashes) lines.push(`${item.hash}  ${item.name}`);
   return `${lines.join('\n')}\n`;
 }
 
-export async function assembleDesktopUpdate({bundleDir, outDir, endpoint, version, notes = '', pubDate = '', privateKey = '', password = '', downloadOrigin = ''} = {}) {
+export async function assembleDesktopUpdate({bundleDir, outDir, endpoint, version, notes = '', pubDate = '', privateKey = '', password = '', downloadOrigin = '', mirrorOrigins = []} = {}) {
   const described = describeStaticEndpoint(endpoint);
   if (!described.ok) throw new Error(described.error);
   const origin = typeof downloadOrigin === 'string' ? downloadOrigin.trim() : '';
@@ -200,7 +206,15 @@ export async function assembleDesktopUpdate({bundleDir, outDir, endpoint, versio
   const stamp = explicitDate || new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
   const artifacts = await collectUpdaterArtifacts(bundleDir, version);
   const platforms = {};
-  for (const item of artifacts) platforms[item.platform] = {signature: item.signature, url: artifactPublicUrl(described.endpoint, item.folder, item.filename, origin)};
+  const published = [];
+  for (const item of artifacts) {
+    const url = artifactPublicUrl(described.endpoint, item.folder, item.filename, origin);
+    const mirrors = mirrorListForPublishedUrl({endpoint: described.endpoint, primary: url, extraOrigins: mirrorOrigins});
+    const platform = {signature: item.signature, url};
+    if (mirrors.length) platform.mirrors = mirrors;
+    platforms[item.platform] = platform;
+    published.push({...item, mirrors});
+  }
   const body = versionBody(version, {notes, pubDate: stamp});
   if (!body) throw new Error('版本号无效');
   if (!body.pub_date) throw new Error('CHAT3D_UPDATE_PUB_DATE 必须是 RFC 3339 UTC，例如 2026-10-26T00:00:00Z');
@@ -231,7 +245,7 @@ export async function assembleDesktopUpdate({bundleDir, outDir, endpoint, versio
     hashes.unshift({hash: await sha256(manifestPath), name: `${described.appName}/latest.json`});
     const checked = desktopManifest(JSON.parse(await readFile(manifestPath, 'utf8')));
     if (!checked) throw new Error('写入后的 latest.json 校验失败');
-    const note = uploadText({endpoint: described.endpoint, appName: described.appName, artifacts, hashes, downloadOrigin: origin});
+    const note = uploadText({endpoint: described.endpoint, appName: described.appName, artifacts: published, hashes, downloadOrigin: origin});
     assertNoSecrets(note, secrets);
     await rm(appDir, {recursive: true, force: true});
     await rename(staging, appDir);
