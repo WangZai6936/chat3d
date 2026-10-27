@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {desktopManifest, updaterEndpointError} from '../shared/app-version.mjs';
 import {assembleFromEnvironment} from '../scripts/assemble-desktop-update.mjs';
-import {PORTAL_ORIGIN_PORT, PORTAL_PUBLISH_DIR, PORTAL_UPDATER_ENDPOINT, archFromFilename, assembleDesktopUpdate, describeStaticEndpoint, readProjectVersion} from '../scripts/desktop-update-publish.mjs';
+import {PORTAL_ORIGIN_PORT, PORTAL_PUBLISH_DIR, PORTAL_UPDATER_ENDPOINT, archFromFilename, artifactPublicUrl, assembleDesktopUpdate, describeStaticEndpoint, readProjectVersion} from '../scripts/desktop-update-publish.mjs';
 import {updaterReleaseMode} from '../scripts/updater-release-mode.mjs';
 
 const signature = `untrusted comment: signature from tauri secret key\n${'R'.repeat(80)}`;
@@ -22,6 +22,8 @@ assert.equal(describeStaticEndpoint('https://portal.jiezi-ai.com/desktop-updates
 assert.equal(describeStaticEndpoint('https://portal.jiezi-ai.com/desktop-updates/chat3d/latest.json?cache=1').ok, false);
 assert.equal(describeStaticEndpoint('https://portal.jiezi-ai.com/desktop-updates/chat3d/{{target}}/latest.json').ok, false);
 assert.equal(describeStaticEndpoint('https://updates.example.com/desktop-updates/otherapp/latest.json').appName, 'otherapp');
+assert.equal(artifactPublicUrl(endpoint, 'windows', 'Scenivo_0.2.0_x64-setup.exe'), `https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/Scenivo_0.2.0_x64-setup.exe`);
+assert.equal(artifactPublicUrl(endpoint, 'windows', 'Scenivo_0.2.0_x64-setup.exe', 'http://36.133.218.210:38008'), `http://36.133.218.210:38008/desktop-updates/chat3d/windows/Scenivo_0.2.0_x64-setup.exe`);
 assert.equal(archFromFilename('Scenivo_0.2.0_x64-setup.exe'), 'x86_64');
 assert.equal(archFromFilename('Scenivo_0.2.0_amd64.AppImage'), 'x86_64');
 assert.equal(archFromFilename('Scenivo_0.2.0_x86_64.AppImage'), 'x86_64');
@@ -114,6 +116,21 @@ try {
   await mkdir(join(windowsOnly, 'nsis'), {recursive: true});
   await writeFile(join(windowsOnly, 'nsis', exe), 'only-windows');
   await writeFile(join(windowsOnly, 'nsis', `${exe}.sig`), signature);
+  const httpOut = join(root, 'http-publish');
+  const httpResult = await assembleDesktopUpdate({
+    bundleDir: windowsOnly,
+    outDir: httpOut,
+    endpoint,
+    version: '0.2.0',
+    pubDate: '2026-10-26T00:00:00Z',
+    downloadOrigin: 'http://36.133.218.210:38008',
+  });
+  const httpManifest = JSON.parse(await readFile(httpResult.manifestPath, 'utf8'));
+  assert.equal(httpManifest.platforms['windows-x86_64'].url, `http://36.133.218.210:38008/desktop-updates/chat3d/windows/${exe}`);
+  const httpUpload = await readFile(httpResult.uploadPath, 'utf8');
+  assert.ok(httpUpload.includes('CHAT3D_UPDATER_DOWNLOAD_ORIGIN'));
+  assert.ok(httpUpload.includes('http://36.133.218.210:38008'));
+
   const onlyOut = join(root, 'only-publish');
   await assembleDesktopUpdate({bundleDir: windowsOnly, outDir: onlyOut, endpoint: 'https://portal.jiezi-ai.com/desktop-updates/otherapp/latest.json', version: '0.2.0', pubDate: '2026-10-26T00:00:00Z'});
   const onlyManifest = JSON.parse(await readFile(join(onlyOut, 'otherapp', 'latest.json'), 'utf8'));
@@ -131,12 +148,13 @@ try {
   await writeFile(join(cliNsis, `${cliExe}.sig`), signature);
   const cli = await assembleFromEnvironment({
     CHAT3D_UPDATER_ENDPOINT: endpoint,
+    CHAT3D_UPDATER_DOWNLOAD_ORIGIN: 'http://36.133.218.210:38008',
     CHAT3D_UPDATE_PUB_DATE: '2026-10-26T00:00:00Z',
     TAURI_SIGNING_PRIVATE_KEY: privateKey,
     TAURI_SIGNING_PRIVATE_KEY_PASSWORD: password,
   }, {root: process.cwd(), bundle: cliBundle, out: join(root, 'cli-publish')});
   assert.equal(cli.manifest.version, readProjectVersion(process.cwd()));
-  assert.equal(cli.manifest.platforms['windows-x86_64'].url, `https://portal.jiezi-ai.com/desktop-updates/chat3d/windows/${cliExe}`);
+  assert.equal(cli.manifest.platforms['windows-x86_64'].url, `http://36.133.218.210:38008/desktop-updates/chat3d/windows/${cliExe}`);
   assert.equal((await readFile(cli.manifestPath, 'utf8')).includes(privateKey), false);
 } finally { await rm(root, {recursive: true, force: true}); }
 
