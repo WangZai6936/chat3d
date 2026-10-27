@@ -13,7 +13,7 @@ export type UpdateView =
   | {kind: 'hidden'}
   | {kind: 'busy'; version: string; notes: string; dirty: boolean}
   | {kind: 'ready'; version: string; notes: string; dirty: boolean; ended: boolean}
-  | {kind: 'installing'; version: string; progress: string}
+  | {kind: 'installing'; version: string; progress: string; percent: number | null; indeterminate: boolean}
   | {kind: 'installed'; version: string; progress: string; busy: boolean}
   | {kind: 'failed'; version: string; message: string};
 
@@ -41,16 +41,27 @@ export function deriveUpdateView(input: {
   remind: string | null;
   phase: 'idle' | 'installing' | 'installed' | 'failed';
   progress: string;
+  progressMetrics: UpdateProgressState | null;
   error: string;
 }): UpdateView {
   const release = input.release && isNewerVersion(input.release.version, input.current) ? input.release : null;
   if (!release) return {kind: 'hidden'};
-  if (input.phase === 'installing') return {kind: 'installing', version: release.version, progress: input.progress || '正在下载更新…'};
+  if (input.phase === 'installing') {
+    const display = formatInstallingProgress(input.progressMetrics, input.progress || '正在下载更新…');
+    return {kind: 'installing', version: release.version, progress: display.label, percent: display.percent, indeterminate: display.indeterminate};
+  }
   if (input.phase === 'installed') return {kind: 'installed', version: release.version, progress: input.progress || '更新已安装。', busy: input.busy};
   if (input.phase === 'failed') return {kind: 'failed', version: release.version, message: input.error || '更新没有完成。'};
   if (input.busy) return input.remind === release.version ? {kind: 'hidden'} : {kind: 'busy', version: release.version, notes: release.notes, dirty: input.dirty};
   if (input.dismissed === release.version && input.remind !== release.version) return {kind: 'hidden'};
   return {kind: 'ready', version: release.version, notes: release.notes, dirty: input.dirty, ended: input.remind === release.version};
+}
+
+export function formatInstallingProgress(metrics: UpdateProgressState | null, fallbackLabel: string) {
+  if (!metrics) return {label: fallbackLabel, percent: null as number | null, indeterminate: true};
+  if (metrics.label.startsWith('正在安装')) return {label: metrics.label, percent: null, indeterminate: true};
+  const percent = metrics.total && metrics.total > 0 ? Math.min(100, Math.floor(metrics.loaded / metrics.total * 100)) : null;
+  return {label: metrics.label, percent, indeterminate: percent === null};
 }
 
 export function reduceUpdateProgress(state: UpdateProgressState, event: UpdateProgressEvent): UpdateProgressState {
