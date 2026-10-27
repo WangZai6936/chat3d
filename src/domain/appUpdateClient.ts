@@ -19,6 +19,7 @@ interface AppUpdateState {
   error: string;
   checking: boolean;
   checkMessage: string;
+  panelOpen: boolean;
 }
 
 const stored = (key: string) => {
@@ -31,7 +32,20 @@ const remember = (key: string, value: string | null) => {
 export const useAppUpdate = create<AppUpdateState>(() => ({
   busy: false, dirty: false, release: null, dismissed: stored(DISMISS_KEY), remind: stored(REMIND_KEY),
   phase: 'idle', progress: '', progressMetrics: null, error: '', checking: false, checkMessage: '',
+  panelOpen: false,
 }));
+
+export function hasPendingAppUpdate(state: AppUpdateState = useAppUpdate.getState()) {
+  return !!(state.release && isNewerVersion(state.release.version, APP_VERSION));
+}
+
+export function openAppUpdatePanel() {
+  useAppUpdate.setState({panelOpen: true});
+}
+
+export function closeAppUpdatePanel() {
+  useAppUpdate.setState({panelOpen: false});
+}
 
 export function setAppUpdateContext(input: {busy: boolean; dirty: boolean}) {
   useAppUpdate.setState(input);

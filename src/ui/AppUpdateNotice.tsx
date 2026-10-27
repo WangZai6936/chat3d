@@ -1,6 +1,19 @@
-import {Button} from '@radix-ui/themes';
+import {isTauri} from '@tauri-apps/api/core';
+import {Button, Dialog} from '@radix-ui/themes';
+import {InfoCircledIcon} from '@radix-ui/react-icons';
 import {APP_VERSION, formatInstallingProgress, type UpdateView} from '../domain/appUpdate';
-import {applyAppUpdate, appUpdateView, checkForAppUpdate, dismissUpdate, relaunchInstalledUpdate, remindUpdateAfterTask, useAppUpdate} from '../domain/appUpdateClient';
+import {
+  applyAppUpdate,
+  appUpdateView,
+  checkForAppUpdate,
+  closeAppUpdatePanel,
+  dismissUpdate,
+  hasPendingAppUpdate,
+  openAppUpdatePanel,
+  relaunchInstalledUpdate,
+  remindUpdateAfterTask,
+  useAppUpdate,
+} from '../domain/appUpdateClient';
 import './app-update.css';
 
 export function AppUpdateProgressBar({label, percent, indeterminate}: {label: string; percent: number | null; indeterminate: boolean}) {
@@ -14,13 +27,18 @@ export function AppUpdateProgressBar({label, percent, indeterminate}: {label: st
   </div>;
 }
 
-export function AppUpdateBanner({view, onLater, onRemind, onApply, onBackup, onRestart}: {
+function applyUpdateLabel(version: string) {
+  return isTauri() ? `立即更新到 ${version}` : `刷新到 ${version}`;
+}
+
+export function AppUpdateBanner({view, onLater, onRemind, onApply, onBackup, onRestart, onOpenPanel}: {
   view: UpdateView;
   onLater: () => void;
   onRemind: () => void;
   onApply: () => void;
   onBackup: () => void;
   onRestart: () => void;
+  onOpenPanel: () => void;
 }) {
   const hidden = view.kind === 'hidden';
   const version = view.kind === 'hidden' ? '' : view.version;
@@ -36,27 +54,93 @@ export function AppUpdateBanner({view, onLater, onRemind, onApply, onBackup, onR
       {notes && <p>{notes}</p>}
     </div>}
     {!hidden && <div className="app-update-actions">
-      {view.kind === 'busy' && <><Button variant="soft" color="gray" onClick={onLater}>稍后提醒</Button><Button variant="solid" onClick={onRemind}>结束后提醒我</Button></>}
-      {view.kind === 'ready' && <><Button variant="soft" color="gray" onClick={onLater}>稍后</Button><Button variant="soft" color="gray" onClick={onBackup}>下载备份</Button><Button variant="solid" onClick={onApply}>立即更新</Button></>}
-      {view.kind === 'failed' && <><Button variant="soft" color="gray" onClick={onLater}>稍后</Button><Button variant="solid" onClick={onApply}>重试</Button></>}
-      {view.kind === 'installed' && <Button variant="solid" disabled={view.busy} onClick={onRestart}>立即重启</Button>}
+      {view.kind === 'busy' && <><Button variant="soft" color="gray" onClick={onLater}>稍后提醒</Button><Button variant="soft" color="gray" onClick={onOpenPanel}>查看详情</Button><Button variant="solid" onClick={onRemind}>结束后提醒我</Button></>}
+      {view.kind === 'ready' && <><Button variant="soft" color="gray" onClick={onLater}>稍后</Button><Button variant="soft" color="gray" onClick={onBackup}>下载备份</Button><Button variant="soft" color="gray" onClick={onOpenPanel}>查看详情</Button><Button variant="solid" className="app-update-primary-action" onClick={onApply}>{applyUpdateLabel(version)}</Button></>}
+      {view.kind === 'failed' && <><Button variant="soft" color="gray" onClick={onLater}>稍后</Button><Button variant="soft" color="gray" onClick={onOpenPanel}>查看详情</Button><Button variant="solid" className="app-update-primary-action" onClick={onApply}>重试更新</Button></>}
+      {view.kind === 'installed' && <Button variant="solid" className="app-update-primary-action" disabled={view.busy} onClick={onRestart}>立即重启</Button>}
+      {view.kind === 'installing' && <Button variant="soft" color="gray" onClick={onOpenPanel}>查看详情</Button>}
     </div>}
   </div>;
 }
 
 export function AppUpdateNotice({onBackup}: {onBackup: () => void}) {
   const state = useAppUpdate();
-  return <AppUpdateBanner view={appUpdateView(state)} onLater={dismissUpdate} onRemind={remindUpdateAfterTask} onApply={() => void applyAppUpdate()} onBackup={onBackup} onRestart={() => void relaunchInstalledUpdate()}/>;
+  return <AppUpdateBanner view={appUpdateView(state)} onLater={dismissUpdate} onRemind={remindUpdateAfterTask} onApply={() => void applyAppUpdate()} onBackup={onBackup} onRestart={() => void relaunchInstalledUpdate()} onOpenPanel={openAppUpdatePanel}/>;
+}
+
+export function AppUpdatePanel({layout = 'settings'}: {layout?: 'settings' | 'dialog'}) {
+  const state = useAppUpdate();
+  const view = appUpdateView(state);
+  const release = state.release;
+  const hasUpdate = hasPendingAppUpdate(state);
+  const checking = state.checking;
+  const message = state.checkMessage;
+  const updating = state.phase === 'installing';
+  const installDisplay = updating ? formatInstallingProgress(state.progressMetrics, state.progress || '正在下载更新…') : null;
+  const desktop = isTauri();
+  const version = release?.version ?? '';
+  const showReadyActions = hasUpdate && !state.busy && state.phase === 'idle' && (view.kind === 'ready' || view.kind === 'hidden');
+  const showBusyActions = hasUpdate && state.busy && state.phase === 'idle';
+  const showFailed = view.kind === 'failed';
+  const showInstalled = view.kind === 'installed';
+  const showInstalling = view.kind === 'installing';
+
+  return <div className={`app-update-panel ${layout === 'dialog' ? 'app-update-panel-dialog' : ''}`}>
+    <div className="app-update-version-compare" aria-label="版本信息">
+      <div className="app-update-version-chip"><span className="app-update-version-label">当前</span><strong>{APP_VERSION}</strong></div>
+      {hasUpdate && <span className="app-update-version-arrow" aria-hidden="true">→</span>}
+      {hasUpdate && <div className="app-update-version-chip app-update-version-chip-new"><span className="app-update-version-label">可更新至</span><strong>{version}</strong></div>}
+    </div>
+    <p className="app-update-panel-lead">{desktop ? '桌面版只安装已签名的发布包。生成进行中可以稍后更新，不会打断当前任务。' : '网页版刷新即可使用站点上的最新功能。'}</p>
+    {release?.notes && hasUpdate && <p className="app-update-release-notes">{release.notes}</p>}
+    {message && <p className="app-update-status" role="status">{message}</p>}
+    {showInstalling && <><p className="app-update-status"><strong>{view.progress}</strong></p><AppUpdateProgressBar label={view.progress} percent={view.percent} indeterminate={view.indeterminate}/></>}
+    {showInstalled && <p className="app-update-status"><strong>版本 {version} 已安装。</strong> {view.progress}</p>}
+    {showFailed && <p className="app-update-status app-update-status-error" role="alert"><strong>更新未完成。</strong> {view.message}</p>}
+    {showBusyActions && <p className="app-update-status">当前还有生成或待确认的预览。可以先结束任务并备份，再回来更新。</p>}
+    {showReadyActions && view.kind === 'ready' && view.dirty && <p className="app-update-status">当前修改尚未导出备份。建议先下载项目备份，再更新。</p>}
+    {installDisplay && !showInstalling && <AppUpdateProgressBar label={installDisplay.label} percent={installDisplay.percent} indeterminate={installDisplay.indeterminate}/>}
+    <div className="app-update-panel-actions">
+      {showReadyActions && <>
+        <Button size="3" variant="solid" className="app-update-primary-action" disabled={checking || updating} onClick={() => void applyAppUpdate()}>{applyUpdateLabel(version)}</Button>
+        <Button size="2" variant="soft" color="gray" onClick={dismissUpdate}>稍后</Button>
+      </>}
+      {showBusyActions && <>
+        <Button size="3" variant="solid" onClick={remindUpdateAfterTask}>结束后提醒我</Button>
+        <Button size="2" variant="soft" color="gray" onClick={dismissUpdate}>稍后提醒</Button>
+      </>}
+      {showFailed && <Button size="3" variant="solid" className="app-update-primary-action" onClick={() => void applyAppUpdate()}>重试更新到 {version}</Button>}
+      {showInstalled && <Button size="3" variant="solid" className="app-update-primary-action" disabled={view.busy} onClick={() => void relaunchInstalledUpdate()}>立即重启</Button>}
+      {!hasUpdate && !showInstalling && !showInstalled && <Button size="3" variant="solid" className="app-update-primary-action" disabled={checking || updating} onClick={() => void checkForAppUpdate({manual: true})}>{checking ? '正在检查…' : '检查更新'}</Button>}
+      {hasUpdate && !showReadyActions && !showBusyActions && !showFailed && !showInstalled && !showInstalling && <Button size="3" variant="solid" className="app-update-primary-action" disabled={checking || updating} onClick={() => void applyAppUpdate()}>{applyUpdateLabel(version)}</Button>}
+    </div>
+  </div>;
+}
+
+export function AppUpdateDialog() {
+  const open = useAppUpdate(s => s.panelOpen);
+  return <Dialog.Root open={open} onOpenChange={next => { if (!next) closeAppUpdatePanel(); else openAppUpdatePanel(); }}>
+    <Dialog.Content className="settings-module app-update-dialog" maxWidth="520px">
+      <Dialog.Title>关于与更新</Dialog.Title>
+      <Dialog.Description>查看当前版本、检查更新，并在新版本可用时一键安装。</Dialog.Description>
+      <AppUpdatePanel layout="dialog"/>
+      <div className="app-update-dialog-footer"><Button variant="soft" color="gray" onClick={closeAppUpdatePanel}>关闭</Button></div>
+    </Dialog.Content>
+  </Dialog.Root>;
+}
+
+export function AppUpdateNavEntry({disabled}: {disabled?: boolean}) {
+  const pending = useAppUpdate(s => hasPendingAppUpdate(s));
+  return <Button variant="ghost" color="gray" className="app-update-nav-entry" title="关于 Scenivo 与检查更新" aria-label={pending ? '关于与更新，有新版本可用' : '关于与更新'} disabled={disabled} onClick={openAppUpdatePanel}>
+    <InfoCircledIcon aria-hidden="true"/>
+    <span className="app-update-nav-label">关于与更新</span>
+    {pending && <span className="app-update-nav-badge" aria-hidden="true">新</span>}
+  </Button>;
 }
 
 export function AppUpdateSettings() {
-  const checking = useAppUpdate(s => s.checking);
-  const message = useAppUpdate(s => s.checkMessage);
-  const phase = useAppUpdate(s => s.phase);
-  const progress = useAppUpdate(s => s.progress);
-  const progressMetrics = useAppUpdate(s => s.progressMetrics);
-  const updating = phase === 'installing';
-  const installDisplay = updating ? formatInstallingProgress(progressMetrics, progress || '正在下载更新…') : null;
-  const buttonLabel = checking ? '正在检查…' : updating && installDisplay ? installDisplay.label : '检查应用更新';
-  return <section className="settings-group"><header><h2>应用更新</h2><p>发现新版本后再决定何时更新</p></header><div className="settings-row"><div><h3>当前版本 {APP_VERSION}</h3><p>浏览器可以刷新到网站上的新版本。桌面版只安装已签名的发布包。生成进行中可以稍后更新。</p>{message && <p role="status">{message}</p>}{installDisplay && <AppUpdateProgressBar label={installDisplay.label} percent={installDisplay.percent} indeterminate={installDisplay.indeterminate}/>}</div><Button variant="soft" color="gray" disabled={checking || updating} onClick={() => void checkForAppUpdate({manual: true})}>{buttonLabel}</Button></div></section>;
+  return <section className="settings-group app-update-settings-group" id="app-update-section">
+    <header><h2>关于与更新</h2><p>查看版本、检查更新，并在新版本可用时安装</p></header>
+    <div className="settings-row app-update-settings-row"><AppUpdatePanel layout="settings"/></div>
+  </section>;
 }
