@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build && node scripts/build-worker.mjs && npm run build:team",
+    "build": "tsc && vite build && node scripts/build-worker.mjs && npm run build:team && npm run build:team-web",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:build": "node scripts/prepare-updater-config.mjs && tauri build --config src-tauri/updater.generated.json",
@@ -15,7 +15,8 @@
     "start": "node server/start.mjs",
     "test:full-scenes": "node tests/full-scene-replay.mjs",
     "build:team": "node scripts/build-team.mjs",
-    "test:team": "npm run build:team && node tests/team-library.mjs && node tests/team-client.mjs && node tests/team-ui.mjs"
+    "build:team-web": "node scripts/build-team-web.mjs",
+    "test:team": "npm run build:team && npm run build:team-web && node tests/team-library.mjs && node tests/team-client.mjs && node tests/team-ui.mjs && node tests/team-web.mjs && node tests/team-static.mjs"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.0.0",

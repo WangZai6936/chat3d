@@ -5,7 +5,10 @@ import {readFile,stat} from 'node:fs/promises';
 import {resolve,extname,sep} from 'node:path';
 import {appVersionMiddleware} from './app-version.mjs';
 import {modelProxyMiddleware} from './node-adapter.mjs';
+import {createSpaStatic} from './static.mjs';
 const root=resolve('dist');
+const teamWebRoot=resolve('dist-team-web');
+const serveTeamWeb=createSpaStatic(teamWebRoot,'/team');
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.jpg':'image/jpeg','.webp':'image/webp'};
 const proxy=modelProxyMiddleware({allowed:process.env.CHAT3D_ALLOWED_UPSTREAMS,publicOrigin:process.env.CHAT3D_PUBLIC_ORIGIN});
 const blender=blenderMiddleware({enabled:process.env.CHAT3D_BLENDER_ENABLED==='1',executable:process.env.BLENDER_EXECUTABLE??'blender',publicOrigin:process.env.CHAT3D_PUBLIC_ORIGIN});
@@ -17,6 +20,7 @@ const server=createServer((req,res)=>version(req,res,()=>sharing(req,res,()=>ble
   if(!['GET','HEAD'].includes(req.method)){res.writeHead(405).end();return;}
   const pathname=decodeURIComponent(new URL(req.url,'http://localhost').pathname);
   if((pathname.startsWith('/api/')||pathname.startsWith('/server/'))){res.writeHead(404).end();return;}
+  if(pathname==='/team'||pathname.startsWith('/team/')){if(await serveTeamWeb(req,res,pathname))return;}
   let file=resolve(root,'.'+pathname);if(!file.startsWith(root+sep)&&file!==root){res.writeHead(403).end();return;}
   if(!extname(pathname))file=resolve(root,'index.html');
   if(!(await stat(file)).isFile())throw Error();const bytes=await readFile(file);

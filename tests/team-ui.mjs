@@ -10,9 +10,9 @@ globalThis.fetch=async(url,init)=>{
  throw Error('Unexpected test request '+path);
 };
 try{
- const {TeamLibrary}=await server.ssrLoadModule('/src/ui/TeamLibrary.tsx'),w=await server.ssrLoadModule('/src/workspace.ts'),{useEditorStore:s}=await server.ssrLoadModule('/src/store.ts'),{saveLibraryProject}=await server.ssrLoadModule('/src/domain/workspaceLibrary.ts');
+ const {TeamStudioPage}=await server.ssrLoadModule('/src/ui/TeamStudioPage.tsx'),w=await server.ssrLoadModule('/src/workspace.ts'),{useEditorStore:s}=await server.ssrLoadModule('/src/store.ts'),{saveLibraryProject}=await server.ssrLoadModule('/src/domain/workspaceLibrary.ts');
  await w.initializeWorkspace();w.createSession(undefined,{moduleKind:'asset',title:'隔离测试资产'});s.getState().applyCommandBatch([{op:'createPrimitive',name:'box',parentId:null,geometry:{type:'box',params:{width:1,height:1,depth:1}},transform:{position:[0,0,0],scale:[1,1,1],rotationQuaternion:[0,0,0,1]},materialId:'mat_blue'}],'fixture');await saveLibraryProject();
- const ui=render(React.createElement(TeamLibrary,{kind:'asset'}));fireEvent.click(ui.getByRole('button',{name:'打开团队资产库'}));
+ const ui=render(React.createElement(TeamStudioPage));assert.ok(ui.getByRole('heading',{name:'团队库'}));
  fireEvent.change(ui.getByLabelText('团队服务地址'),{target:{value:'http://localhost:1420'}});fireEvent.change(ui.getByLabelText('团队账号'),{target:{value:'alice'}});fireEvent.change(ui.getByLabelText('团队密码'),{target:{value:'isolated-password'}});fireEvent.click(ui.getByRole('button',{name:'登录团队'}));
  await waitFor(()=>assert.ok(ui.getByRole('option',{name:/隔离测试资产/})));const option=ui.getByRole('option',{name:/隔离测试资产/});fireEvent.change(ui.getByLabelText('发布本地内容'),{target:{value:option.value}});fireEvent.click(ui.getByRole('button',{name:'准备发布'}));await waitFor(()=>assert.ok(ui.getByRole('button',{name:'确认发布'})));
  assert.equal(calls.length,0);fireEvent.click(ui.getByRole('button',{name:'取消',exact:true}));assert.equal(calls.length,0);assert.ok(ui.getByText('发布已取消，没有上传。'));console.log('PASS UI prepare and cancellation never upload local data');

@@ -35,6 +35,7 @@ e2e/shots
 !.env.example
 
 dist-team
+dist-team-web
 team-data
 *.sqlite
 *.sqlite-wal

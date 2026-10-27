@@ -15,6 +15,7 @@ import {focusSceneObjects} from './scene/focus';
 import {CursorArrowIcon,MoveIcon,RotateCounterClockwiseIcon,SizeIcon,EnterFullScreenIcon} from '@radix-ui/react-icons';
 import {AppearanceProvider,AppearanceMenu} from './ui/Appearance';
 import {ProjectLibrary} from './ui/ProjectLibrary';
+import {TeamStudioPage} from './ui/TeamStudioPage';
 import {LibraryProjectSaveDialog} from './ui/LibraryMetadataDialog';
 import {AssetLibrary} from './ui/AssetLibrary';
 import {probeServerRenderer} from './scene/serverCapture';
@@ -75,7 +76,7 @@ export default function App() {
   const [projectNotice, setProjectNotice] = useState('');
   const closeSaveNotice=useCallback(()=>setProjectNotice(''),[]);
   const saveNotice=isLibrarySaveNotice(projectNotice)&&!autosaveError;
-  const [modulePage,setModulePage]=useState<'home'|'workbench'|'asset'|'scene'|'tasks'|'settings'>('home');const [libraryRefresh,setLibraryRefresh]=useState(0);
+  const [modulePage,setModulePage]=useState<'home'|'workbench'|'asset'|'scene'|'team'|'tasks'|'settings'>('home');const [libraryRefresh,setLibraryRefresh]=useState(0);
   const [librarySaving,setLibrarySaving]=useState(false),[showLibrarySave,setShowLibrarySave]=useState(false);
 
   const [exporting, setExporting] = useState(false);
@@ -148,7 +149,7 @@ export default function App() {
       <nav className="app-navigation" aria-label="主导航">
         <div className="app-brand"><BrandMark/><strong>Scenivo</strong></div>
 
-        <div className="navigation-pages">{([['home','首页','首页'],['asset','资产','资产库'],['scene','场景','场景库'],['workbench','工作台','建模工作台']] as const).map(([page,label,accessibleLabel])=><Button variant="ghost" color="gray" key={page} title={accessibleLabel} aria-label={accessibleLabel} disabled={librarySaving||!workspace.ready} aria-current={modulePage===page?'page':undefined} onClick={()=>{setModulePage(page);setFocusScene(false);}}><span>{label}</span></Button>)}</div>
+        <div className="navigation-pages">{([['home','首页','首页'],['asset','资产','资产库'],['scene','场景','场景库'],['team','团队','团队库'],['workbench','工作台','建模工作台']] as const).map(([page,label,accessibleLabel])=><Button variant="ghost" color="gray" key={page} title={accessibleLabel} aria-label={accessibleLabel} disabled={librarySaving||!workspace.ready} aria-current={modulePage===page?'page':undefined} onClick={()=>{setModulePage(page);setFocusScene(false);}}><span>{label}</span></Button>)}</div>
         <div className="navigation-utilities"><AppearanceMenu/><AppUpdateNavEntry disabled={librarySaving||!workspace.ready}/><TaskQueue openRequest={taskQueueRequest} disabled={librarySaving||!workspace.ready} onOpen={()=>{setModulePage('workbench');setFocusScene(false);setAssistantOpen(true);setAssistantTab('chat');}} onHistory={()=>{setModulePage('tasks');setFocusScene(false);}}/><Button variant="ghost" color="gray" title="设置" aria-label="设置" disabled={librarySaving||!workspace.ready} aria-current={modulePage==='settings'?'page':undefined} onClick={()=>setModulePage('settings')}><GearIcon/></Button></div>
       </nav>
       <section className="studio-main">
@@ -159,6 +160,7 @@ export default function App() {
         {!workspace.ready&&<div className="workspace-loading"><Spinner size="3"/><p>正在恢复项目…</p></div>}
         {workspace.ready&&<StudioHome onTasks={()=>setTaskQueueRequest(v=>v+1)} onConfigure={()=>setShowSettings(true)} onGenerate={projectId=>setAutoStartRequest({id:makeId(),projectId})} hidden={modulePage!=='home'} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);setAssistantTab('chat');}} onLibrary={setModulePage}/>}
         {workspace.ready&&(modulePage==='asset'||modulePage==='scene')&&<ProjectLibrary key={modulePage+libraryRefresh} kind={modulePage} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}} onManage={()=>setShowAssets(true)}/>}
+        {workspace.ready&&modulePage==='team'&&<TeamStudioPage onCopied={()=>setLibraryRefresh(v=>v+1)}/>}
         {workspace.ready&&modulePage==='tasks'&&<TaskCenter locked={locked} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);setAssistantTab('chat');}}/>}
         {workspace.ready&&modulePage==='settings'&&<StudioSettings onModel={()=>setShowSettings(true)} onBackup={()=>setShowTools(true)} onAssets={()=>setShowAssets(true)} onHistory={()=>setShowHistory(true)}/>}
         {workspace.ready&&<div className={`editor-workspace ${assistantOpen?'assistant-expanded':''}`} hidden={modulePage!=='workbench'}>

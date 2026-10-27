@@ -133,7 +133,7 @@ ln -s /opt/chat3d/releases/0.2.0-4c16cad /opt/chat3d/current
 ls /opt/chat3d/current
 ```
 
-应包含 `dist`、`dist-team`、`server`、`node_modules`、`README-RUNTIME.txt`、`SOURCE-COMMIT.txt`。部署包已携带所需运行文件，不删除其中的 `node_modules`。
+应包含 `dist`、`dist-team`、`dist-team-web`、`server`、`node_modules`、`README-RUNTIME.txt`、`SOURCE-COMMIT.txt`。部署包已携带所需运行文件，不删除其中的 `node_modules`。
 
 ## 4 配置运行参数
 
@@ -142,7 +142,7 @@ ls /opt/chat3d/current
 ```bash
 cat > /etc/chat3d/team.env <<'EOF'
 CHAT3D_TEAM_DB=/var/lib/chat3d/team.sqlite
-CHAT3D_TEAM_ORIGINS=https://chat3d.example.com,http://tauri.localhost,tauri://localhost
+CHAT3D_TEAM_ORIGINS=https://chat3d.example.com,https://portal.jiezi-ai.com,http://tauri.localhost,tauri://localhost
 CHAT3D_PUBLIC_ORIGIN=https://chat3d.example.com
 CHAT3D_BLENDER_ENABLED=0
 HOST=127.0.0.1
@@ -341,7 +341,7 @@ curl -i -X OPTIONS https://chat3d.example.com/api/team/login \
 ## 8 Windows 客户端连接
 
 1. 安装配套 `Chat3D_0.2.0_x64-setup.exe`，升级前先备份已有本地数据。此版本安装包尚未签名，按公司软件准入流程处理，不关闭系统安全防护。
-2. 打开资产库或场景库，点击“打开团队资产库/场景库”。
+2. 点击顶部导航 **团队**（浏览器用户可打开 `https://你的真实域名/team/`）。
 3. 服务地址填写 `https://你的真实域名`，不加 `/api/team`、`/manage` 或 `:1420`。
 4. 使用第 6 节创建的团队账号登录。模型 API Key 不是团队登录账号。
 5. 第二台电脑使用另一个成员账号连接同一地址。
