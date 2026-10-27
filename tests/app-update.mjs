@@ -110,7 +110,7 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 globalThis.getComputedStyle = dom.window.getComputedStyle;
 globalThis.requestAnimationFrame = fn => setTimeout(fn, 0);
 globalThis.cancelAnimationFrame = clearTimeout;
-const {render, fireEvent, waitFor, cleanup, act} = await import('@testing-library/react');
+const {render, fireEvent, waitFor, cleanup, act, within} = await import('@testing-library/react');
 const {Theme} = await import('@radix-ui/themes');
 const vite = await createVite({server: {middlewareMode: true}, appType: 'custom'});
 const renderInTheme = ui => render(React.createElement(Theme, null, ui));
@@ -121,7 +121,7 @@ try {
   assert.deepEqual(updateSignals([{id: 'a', deleted: true, pending: true, wasRunning: true, dirty: true}], {id: 'missing', status: 'idle', dirty: false}), {busy: false, dirty: false});
   assert.equal(updateSignals([{id: 'a', pending: true, wasRunning: false, dirty: false}], {id: 'other', status: 'idle', dirty: false}).busy, true);
   const release = {version: '99.0.0', notes: '可以稍后更新'};
-  const base = {current: pkg, release, busy: false, dirty: false, dismissed: null, remind: null, phase: 'idle', progress: '', error: ''};
+  const base = {current: pkg, release, busy: false, dirty: false, dismissed: null, remind: null, phase: 'idle', progress: '', progressMetrics: null, error: ''};
   assert.equal(deriveUpdateView({...base, release: {version: pkg, notes: ''}}).kind, 'hidden');
   assert.equal(deriveUpdateView(base).kind, 'ready');
   assert.equal(deriveUpdateView({...base, busy: true}).kind, 'busy');
@@ -129,7 +129,11 @@ try {
   assert.equal(deriveUpdateView({...base, remind: '99.0.0'}).ended, true);
   assert.equal(deriveUpdateView({...base, dismissed: '99.0.0'}).kind, 'hidden');
   assert.equal(deriveUpdateView({...base, dirty: true}).dirty, true);
-  assert.equal(deriveUpdateView({...base, phase: 'installing', progress: '正在下载更新… 40%'}).progress, '正在下载更新… 40%');
+  const installing = deriveUpdateView({...base, phase: 'installing', progress: '正在下载更新… 40%', progressMetrics: {loaded: 80, total: 200, label: '正在下载更新… 40%'}});
+  assert.equal(installing.progress, '正在下载更新… 40%');
+  assert.equal(installing.percent, 40);
+  assert.equal(installing.indeterminate, false);
+  assert.equal(deriveUpdateView({...base, phase: 'installing', progress: '正在安装更新…', progressMetrics: {loaded: 200, total: 200, label: '正在安装更新…'}}).indeterminate, true);
   assert.equal(deriveUpdateView({...base, phase: 'installed', busy: true}).busy, true);
   assert.match(deriveUpdateView({...base, phase: 'failed', error: '签名无效'}).message, /签名无效/);
   let progress = reduceUpdateProgress({loaded: 0, total: null, label: ''}, {event: 'Started', data: {contentLength: 200}});
@@ -141,7 +145,7 @@ try {
 
   const uiModule = await vite.ssrLoadModule('/src/ui/AppUpdateNotice.tsx');
   const client = await vite.ssrLoadModule('/src/domain/appUpdateClient.ts');
-  client.useAppUpdate.setState({busy: false, dirty: false, release: null, dismissed: null, remind: null, phase: 'idle', progress: '', error: '', checking: false, checkMessage: ''});
+  client.useAppUpdate.setState({busy: false, dirty: false, release: null, dismissed: null, remind: null, phase: 'idle', progress: '', progressMetrics: null, error: '', checking: false, checkMessage: ''});
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async url => { assert.equal(url, '/api/version'); return new Response(JSON.stringify({version: '99.0.0', notes: '可以稍后更新'}), {headers: {'content-type': 'application/json'}}); };
   const settings = renderInTheme(React.createElement(uiModule.AppUpdateSettings));
@@ -164,13 +168,22 @@ try {
   assert.equal(backups, 1);
   fireEvent.click(notice.getByRole('button', {name: '稍后'}));
   await waitFor(() => assert.equal(notice.queryByRole('button', {name: '立即更新'}), null));
-  await act(async () => client.useAppUpdate.setState({release, dismissed: null, remind: null, phase: 'installing', progress: '正在下载更新…'}));
-  await waitFor(() => assert.ok(notice.getByText(/正在下载更新/)));
+  await act(async () => client.useAppUpdate.setState({release, dismissed: null, remind: null, phase: 'installing', progress: '正在下载更新… 40%', progressMetrics: {loaded: 80, total: 200, label: '正在下载更新… 40%'}}));
+  const noticeRegion = within(notice.getByRole('region', {name: '应用更新'}));
+  await waitFor(() => assert.equal(noticeRegion.getByRole('progressbar').getAttribute('aria-valuenow'), '40'));
   assert.equal(notice.queryByRole('button', {name: '立即更新'}), null);
+  assert.ok(noticeRegion.getByText('40%'));
+  settings.unmount();
+  notice.unmount();
+  const settingsInstalling = renderInTheme(React.createElement(uiModule.AppUpdateSettings));
+  await waitFor(() => assert.equal(settingsInstalling.getByRole('button', {name: '正在下载更新… 40%'}).disabled, true));
+  assert.equal(settingsInstalling.container.querySelectorAll('.app-update-progress').length, 1);
   globalThis.fetch = async () => { throw new Error('offline'); };
-  await act(async () => client.useAppUpdate.setState({checking: false, checkMessage: '', phase: 'idle'}));
-  fireEvent.click(settings.getByRole('button', {name: '检查应用更新'}));
-  await waitFor(() => assert.ok(settings.getByRole('status').textContent.includes('暂时无法检查更新')));
+  await act(async () => client.useAppUpdate.setState({checking: false, checkMessage: '', phase: 'idle', progressMetrics: null}));
+  settingsInstalling.unmount();
+  const settingsOffline = renderInTheme(React.createElement(uiModule.AppUpdateSettings));
+  fireEvent.click(settingsOffline.getByRole('button', {name: '检查应用更新'}));
+  await waitFor(() => assert.ok(settingsOffline.getByRole('status').textContent.includes('暂时无法检查更新')));
   globalThis.fetch = originalFetch;
   console.log('PASS update prompt waits for generation and keeps backup choice');
 } finally { cleanup(); await vite.close(); dom.window.close(); }

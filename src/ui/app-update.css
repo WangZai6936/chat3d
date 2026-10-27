@@ -1,3 +1,12 @@
+.app-update-progress{display:flex;align-items:center;gap:10px;margin-top:8px;max-width:420px}
+.app-update-progress-track{position:relative;flex:1;height:6px;border-radius:999px;background:#52647d88;overflow:hidden}
+.app-update-progress-fill{height:100%;border-radius:inherit;background:linear-gradient(90deg,#6ea8ff,#9bc2ff);transition:width .2s ease}
+.app-update-progress-fill[data-indeterminate]{width:38%!important;animation:app-update-progress-slide 1.2s ease-in-out infinite}
+.app-update-progress-percent{flex-shrink:0;min-width:2.5em;text-align:right;font-variant-numeric:tabular-nums;font-weight:650}
+@keyframes app-update-progress-slide{0%{transform:translateX(-120%)}100%{transform:translateX(320%)}}
+.settings-row .app-update-progress{margin-top:10px;max-width:100%}
+.settings-refresh .app-update-progress-track{background:var(--gray-5)}
+.settings-refresh .app-update-progress-percent{color:var(--gray-11)}
 .app-update-notice{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:10px 16px;background:#243044;color:#d5deea;border-bottom:1px solid #52647d55;font-size:12px;line-height:1.55}
 .app-update-notice[hidden]{display:none}
 .app-update-notice p{margin:0}
