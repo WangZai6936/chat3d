@@ -470,7 +470,7 @@ export class Viewport {
   seekAnimation(time:number){this.animationClock.pause();this.animationClock.seek(time);try{this.applyAnimation(this.animationClock.state.time);}catch(e){this.animationClock.fail(e instanceof Error?e.message:'动画计算失败');this.restoreBasePose();}this.notifyPlayback();}
   setAnimationSpeed(speed:number){this.animationClock.setSpeed(speed);this.notifyPlayback();}
 
-  setBackdrop(mode:'light'|'slate'):void {this.scene.background=new THREE.Color(mode==='slate'?'#465b69':'#e8edef');this.floorMaterial?.color.set(mode==='slate'?'#536a77':'#e0e7e9');this.markDirty();}
+  setBackdrop(mode:'light'|'slate'):void {this.scene.background=new THREE.Color(mode==='slate'?'#22252b':'#f1f2f4');this.floorMaterial?.color.set(mode==='slate'?'#2c3037':'#e6e8ec');this.markDirty();}
 
   setGridVisible(visible:boolean):void {const grid=this.scene.getObjectByName('__grid');if(grid)grid.visible=visible;this.markDirty();}
   topView():void {this.orbitPhi=.02;this.orbitTheta=0;this.frameScene();this.updateOrbitCamera();this.markDirty();}

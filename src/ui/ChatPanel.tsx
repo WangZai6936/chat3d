@@ -138,15 +138,16 @@ export function ChatPanel({onConfigure,onAssets,canvasMode=false,expanded=true,o
     <div className="chat-context-strip" title="会话在本浏览器保存；请下载项目文件长期备份"><span>{selection.length ? `已选 ${selection.length} 个对象` : `场景 ${doc.nodes.length} 个对象`}</span></div>
     <div ref={scrollRef} onScroll={() => {const el=scrollRef.current; if(el) {stickRef.current=el.scrollHeight-el.scrollTop-el.clientHeight<64;if(stickRef.current)setNewMessages(false);}}} className="chat-transcript flex-1 overflow-auto p-3 space-y-4 min-h-0">
       {!messages.length && <div className="chat-welcome text-sm text-gray-400 py-5 leading-relaxed">
-        <p className="text-gray-200 font-medium mb-2">{doc.nodes.length?'从现有模型继续':'从一个想法开始'}</p>
-
-        <p>{doc.nodes.length?'可以选择对象后修改尺寸、颜色和位置，或描述要追加的模型。修改会先预览，应用后可撤销。':'先创建单个模型，也可以从已有资产组合场景。说明用途、尺寸和需要保留的细节。'}</p>
-        <button className="mt-3 text-blue-300 text-left" onClick={()=>setInput('创建一个长 1.2 米、宽 0.8 米、高 0.75 米的工作台')}>试试：创建一个有明确尺寸的工作台 ↗</button>
-        {!doc.nodes.length&&<button className="mt-2 text-blue-300 text-left" onClick={()=>setInput('创建一个小型仓储场景，包含货架、周转箱和一条清晰通道；先给出布局和尺寸假设，再生成可编辑模型')}>组合一个场景 ↗</button>}
-        {onAssets&&<button className="mt-2 text-blue-300 text-left" onClick={onAssets}>从资产库开始 ↗</button>}
-        <p className="mt-3 text-xs">图片建模是可编辑的近似重建，单张图无法确定背面与真实尺寸。</p>
+        <span className="chat-welcome-mark" aria-hidden="true"><ChatBubbleIcon/></span>
+        <p className="chat-welcome-title">{doc.nodes.length?'让模型更进一步。':'把想法，变成立体。'}</p>
+        <p>{doc.nodes.length?'描述你想改变的地方，或选择对象精确调整。每次修改都会先预览，由你决定是否应用。':'告诉我用途、尺寸和你在意的细节，也可以上传参考图，一起完成你的第一个模型。'}</p>
+        <div className="chat-starter-label">从这里开始</div>
+        <button className="chat-starter" onClick={()=>setInput('创建一个长 1.2 米、宽 0.8 米、高 0.75 米的工作台')}>创建一个有明确尺寸的工作台 <span>↗</span></button>
+        {!doc.nodes.length&&<button className="chat-starter" onClick={()=>setInput('创建一个小型仓储场景，包含货架、周转箱和一条清晰通道；先给出布局和尺寸假设，再生成可编辑模型')}>组合一个场景 <span>↗</span></button>}
+        {onAssets&&<button className="chat-starter" onClick={onAssets}>从资产库开始 <span>↗</span></button>}
+        <p className="chat-welcome-note">参考图用于近似重建，背面与真实尺寸需要补充说明。</p>
       </div>}
-      {(!aiConfig || aiConfig.useMock)&&<p className="text-xs text-amber-200 p-2">请连接真实模型后生成。已有项目仍可打开、手动编辑、保存和导出。<button onClick={onConfigure} className="ml-2 underline">连接模型</button></p>}
+      {(!aiConfig || aiConfig.useMock)&&<div className="chat-connect-notice"><span>连接模型，开始创作<br/><small>手动编辑、保存与导出始终可用</small></span><button onClick={onConfigure}>连接模型 ↗</button></div>}
       {messages.filter(m=>!m.queuedTask).map(m=><div key={m.id}><div className={`chat-message-row ${m.role==='user'?'is-user':'is-assistant'} flex ${m.role==='user'?'justify-end':'justify-start'}`}>
         {canvasMode&&<span className={`chat-avatar ${m.role}`} aria-hidden="true">{m.role==='user'?<PersonIcon/>:<ChatBubbleIcon/>}</span>}
         <div className={`chat-message ${m.role==='user'?'chat-message-user':'chat-message-assistant'} max-w-[94%] rounded-xl px-3 py-2.5 text-sm leading-relaxed ${m.role==='user'?'bg-blue-600 text-white':m.error?'bg-red-950/50 border border-red-500/30 text-red-200':'bg-[#2c323b]'}`}>

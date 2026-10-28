@@ -5,6 +5,25 @@ import {parseProject,serializeProject} from './project';
 import {saveModelAsset} from './modelAssetStorage';
 import {createSession,flushWorkspace,useWorkspaceStore} from '../workspace';
 import {assertLibraryReady} from './libraryNavigation';
+import {listModelAssets,readModelAsset} from './modelAssetStorage';
+import {listTeamResourceLinks,listLocalTeamResourceStates,reserveTeamResourceLink,saveTeamResourceLink,rememberTeamResourceHeads,teamLocalFingerprint,teamResourceKey,type TeamResourceLink,type LocalTeamResourceState} from './teamResourceLinks';
+type PublicationShape=true|{[key:string]:PublicationShape}|readonly PublicationShape[];
+const vectorShape=[true] as const,transformShape={position:vectorShape,rotationQuaternion:vectorShape,scale:vectorShape};
+const geometryShape={type:true,params:{width:true,height:true,depth:true,bevelRadius:true,radius:true,widthSegments:true,heightSegments:true,radiusTop:true,radiusBottom:true,radialSegments:true,cornerRadius:true,holeRadius:true,length:true,thickness:true,outerRadius:true,innerRadius:true,widthTop:true,widthBottom:true,positions:vectorShape,indices:vectorShape,normals:vectorShape,uvs:vectorShape,points:[vectorShape],rings:[{center:vectorShape,radiusX:true,radiusZ:true}],segments:true,smooth:true,wallThickness:true,capStart:true,capEnd:true,holes:[[vectorShape]],edgeRadius:true}} satisfies PublicationShape;
+const textureShape={dataUrl:true,repeat:vectorShape,offset:vectorShape,rotation:true,wrapS:true,wrapT:true} satisfies PublicationShape;
+const materialShape={id:true,baseColor:true,roughness:true,metalness:true,emissive:true,emissiveIntensity:true,opacity:true,alphaTest:true,transparent:true,doubleSided:true,normalScale:true,surface:{preset:true,repeat:vectorShape,strength:true},maps:{baseColor:textureShape,normal:textureShape,roughness:textureShape,metalness:textureShape,emissive:textureShape,occlusion:textureShape}} satisfies PublicationShape;
+const nodeShape={id:true,parentId:true,name:true,kind:true,geometry:geometryShape,assetId:true,materialId:true,transform:transformShape,visible:true,locked:true,assemblyName:true,sceneRole:true,planKey:true,zone:true,label:true,assemblyId:true,modelAsset:{id:true,version:true,instanceId:true,sourceNodeId:true},connection:{targetId:true,sourcePoint:vectorShape,targetPoint:vectorShape,maxDistance:true,purpose:true},poseRig:{version:true,joints:[{key:true,name:true,anchorNodeId:true,pivot:vectorShape,axis:vectorShape,memberIds:vectorShape}],anchors:[{key:true,name:true,nodeId:true,point:vectorShape,kind:true}],shapes:{'*':true}},modelStructure:{blueprintKey:true,featureKeys:vectorShape,localTransform:transformShape,blueprint:{dimensions:{x:true,y:true,z:true},key:true,name:true,purpose:true,detailLevel:true,detailReason:true,silhouette:true,features:[{key:true,name:true,referenceObservation:true,role:true,geometryApproach:true}],negativeSpaces:vectorShape,views:vectorShape}}} satisfies PublicationShape;
+const expressionShape:{[key:string]:PublicationShape}={op:true};expressionShape.args=[expressionShape];
+const animationShape={version:true,name:true,duration:true,loop:true,tracks:[{id:true,name:true,targetIds:vectorShape,channel:true,keyframes:[{time:true,value:vectorShape}],expression:expressionShape,axis:vectorShape,pivot:vectorShape,sourceId:true,start:true,end:true}]} satisfies PublicationShape;
+/** A structural allowlist, including nested objects; unknown keys cannot smuggle private session data. */
+function publicSnapshot(value:unknown,shape:PublicationShape):unknown{
+ if(value===null||typeof value==='string'||typeof value==='number'||typeof value==='boolean'||value===undefined)return value;
+ if(Array.isArray(value)){const child=Array.isArray(shape)?shape[0]:shape;return value.map(item=>publicSnapshot(item,child));}
+ if(shape===true||Array.isArray(shape))return undefined;
+ const fields=shape as {[key:string]:PublicationShape},source=value as Record<string,unknown>,result:Record<string,unknown>={};
+ for(const key of Object.keys(source)){const child=Object.prototype.hasOwnProperty.call(fields,key)?fields[key]:fields['*'];if(child!==undefined)result[key]=publicSnapshot(source[key],child);}
+ return result;
+}
 export interface TeamUser {id:string;name:string;role:'admin'|'member'|'viewer'}
 export interface TeamItem {id:string;owner:string;kind:'asset'|'scene';version:number;name:string;description:string;created:string}
 export interface TeamVersion extends TeamItem {payload:unknown}
@@ -28,15 +47,26 @@ export class TeamClient {
   const data=await response.json();if(!response.ok)throw Error(data.error??'团队服务请求失败');return data as T;
  }
  async login(name:string,password:string){const result=await this.request<{token:string;user:TeamUser}>('login',{name,password});this.token=result.token;this.user=result.user;return result.user;}
- async logout(){try{await this.request('logout',{});}finally{this.token='';this.user=undefined;}}
+ async logout(){const pending=this.request('logout',{});this.token='';this.user=undefined;await pending;}
  list(kind:'asset'|'scene',q=''){return this.request<TeamItem[]>('items?kind='+kind+'&q='+encodeURIComponent(q));}
- read(item:TeamItem){return this.request<TeamVersion>(`items/${item.id}/${item.version}`);}
+ async read(item:TeamItem){const value=await this.request<TeamVersion>(`items/${encodeURIComponent(item.id)}/${item.version}`);if(value.id!==item.id||value.kind!==item.kind||value.version!==item.version)throw Error('团队服务返回的固定版本不匹配');return value;}
  publish(body:TeamPublish){return this.request<{id:string;version:number}>('publish',body);}
 }
+const sessionListeners=new Set<()=>void>();
+let sharedClient:TeamClient|undefined;
+export function getTeamSession(){return sharedClient;}
+export function subscribeTeamSession(listener:()=>void){sessionListeners.add(listener);return ()=>{sessionListeners.delete(listener);};}
+export async function loginTeamSession(base:string,name:string,password:string){
+ if(sharedClient?.user)throw Error('请先退出当前团队账号');
+ const next=new TeamClient(base);await next.login(name,password);rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
+}
+export async function logoutTeamSession(){const previous=sharedClient;sharedClient=undefined;for(const listener of sessionListeners)listener();await previous?.logout();}
+export function teamItemFromLink(link:TeamResourceLink,version=link.latestVersion):TeamItem{return {id:link.teamItemId,kind:link.kind,version,name:link.teamName,owner:'',description:'',created:''};}
+export async function refreshLinkedTeamResources(kind:'asset'|'scene'):Promise<LocalTeamResourceState[]>{const client=sharedClient;if(!client?.user)throw Error('请先登录团队服务');const heads=await client.list(kind);await rememberTeamResourceHeads(client.base,kind,heads);return listLocalTeamResourceStates(kind);}
 // Explicit allowlist prevents session/chat/settings data from entering a publication.
 export function assetPublication(source:ModelAssetVersion):ModelAssetVersion {
- const {format,schemaVersion,id,version,name,category,description,createdAt,unit,upAxis,front,quality,size,nodes,materials,thumbnail,externalConnectionsRemoved,contract}=source;
- return parseModelAsset(JSON.stringify({format,schemaVersion,id,version,name,category,description,createdAt,unit,upAxis,front,quality,size,nodes,materials,thumbnail,externalConnectionsRemoved,contract}));
+ const safe=publicSnapshot(source,{format:true,schemaVersion:true,id:true,version:true,name:true,category:true,description:true,createdAt:true,unit:true,upAxis:true,front:true,quality:true,size:vectorShape,nodes:[nodeShape],materials:[materialShape],thumbnail:true,externalConnectionsRemoved:true,contract:{purpose:true,features:vectorShape,anchors:[{id:true,name:true,kind:true,nodeId:true,point:vectorShape,normal:vectorShape}],clearance:{min:vectorShape,max:vectorShape}}});
+ return parseModelAsset(JSON.stringify(safe));
 }
 export async function copyTeamVersion(item:TeamVersion){
  assertLibraryReady();
@@ -45,7 +75,82 @@ export async function copyTeamVersion(item:TeamVersion){
   await saveModelAsset(asset);return asset.id;
  }
  const doc=parseProject(buildTeamCopyExport({...item,kind:'scene'}));
- if(!createSession(doc,{moduleKind:'scene',title:item.name+' 副本',libraryDescription:item.description}))throw Error('无法创建本地副本');
+ if(!createSession(doc,{moduleKind:'scene',title:item.name+' 副本',libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision}))throw Error('无法创建本地副本');
  await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('副本已创建，但本地保存失败，请先修复存储再继续');return doc.projectId;
 }
-export function scenePublication(doc:Parameters<typeof serializeProject>[0]){return JSON.parse(serializeProject(doc));}
+export function scenePublication(doc:Parameters<typeof serializeProject>[0]){const safe=publicSnapshot(doc,{schemaVersion:true,projectId:true,revision:true,unit:true,upAxis:true,nodes:[nodeShape],materials:[materialShape],assets:[],animation:animationShape,viewState:{cameraPosition:vectorShape,cameraTarget:vectorShape,projection:true,displayUnit:true}}) as Parameters<typeof serializeProject>[0];return JSON.parse(serializeProject(safe));}
+
+export interface TeamLocalSource {id:string;version?:number}
+export interface TeamPublishSource extends TeamLocalSource {name:string;kind:'asset'|'scene'}
+export interface PreparedTeamPublication {
+ source:TeamLocalSource;request:TeamPublish;serviceOrigin:string;userId:string;baselineFingerprint:string;sceneRevision?:number;
+ status:'ready'|'running'|'success'|'error';error?:string;serverResult?:{id:string;version:number};
+}
+export async function listTeamPublishSources(kind:'asset'|'scene'):Promise<TeamPublishSource[]>{
+ assertLibraryReady();await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('请先修复本地保存错误');
+ return kind==='asset'?(await listModelAssets()).map(a=>({id:a.id,name:a.name,kind,version:a.version})):useWorkspaceStore.getState().sessions.filter(s=>!s.deletedAt&&(s.moduleKind??'scene')==='scene'&&s.librarySavedAt&&s.savedRevision===s.snapshot.doc.revision&&!s.snapshot.pendingBatch&&!s.snapshot.wasRunning).map(s=>({id:s.id,name:s.title,kind}));
+}
+/** Freeze only explicitly selected, saved content; no network publication is performed here. */
+export async function prepareTeamPublications(client:TeamClient,kind:'asset'|'scene',sources:TeamLocalSource[],targets:Record<string,TeamItem|undefined>={}):Promise<PreparedTeamPublication[]>{
+ if(!client.user||client.user.role==='viewer')throw Error('当前账号只有浏览权限');
+ assertLibraryReady();await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('请先修复本地保存错误');
+ if(!sources.length||new Set(sources.map(s=>s.id)).size!==sources.length)throw Error('请选择不重复的已保存资源');
+ const heads=kind==='asset'?await listModelAssets():[];
+ return Promise.all(sources.map(async source=>{
+  const target=targets[source.id];if(target&&(target.kind!==kind||(target.owner!==client.user!.id&&client.user!.role!=='admin')))throw Error('你没有追加该团队原件版本的权限');
+  let payload:unknown,name:string,description:string,category:string|undefined,sceneRevision:number|undefined,localPayload:unknown;
+  if(kind==='asset'){
+   const head=heads.find(a=>a.id===source.id);if(!head)throw Error('待发布资产不存在');if(source.version!==undefined&&source.version!==head.version)throw Error('待发布资产版本已变化，请重新选择');
+   const stored=await readModelAsset(head.id,head.version);source={id:head.id,version:head.version};name=head.name;description=head.description??'';category=head.category;localPayload=stored;payload=assetPublication({...stored,name,description,category});
+  }else{
+   const session=useWorkspaceStore.getState().sessions.find(s=>s.id===source.id&&!s.deletedAt&&(s.moduleKind??'scene')==='scene');
+   if(!session?.librarySavedAt||session.savedRevision!==session.snapshot.doc.revision||session.snapshot.pendingBatch||session.snapshot.wasRunning)throw Error('场景包含未保存修改或预览，请先保存到本地库后再发布');
+   name=session.title;description=session.libraryDescription??'';category=session.sceneCategory;sceneRevision=session.snapshot.doc.revision;payload=scenePublication(session.snapshot.doc);localPayload=JSON.parse(serializeProject(session.snapshot.doc));
+  }
+  const request:TeamPublish={kind,name,description,payload,key:crypto.randomUUID(),expectedVersion:target?.version??0,...(target?{itemId:target.id}:{})};
+  return {source,request,serviceOrigin:client.base,userId:client.user!.id,baselineFingerprint:await teamLocalFingerprint({kind,payload:localPayload,name,description,category}),sceneRevision,status:'ready' as const};
+ }));
+}
+/** Retrying never re-freezes local content or changes keys, and successful entries are skipped. */
+export async function publishPreparedTeamBatch(client:TeamClient,entries:PreparedTeamPublication[],onChange?:()=>void){
+ if(!client.user||client.user.role==='viewer')throw Error('当前账号没有发布权限');
+ if(entries.some(e=>e.serviceOrigin!==client.base||e.userId!==client.user!.id))throw Error('团队登录已变化，请重新准备发布');
+ for(const entry of entries){if(entry.status==='success')continue;entry.status='running';entry.error=undefined;onChange?.();
+  try{
+   entry.serverResult??=await client.publish(entry.request);
+   await saveTeamResourceLink({serviceOrigin:client.base,kind:entry.request.kind,teamItemId:entry.serverResult.id,teamVersion:entry.serverResult.version,teamName:entry.request.name,localId:entry.source.id,localVersion:entry.source.version,sceneRevision:entry.sceneRevision,baselineFingerprint:entry.baselineFingerprint,direction:'publish',active:true,status:'ready',createdAt:new Date().toISOString(),latestVersion:entry.serverResult.version});
+   entry.status='success';
+  }catch(error){entry.status='error';entry.error=error instanceof Error?error.message:'发布失败，可重试同一项';}onChange?.();
+ }
+}
+const acquisitionFlights=new Map<string,Promise<{link:TeamResourceLink;reused:boolean}>>();
+/** Explicit fixed-version acquisition: new remote versions always create separate local identities. */
+export function acquireLinkedTeamVersion(client:TeamClient,item:TeamVersion):Promise<{link:TeamResourceLink;reused:boolean}>{
+ const key=teamResourceKey(client.base,item.kind,item.id,item.version),existing=acquisitionFlights.get(key);if(existing)return existing;
+ const operation=(async()=>{
+  if(!client.user)throw Error('请先登录团队服务');assertLibraryReady();
+  const links=await listTeamResourceLinks(),known=links.find(x=>x.serviceOrigin===client.base&&x.kind===item.kind&&x.teamItemId===item.id&&x.teamVersion===item.version&&x.direction==='acquire');
+  if(known?.status==='ready'){
+   const state=(await listLocalTeamResourceStates(item.kind,[known.localId])).find(x=>x.link.id===known.id);if(state?.localMissing)throw Error('该团队版本的本地副本已移除，请恢复旧副本；不会静默创建重复项');
+   return {link:known,reused:true};
+  }
+  const projectId=crypto.randomUUID();
+  let link=known??await reserveTeamResourceLink({serviceOrigin:client.base,kind:item.kind,teamItemId:item.id,teamVersion:item.version,teamName:item.name,localId:projectId,localProjectId:item.kind==='scene'?projectId:undefined,localVersion:item.kind==='asset'?1:undefined,sceneRevision:item.kind==='scene'?0:undefined,baselineFingerprint:'',direction:'acquire',active:false,status:'pending',createdAt:new Date().toISOString(),latestVersion:item.version});
+  let payload:unknown,name:string,description:string|undefined,category:string|undefined;
+  if(item.kind==='asset'){
+   let asset=(await listModelAssets()).find(x=>x.id===link.localId)?await readModelAsset(link.localId,1):undefined;
+   if(!asset){asset=parseModelAsset(buildTeamCopyExport({...item,kind:'asset'}));asset.id=link.localId;await saveModelAsset(asset);}
+   payload=asset;name=asset.name;description=asset.description;category=asset.category;
+  }else{
+   let session=useWorkspaceStore.getState().sessions.find(x=>x.snapshot.doc.projectId===link.localProjectId);
+   if(session?.deletedAt)throw Error('该版本已获取后移入回收站，请恢复旧副本');
+   if(!session){const doc=parseProject(buildTeamCopyExport({...item,kind:'scene'}));doc.projectId=link.localProjectId!;
+    if(!createSession(doc,{moduleKind:'scene',title:item.name.slice(0,76)+' 副本',libraryDescription:item.description,librarySavedAt:Date.now(),savedRevision:doc.revision}))throw Error('无法创建本地副本');session=useWorkspaceStore.getState().sessions.find(x=>x.snapshot.doc.projectId===doc.projectId)!;}
+   await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error('副本已创建，但本地保存失败；修复后重试同一项');
+   link={...link,localId:session.id};payload=scenePublication(session.snapshot.doc);name=session.title;description=session.libraryDescription;category=session.sceneCategory;
+  }
+  const newer=links.some(x=>x.serviceOrigin===client.base&&x.kind===item.kind&&x.teamItemId===item.id&&x.active&&x.teamVersion>item.version);
+  link=await saveTeamResourceLink({...link,active:!newer,baselineFingerprint:await teamLocalFingerprint({kind:item.kind,payload,name,description,category})},link.id);
+  return {link,reused:false};
+ })();acquisitionFlights.set(key,operation);void operation.finally(()=>acquisitionFlights.delete(key)).catch(()=>{});return operation;
+}

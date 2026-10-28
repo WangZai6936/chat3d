@@ -129,12 +129,12 @@ export function AppUpdateDialog() {
   </Dialog.Root>;
 }
 
-export function AppUpdateNavEntry({disabled}: {disabled?: boolean}) {
+export function AppUpdateNavEntry({disabled,layout='icon'}: {disabled?: boolean;layout?:'icon'|'sidebar'}) {
   const pending = useAppUpdate(s => hasPendingAppUpdate(s));
   return <Button variant="ghost" color="gray" className="app-update-nav-entry" title="关于 Scenivo 与检查更新" aria-label={pending ? '关于与更新，有新版本可用' : '关于与更新'} disabled={disabled} onClick={openAppUpdatePanel}>
     <InfoCircledIcon aria-hidden="true"/>
-    <span className="app-update-nav-label">关于与更新</span>
-    {pending && <span className="app-update-nav-badge" aria-hidden="true">新</span>}
+    {layout==='sidebar'?<span className="app-update-sidebar-label">Scenivo · v{APP_VERSION}</span>:<span className="app-update-nav-label">关于与更新</span>}
+    {pending && <span className="app-update-nav-badge" aria-hidden="true">{layout==='sidebar'?'有更新':'新'}</span>}
   </Button>;
 }
 

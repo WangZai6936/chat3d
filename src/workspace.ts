@@ -6,6 +6,7 @@ import {bindConversationStore} from './conversationStores';
 import { parseProject, serializeProject } from './domain/project';
 import { readWorkspace, writeWorkspace } from './domain/workspaceStorage';
 import { makeId } from './util/ids';
+import {listLibraryCategories} from './domain/libraryCategories';
 
 export type Snapshot=Pick<EditorState,'doc'|'messages'|'selection'|'dirty'|'past'|'future'|'composerText'|'composerImages'|'lastRun'> & {
   pendingBatch:EditorState['pendingBatch'];pendingResult:EditorState['pendingResult'];wasRunning:boolean;
@@ -164,4 +165,22 @@ export async function editLibrarySessionMetadata(id:string,details:LibraryMetada
  const detailsSafe=normalizeLibraryMetadata(details,target.moduleKind??'scene');
  updateLibrarySession(id,{title:detailsSafe.name,autoTitle:false,...(target.moduleKind==='asset'?{assetCategory:detailsSafe.category}:{sceneCategory:detailsSafe.category}),libraryDescription:detailsSafe.description,libraryMetadataRevision:expectedRevision+1});
  await flushWorkspace();if(useWorkspaceStore.getState().error)throw Error(useWorkspaceStore.getState().error!);
+}
+
+/** Validate the entire selection before committing metadata; drafts remain drafts. */
+export async function moveLibrarySessionsToCategory(expected:Array<Pick<WorkspaceSession,'id'|'libraryMetadataRevision'>>,category:string|undefined,kind:'asset'|'scene'='scene'):Promise<void>{
+ if(!expected.length||expected.length>500||new Set(expected.map(item=>item.id)).size!==expected.length||(category!==undefined&&!validCategory(category)))throw Error('请选择项目和有效目标分类');
+ if(category&&!(await listLibraryCategories(useWorkspaceStore.getState().sessions.filter(session=>(session.moduleKind??'scene')===kind).map(session=>kind==='asset'?session.assetCategory:session.sceneCategory).filter((value):value is string=>!!value),kind)).some(item=>item.value===category))throw Error('目标分类不存在，请刷新分类');
+ const state=useWorkspaceStore.getState();
+ if(blocked||!state.ready||state.error)throw Error('请先处理工作区保存异常');
+ const ids=new Set(expected.map(item=>item.id));
+ for(const item of expected){
+  const target=state.sessions.find(session=>session.id===item.id&&!session.deletedAt);
+  if(!target||(target.moduleKind??'scene')!==kind||(target.libraryMetadataRevision??0)!==(item.libraryMetadataRevision??0))throw Error('选中项目已变化，未移动任何项目，请刷新重选');
+  if(sessionIsRunning(item.id)||stores.get(item.id)?.getState().aiStatus==='previewing'||target.snapshot.pendingBatch||target.snapshot.wasRunning)throw Error('选中项目正在执行或存在待确认预览，未移动任何项目');
+ }
+ const updatedAt=Date.now();
+ useWorkspaceStore.setState({sessions:state.sessions.map(session=>ids.has(session.id)?{...session,...(kind==='asset'?{assetCategory:category??'其他'}:{sceneCategory:category}),libraryMetadataRevision:(session.libraryMetadataRevision??0)+1,updatedAt}:session)});
+ schedule();await flushWorkspace();
+ if(useWorkspaceStore.getState().error)throw Error(useWorkspaceStore.getState().error!);
 }

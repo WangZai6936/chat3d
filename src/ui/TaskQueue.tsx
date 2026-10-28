@@ -18,16 +18,18 @@ export function taskSummary(session:WorkspaceSession){
 export function TaskQueue({onOpen,onHistory,disabled=false,openRequest=0}:{onOpen:()=>void;onHistory:()=>void;disabled?:boolean;openRequest?:number}){
  const w=useWorkspaceStore();
  const [open,setOpen]=useState(false),[query,setQuery]=useState(''),[error,setError]=useState('');
+ const [filter,setFilter]=useState<'all'|'running'|'review'|'ended'>('all');
  useEffect(()=>{if(openRequest){setOpen(true);setError('');}},[openRequest]);
  const [stop,setStop]=useState<{id:string;title:string;runId:string|null}|null>(null);
  const tasks=w.sessions.filter(s=>!s.deletedAt).map(s=>({session:s,...taskSummary(s)})).filter(t=>t.visible);
  const running=tasks.filter(t=>t.group==='running').length,review=tasks.filter(t=>t.group==='review').length;
- const shown=tasks.filter(t=>t.session.title.toLowerCase().includes(query.trim().toLowerCase()));
+ const shown=tasks.filter(t=>t.session.title.toLowerCase().includes(query.trim().toLowerCase())&&(filter==='all'||t.group===filter));
  return <><Dialog.Root open={open} onOpenChange={value=>{setOpen(value);setError('');}}>
-  <Dialog.Trigger><Button variant="ghost" color="gray" className="global-task-trigger" aria-label="任务" title={`${running} 个运行中，${review} 个待确认`} disabled={disabled}><ActivityLogIcon/>{running>0&&<span className="global-task-count" aria-label={`${running} 个运行中`}>{running}</span>}</Button></Dialog.Trigger>
+  <Dialog.Trigger><Button variant="ghost" color="gray" className="global-task-trigger" aria-label="任务" title={`${running} 个运行中，${review} 个待确认`} disabled={disabled}><ActivityLogIcon/><span className="global-task-label">任务</span>{running>0&&<span className="global-task-count" aria-label={`${running} 个运行中`}>{running}</span>}</Button></Dialog.Trigger>
   <Dialog.Content className="global-task-drawer" aria-label="任务队列">
    <header><div><Dialog.Title>任务队列</Dialog.Title><Dialog.Description>{running} 个运行中 · {review} 个待确认</Dialog.Description></div><Dialog.Close><Button variant="ghost" color="gray" aria-label="关闭任务队列"><Cross1Icon/></Button></Dialog.Close></header>
    <TextField.Root aria-label="搜索任务" placeholder="搜索任务名称" value={query} onChange={e=>setQuery(e.target.value)}/>
+   <div className="global-task-filters" role="group" aria-label="筛选任务">{([['all','全部'],['running','运行中'],['review','待确认'],['ended','已结束']] as const).map(([value,label])=><Button key={value} variant="ghost" color="gray" aria-pressed={filter===value} onClick={()=>setFilter(value)}>{label}</Button>)}</div>
    {error&&<p role="alert">{error}</p>}
    <div className="global-task-list">
     {(['running','review','ended'] as const).map(group=>{const items=shown.filter(t=>t.group===group).sort((a,b)=>b.session.updatedAt-a.session.updatedAt);if(!items.length)return null;return <section key={group} aria-label={{running:'运行中任务',review:'待确认任务',ended:'已结束任务'}[group]}><h3>{{running:'运行中',review:'待确认',ended:'已结束'}[group]} <span>{items.length}</span></h3>{items.map(({session:s,label})=><article key={s.id} className={`global-task-item ${s.id===w.activeId?'is-current':''}`}><button type="button" className="global-task-open" aria-label={`打开任务 ${s.title}`} aria-current={s.id===w.activeId?'true':undefined} disabled={disabled||!!w.error} onClick={()=>{if(!switchSession(s.id)){setError('无法切换，请先处理工作区保存异常');return;}setOpen(false);onOpen();}}><strong>{s.title}</strong><small><span className={`global-task-state is-${group}`}>{label}</span>{s.id===w.activeId?' · 当前任务':''} · {s.moduleKind==='asset'?'资产':'场景'}</small></button>{group==='running'&&<Button size="1" variant="soft" color="gray" aria-label={`停止任务 ${s.title}`} onClick={()=>{const editor=getSessionEditor(s.id);if(editor)setStop({id:s.id,title:s.title,runId:conversationController(editor).ui.getState().runMessageId});}}>停止</Button>}<ArrowRightIcon aria-hidden="true"/></article>)}</section>;})}

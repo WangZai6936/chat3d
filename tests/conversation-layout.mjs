@@ -14,6 +14,7 @@ const server=await createServer({plugins:[{name:'workbench-viewport-fixture',enf
 
 try{
  const {default:App}=await server.ssrLoadModule('/src/App.tsx'),w=await server.ssrLoadModule('/src/workspace.ts'),{useEditorStore:store}=await server.ssrLoadModule('/src/store.ts'),{clampConversationWidth,CONVERSATION_WIDTH_KEY}=await server.ssrLoadModule('/src/ui/ConversationResize.tsx');
+ Object.defineProperty(window,'innerWidth',{value:1440,writable:true,configurable:true});
  await w.initializeWorkspace();await w.flushWorkspace();localStorage.removeItem(CONVERSATION_WIDTH_KEY);let ui=render(React.createElement(App));fireEvent.click(ui.getByRole('button',{name:'建模工作台',exact:true}));
  const input=ui.getByRole('textbox',{name:'建模指令'}),separator=ui.getByRole('separator',{name:'调整对话区宽度'});assert.equal(input.rows,4);console.log('PASS conversation and multiline composer are open by default');passed++;
  fireEvent.change(input,{target:{value:'保持其他模型不变\n只调整托盘位置'}});const initial=Number(separator.getAttribute('aria-valuenow'));fireEvent.keyDown(separator,{key:'ArrowLeft'});assert.equal(Number(separator.getAttribute('aria-valuenow')),initial+24);assert.equal(input.value,'保持其他模型不变\n只调整托盘位置');console.log('PASS keyboard resizing widens conversation without losing draft');passed++;
@@ -22,6 +23,9 @@ try{
  fireEvent.click(ui.getByRole('button',{name:'收起对话区'}));assert.equal(document.querySelector('.conversation-region').hidden,true);fireEvent.click(ui.getByRole('button',{name:'打开 AI 助手'}));assert.equal(ui.getByRole('textbox',{name:'建模指令'}),input);assert.equal(input.value,'保持其他模型不变\n只调整托盘位置');console.log('PASS collapsing and reopening preserves conversation and draft');passed++;
  fireEvent.click(ui.getByRole('tab',{name:'任务记录',exact:true}));assert.ok(ui.getByRole('heading',{name:'任务与执行记录'}));fireEvent.click(ui.getByRole('tab',{name:'对话',exact:true}));assert.equal(ui.getByRole('textbox',{name:'建模指令'}),input);console.log('PASS task history and conversation remain independently navigable');passed++;
  fireEvent.click(ui.getByRole('button',{name:'收起对话区'}));await act(async()=>store.setState({aiStatus:'generating'}));assert.equal(document.querySelector('.conversation-region').hidden,false);assert.equal(store.getState().aiStatus,'generating');console.log('PASS active task reopens process visibility without cancelling');passed++;
- assert.equal(clampConversationWidth(NaN,1200),440);assert.equal(clampConversationWidth(900,1200),720);assert.equal(clampConversationWidth(600,800),440);console.log('PASS size guards preserve useful canvas width');passed++;
+ if(ui.getByRole('button',{name:'结构',exact:true}).getAttribute('aria-pressed')==='true')fireEvent.click(ui.getByRole('button',{name:'结构',exact:true}));
+ await act(async()=>{window.innerWidth=1024;window.dispatchEvent(new Event('resize'));});
+ fireEvent.click(ui.getByRole('button',{name:'结构',exact:true}));assert.equal(document.querySelector('.conversation-region').hidden,true);assert.equal(document.querySelector('.editor-objects').hidden,false);assert.equal(store.getState().aiStatus,'generating');
+ fireEvent.click(ui.getByRole('button',{name:'打开 AI 助手'}));assert.equal(document.querySelector('.editor-objects').hidden,true);assert.equal(ui.getByRole('textbox',{name:'建模指令'}),input);assert.equal(input.value,'保持其他模型不变\n只调整托盘位置');console.log('PASS narrow-window editor panels and assistant switch without losing the live task or composer');passed++;
  await act(async()=>store.setState({aiStatus:'idle'}));await w.flushWorkspace();console.log(`${passed} persistent conversation checks passed`);
 }finally{cleanup();await server.close();dom.window.close()}

@@ -1,57 +1,21 @@
-/* Scenivo studio tokens — aliases on Radix Themes, Tailwind, and frosted-studio variables. */
 .redesigned-studio.canvas-studio.frosted-studio {
-  --sc-font: var(--default-font-family, Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif);
-  --sc-text-xs: 11px;
-  --sc-text-sm: 12px;
-  --sc-text-base: 13px;
-  --sc-text-md: 14px;
-  --sc-text-lg: 16px;
-  --sc-text-xl: 21px;
-  --sc-text-2xl: 24px;
-  --sc-leading-tight: 1.35;
-  --sc-leading-normal: 1.55;
-  --sc-space-1: 4px;
-  --sc-space-2: 8px;
-  --sc-space-3: 12px;
-  --sc-space-4: 16px;
-  --sc-space-5: 20px;
-  --sc-space-6: 24px;
-  --sc-radius-sm: var(--radius-2, 6px);
-  --sc-radius-md: var(--radius-3, 8px);
-  --sc-radius-lg: var(--radius-4, 12px);
-  --sc-radius-pill: 999px;
-  --sc-surface-page: var(--gray-2);
-  --sc-surface-elevated: var(--color-panel-solid, var(--gray-1));
-  --sc-surface-muted: var(--gray-a2);
-  --sc-border: var(--gray-6);
-  --sc-border-subtle: var(--gray-a5);
-  --sc-ink: var(--gray-12);
-  --sc-ink-muted: var(--gray-11);
-  --sc-accent: var(--accent-9);
-  --sc-accent-soft: var(--accent-a3);
-  --sc-accent-ink: var(--accent-contrast, #fff);
-  --sc-focus: var(--accent-8);
-  --sc-shadow-panel: 0 1px 0 var(--gray-a3), 0 8px 24px var(--gray-a2);
-  --sc-shadow-float: 0 12px 40px var(--gray-a4), 0 2px 8px var(--gray-a3);
-  --sc-shadow-inset: inset 0 1px 0 var(--gray-a2);
-  --sc-gradient-page: radial-gradient(1200px 600px at 12% -8%, var(--accent-a2), transparent 55%),
-    radial-gradient(900px 480px at 88% 0%, var(--blue-a2), transparent 50%),
-    linear-gradient(180deg, var(--gray-2), var(--gray-1));
-  --sc-gradient-accent: linear-gradient(135deg, var(--accent-9), var(--blue-9));
-  --sc-gradient-panel: linear-gradient(180deg, var(--sc-surface-elevated), var(--sc-surface-muted));
-  --sc-nav-height: 64px;
-  --sc-utility-size: 40px;
-  /* Bridge legacy frosted names to Radix scales */
-  --studio-page: var(--sc-surface-page);
-  --studio-surface: var(--sc-surface-elevated);
-  --studio-card: var(--sc-surface-elevated);
-  --studio-line: var(--sc-border);
-  --studio-ink: var(--sc-ink);
-  --studio-muted: var(--sc-ink-muted);
-  --studio-primary: var(--sc-accent);
-  --studio-primary-ink: var(--sc-accent-ink);
-  --panel-fill: var(--sc-surface-elevated);
-  --glass-line: var(--sc-border);
-  --glass-text: var(--sc-ink);
-  --glass-muted: var(--sc-ink-muted);
+ --sc-font:Inter,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+ --sc-text-xs:11px;--sc-text-sm:12px;--sc-text-base:13px;--sc-text-md:14px;--sc-text-lg:16px;--sc-text-xl:22px;--sc-text-2xl:26px;
+ --sc-leading-tight:1.3;--sc-leading-normal:1.65;
+ --sc-space-1:4px;--sc-space-2:8px;--sc-space-3:12px;--sc-space-4:16px;--sc-space-5:24px;--sc-space-6:32px;
+ --sc-radius-sm:4px;--sc-radius-md:6px;--sc-radius-lg:9px;--sc-radius-pill:999px;
+ --sc-surface-page:#fff;--sc-surface-elevated:#fff;--sc-surface-muted:#f4f4f5;--sc-surface-subtle:#fafafa;
+ --sc-border:#dedee3;--sc-border-subtle:#e4e4e7;--sc-ink:#18181b;--sc-ink-muted:#71717a;
+ --sc-accent:#18181b;--sc-accent-soft:#f0f0f2;--sc-accent-ink:#fafafa;--sc-focus:#64748b;
+ --sc-shadow-panel:0 1px 2px #00000004;--sc-shadow-float:0 18px 60px #0002;--sc-shadow-inset:none;
+ --sc-gradient-page:var(--sc-surface-page);--sc-gradient-accent:var(--sc-accent);--sc-gradient-panel:var(--sc-surface-elevated);
+ --sc-nav-height:0px;--sc-utility-size:32px;
+ --studio-page:var(--sc-surface-page);--studio-surface:var(--sc-surface-elevated);--studio-card:var(--sc-surface-elevated);--studio-line:var(--sc-border-subtle);--studio-ink:var(--sc-ink);--studio-muted:var(--sc-ink-muted);--studio-primary:var(--sc-accent);--studio-primary-ink:var(--sc-accent-ink);
+ --panel-fill:var(--sc-surface-elevated);--glass:var(--sc-surface-elevated);--glass-soft:var(--sc-surface-muted);--glass-line:var(--sc-border-subtle);--glass-text:var(--sc-ink);--glass-muted:var(--sc-ink-muted);--glass-accent:var(--sc-ink);--glass-shadow:var(--sc-shadow-panel);--input-fill:var(--sc-surface-muted);--user-bubble:var(--sc-surface-muted);--assistant-bubble:var(--sc-surface-elevated);
+ font-family:var(--sc-font);
+}
+.dark .redesigned-studio.canvas-studio.frosted-studio {
+ --sc-surface-page:#111113;--sc-surface-elevated:#18181b;--sc-surface-muted:#27272a;--sc-surface-subtle:#202023;
+ --sc-border:#3f3f46;--sc-border-subtle:#303034;--sc-ink:#f4f4f5;--sc-ink-muted:#a1a1aa;
+ --sc-accent:#fafafa;--sc-accent-soft:#27272a;--sc-accent-ink:#18181b;--sc-shadow-panel:none;--sc-shadow-float:0 18px 60px #0005;
 }
