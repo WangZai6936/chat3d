@@ -88,7 +88,7 @@ export function ChatPanel({onConfigure,onAssets,canvasMode=false,expanded=true,o
     const imgs: string[] = [];
     try {
       for (const f of files) {
-        if (f.size > MAX_ATTACHMENT_BYTES) { setNotice('单个附件不能超过 20 MB'); continue; }
+        if (f.size > MAX_ATTACHMENT_BYTES) { setNotice('单个附件不能超过 100 MB'); continue; }
         try { imgs.push(await prepareReference(f,compressImage)); } catch { setNotice('附件处理失败，请重新选择'); }
       }
       if (aliveRef.current) setAttachments(prev => [...prev, ...imgs]);
@@ -189,7 +189,7 @@ export function ChatPanel({onConfigure,onAssets,canvasMode=false,expanded=true,o
       </div>
       <div className="composer-toolbar">
         <input ref={fileRef} type="file" multiple className="hidden" onChange={e=>{void addImages(Array.from(e.target.files??[]));e.target.value='';}}/>
-        <DropdownMenu.Root><DropdownMenu.Trigger><Button type="button" variant="ghost" color="gray" aria-label="添加与参考附件选项" title="添加参考附件与附件选项" className="composer-icon"><PlusIcon/>{attachments.length>0&&<span className="attachment-count">{attachments.length}</span>}</Button></DropdownMenu.Trigger><DropdownMenu.Content className="composer-action-menu" align="start" side="top" color="gray"><DropdownMenu.Item disabled={imageBusy} onSelect={()=>fileRef.current?.click()}><ImageIcon/>{imageBusy?'正在处理参考附件':'添加参考附件'}</DropdownMenu.Item>{!attachments.length&&messages.some(m=>m.images?.length)&&<><DropdownMenu.Separator/><DropdownMenu.CheckboxItem checked={reuseReference} onCheckedChange={setReuseReference}>沿用最近参考附件</DropdownMenu.CheckboxItem></>}<DropdownMenu.Label>每个附件20MB以内</DropdownMenu.Label></DropdownMenu.Content></DropdownMenu.Root>
+        <DropdownMenu.Root><DropdownMenu.Trigger><Button type="button" variant="ghost" color="gray" aria-label="添加与参考附件选项" title="添加参考附件与附件选项" className="composer-icon"><PlusIcon/>{attachments.length>0&&<span className="attachment-count">{attachments.length}</span>}</Button></DropdownMenu.Trigger><DropdownMenu.Content className="composer-action-menu" align="start" side="top" color="gray"><DropdownMenu.Item disabled={imageBusy} onSelect={()=>fileRef.current?.click()}><ImageIcon/>{imageBusy?'正在处理参考附件':'添加参考附件'}</DropdownMenu.Item>{!attachments.length&&messages.some(m=>m.images?.length)&&<><DropdownMenu.Separator/><DropdownMenu.CheckboxItem checked={reuseReference} onCheckedChange={setReuseReference}>沿用最近参考附件</DropdownMenu.CheckboxItem></>}<DropdownMenu.Label>每个附件100MB以内</DropdownMenu.Label></DropdownMenu.Content></DropdownMenu.Root>
         <QualityPicker onConfigure={onConfigure}/><div className="composer-spacer"/><ModelPicker onConfigure={onConfigure}/>
         {busy&&(!!input.trim()||!!attachments.length)&&<Button variant="solid" className="composer-send is-running" aria-label="停止生成" title="停止当前任务，保留输入和已生成草稿" onClick={cancel}><StopIcon/></Button>}<Button key={busy&&!input.trim()&&!attachments.length?'stop-current':'send-message'} variant="solid" onClick={()=>busy&&!input.trim()&&!attachments.length?cancel():void send(busy?'later':'guide')} disabled={imageBusy||(!busy&&!input.trim()&&!attachments.length)} className={`composer-send ${busy?'is-running':''}`} aria-label={busy&&!input.trim()&&!attachments.length?'停止生成':busy?'加入消息队列':'发送'} title={busy&&!input.trim()&&!attachments.length?'停止当前任务，保留已生成草稿':busy?'加入上方消息队列，可引导或移除':'发送（Enter发送，Shift+Enter换行）'}>{busy&&!input.trim()&&!attachments.length?<StopIcon/>:<ArrowUpIcon/>}</Button>
 

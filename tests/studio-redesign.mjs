@@ -10,8 +10,9 @@ try{
  await test('home accepts more than four arbitrary attachments and retains per-file ceiling',async()=>{
   const ui=render(React.createElement(StudioHome,{onOpen:()=>{},onLibrary:()=>{}})),picker=ui.container.querySelector('input[type="file"]');assert.equal(picker.hasAttribute('accept'),false);
   const files=Array.from({length:5},(_,i)=>new dom.window.File(['model'],`part-${i}.glb`,{type:'model/gltf-binary'}));
-  const oversized=new dom.window.File(['x'],'large.mp4',{type:'video/mp4'});Object.defineProperty(oversized,'size',{value:20*1024*1024+1});
-  fireEvent.change(picker,{target:{files:[...files,oversized]}});await waitFor(()=>assert.ok(ui.getByText('part-4.glb')));assert.equal(ui.container.querySelector('.home-reference-images').querySelectorAll('img').length,0);assert.ok(ui.getByText('单个附件不能超过20MB'));
+  Object.defineProperty(files[4],'size',{value:100*1024*1024});
+  const oversized=new dom.window.File(['x'],'large.mp4',{type:'video/mp4'});Object.defineProperty(oversized,'size',{value:100*1024*1024+1});
+  fireEvent.change(picker,{target:{files:[...files,oversized]}});await waitFor(()=>assert.ok(ui.getByText('part-4.glb')));assert.equal(ui.container.querySelector('.home-reference-images').querySelectorAll('img').length,0);assert.ok(ui.getByText('单个附件不能超过100MB'));
   fireEvent.click(ui.getByRole('button',{name:'移除首页参考附件 5'}));assert.equal(ui.queryByText('part-4.glb'),null);assert.equal(ui.getByRole('button',{name:'添加参考附件'}).disabled,false);
  });
  await test('blank asset creation opens the workbench without metadata fields',async()=>{const before=w.useWorkspaceStore.getState().sessions.length;const ui=render(React.createElement(ProjectLibrary,props));fireEvent.click(ui.getByRole('button',{name:'新建资产',exact:true}));assert.equal(w.useWorkspaceStore.getState().sessions.length,before+1);assert.equal(s.getState().doc.nodes.length,0);assert.equal(ui.queryByLabelText('新资产名称'),null);});

@@ -29,13 +29,14 @@ try {
   reset();handler=async()=>new Response(JSON.stringify({choices:[{message:{content:JSON.stringify({summary:'ok',operations:[]})}}]}));
   const ui=mount(),picker=ui.container.querySelector('input[type="file"]');assert.equal(picker.hasAttribute('accept'),false);
   const files=['clip.mp4','part.glb','scene.gltf','notes.pdf','unknown','sixth.bin'].map(name=>new dom.window.File(['binary payload'],name,{type:name.endsWith('mp4')?'video/mp4':name.endsWith('pdf')?'application/pdf':''}));
-  const oversized=new dom.window.File(['x'],'too-big.bin');Object.defineProperty(oversized,'size',{value:20*1024*1024+1});
+  Object.defineProperty(files[5],'size',{value:100*1024*1024});
+  const oversized=new dom.window.File(['x'],'too-big.bin');Object.defineProperty(oversized,'size',{value:100*1024*1024+1});
   fireEvent.change(picker,{target:{files:[...files,oversized]}});
-  await waitFor(()=>assert.equal(store.getState().composerImages.length,6));assert.ok(ui.getByText('sixth.bin'));assert.ok(ui.getByText('单个附件不能超过 20 MB'));assert.equal(ui.container.querySelectorAll('img').length,0);
+  await waitFor(()=>assert.equal(store.getState().composerImages.length,6));assert.ok(ui.getByText('sixth.bin'));assert.ok(ui.getByText('单个附件不能超过 100 MB'));assert.equal(ui.container.querySelectorAll('img').length,0);
   const {attachmentInfo,prepareReference,MAX_ATTACHMENT_BYTES}=await server.ssrLoadModule('/src/domain/referenceAttachments.ts');
   assert.deepEqual(attachmentInfo(store.getState().composerImages[0]),{name:'clip.mp4',mime:'video/mp4',size:14});
   let compressed=0;const image=await prepareReference(new dom.window.File(['pixels'],'image.png',{type:'image/png'}),async()=>{compressed++;return 'data:image/jpeg;base64,cGl4ZWxz';});assert.equal(compressed,1);
-  await assert.rejects(prepareReference(oversized,async()=>''),/20 MB/);assert.equal(MAX_ATTACHMENT_BYTES,20*1024*1024);
+  await assert.rejects(prepareReference(oversized,async()=>''),/100 MB/);assert.equal(MAX_ATTACHMENT_BYTES,100*1024*1024);
   act(()=>store.getState().setComposerImages([...store.getState().composerImages,image]));send(ui,'使用这些参考附件');
   await waitFor(()=>assert.equal(store.getState().aiStatus,'idle'));
   const body=JSON.parse(requests[0][1].body),parts=body.messages.at(-1).content;

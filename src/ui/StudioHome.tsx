@@ -43,7 +43,7 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
    setDraft('');setImages([]);setError('');onOpen();onGenerate?.(projectId);
   }catch(e){setError(e instanceof Error?e.message:'新建失败');creating.current=false;}
  }
- async function addImages(files:File[]){if(imageBusyRef.current)return;imageBusyRef.current=true;setImageBusy(true);setError('');const prepared:string[]=[];try{for(const file of files){if(file.size>MAX_ATTACHMENT_BYTES){setError('单个附件不能超过20MB');continue;}try{prepared.push(await prepareReference(file,compressImage));}catch{setError('附件处理失败，请重新选择');}}setImages(old=>[...old,...prepared]);}catch{setError('附件处理失败，请重新选择');}finally{imageBusyRef.current=false;setImageBusy(false)}}
+ async function addImages(files:File[]){if(imageBusyRef.current)return;imageBusyRef.current=true;setImageBusy(true);setError('');const prepared:string[]=[];try{for(const file of files){if(file.size>MAX_ATTACHMENT_BYTES){setError('单个附件不能超过100MB');continue;}try{prepared.push(await prepareReference(file,compressImage));}catch{setError('附件处理失败，请重新选择');}}setImages(old=>[...old,...prepared]);}catch{setError('附件处理失败，请重新选择');}finally{imageBusyRef.current=false;setImageBusy(false)}}
  // A new visit can start another project; repeated submit events within the current visit cannot.
  useEffect(()=>{if(!hidden)creating.current=false;},[hidden]);
  return <StudioPage className="home-page home-command-center" hidden={hidden}>
@@ -65,12 +65,12 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
     {!!images.length&&<div className="home-reference-images">{images.map((image,i)=><div key={i}>{isReferenceImage(image)?<button type="button" aria-label={`预览首页参考附件 ${i+1}`} onClick={()=>setPreview(image)}><img src={image} alt={`首页参考附件 ${i+1}`}/></button>:<span>{attachmentInfo(image).name}</span>}<Button type="button" variant="ghost" color="gray" aria-label={`移除首页参考附件 ${i+1}`} onClick={()=>setImages(old=>old.filter((_,j)=>i!==j))}><Cross1Icon/></Button></div>)}</div>}
     <div className="home-composer-actions">
      <input ref={fileRef} type="file" multiple hidden onChange={e=>{const files=Array.from(e.target.files??[]);e.target.value='';void addImages(files);}}/>
-     <Button type="button" className="home-add-image" aria-label={imageBusy?'正在处理参考附件':'添加参考附件'} title="添加参考附件（每个20MB以内）" variant="ghost" color="gray" disabled={imageBusy} onClick={()=>fileRef.current?.click()}><ImageIcon/><span>{imageBusy?'处理中':'参考附件'}</span>{images.length>0&&<span className="attachment-count">{images.length}</span>}</Button>
+     <Button type="button" className="home-add-image" aria-label={imageBusy?'正在处理参考附件':'添加参考附件'} title="添加参考附件（每个附件100MB以内）" variant="ghost" color="gray" disabled={imageBusy} onClick={()=>fileRef.current?.click()}><ImageIcon/><span>{imageBusy?'处理中':'参考附件'}</span>{images.length>0&&<span className="attachment-count">{images.length}</span>}</Button>
      <div className="composer-spacer"/><QualityPicker forNewProject onConfigure={onConfigure}/><ModelPicker forNewProject onConfigure={onConfigure}/>
      <Button className="primary home-start composer-send" aria-label="开始生成" title="开始生成" type="submit" disabled={locked||imageBusy||(!draft.trim()&&!images.length)}><span>开始生成</span><ArrowUpIcon/></Button>
     </div>
    </form>
-   <p className="home-composer-note">支持粘贴参考附件 · 每个附件20MB以内 · 连接模型后开始生成，配置时保留输入</p>
+   <p className="home-composer-note">支持粘贴参考附件 · 每个附件100MB以内 · 连接模型后开始生成，配置时保留输入</p>
    {error&&<p className="resource-error" role="alert">{error}</p>}
    </div>
   </section>
