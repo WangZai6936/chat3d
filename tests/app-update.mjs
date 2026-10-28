@@ -236,7 +236,16 @@ try {
   const details = renderInTheme(React.createElement(uiModule.AppUpdateDialog));
   fireEvent.click(noticeDialog.getByRole('button', {name: '查看详情'}));
   assert.ok(details.getByRole('dialog', {name: '关于与更新'}));
-  for (const selector of ['.app-update-dialog-header', '.app-update-dialog-body', '.app-update-dialog-footer']) assert.ok(details.getByRole('dialog', {name: '关于与更新'}).querySelector(selector));
+  const aboutDialog = details.getByRole('dialog', {name: '关于与更新'});
+  for (const selector of ['.app-update-dialog-header', '.app-update-dialog-heading', '.app-update-dialog-body', '.app-update-dialog-footer']) assert.ok(aboutDialog.querySelector(selector));
+  const aboutHeading = aboutDialog.querySelector('.app-update-dialog-heading');
+  assert.ok(aboutHeading);
+  assert.ok(aboutHeading.querySelector('.rt-Heading, .rt-DialogTitle, h1'));
+  assert.ok(aboutHeading.querySelector('.rt-Text, .rt-DialogDescription, p'));
+  assert.match(aboutHeading.textContent ?? '', /查看当前版本、检查更新/);
+  // Title+Description must live in column-2 wrapper (not as direct grid kids of the 24px icon column).
+  assert.equal(aboutDialog.querySelector('.app-update-dialog-header')?.children.length, 2);
+  assert.equal(aboutHeading.parentElement?.className.includes('app-update-dialog-header'), true);
   fireEvent.click(details.getByRole('button', {name: '关闭'}));
   assert.ok(notice.getByRole('dialog', {name: '应用更新'}));
   details.unmount();
