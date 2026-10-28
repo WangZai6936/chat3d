@@ -21,11 +21,11 @@ function Shot($name) {
  $b=New-Object System.Drawing.Bitmap($r.Width,$r.Height); $g=[System.Drawing.Graphics]::FromImage($b)
  try { $g.CopyFromScreen($r.Location,[System.Drawing.Point]::Empty,$r.Size); $b.Save((Join-Path $out "$name.png")) } finally { $g.Dispose();$b.Dispose() }
 }
-function Find-Control($name) {
+function Find-Control($name,[switch]$AllowDisabled) {
  $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$name)
  for($i=0;$i -lt 30;$i++) {
   $found=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
-  if($found -and $found.Current.IsEnabled){return $found}
+  if($found -and ($AllowDisabled -or $found.Current.IsEnabled)){return $found}
   Start-Sleep -Milliseconds 500
  }
  throw "UI control not found: $name"
@@ -71,18 +71,21 @@ try {
  Start-Sleep -Seconds 4;Shot 'ui-home';Dump-Controls 'ui-home-controls'
  Find-Control '资产库' | Out-Null
  $checks.Add(@{name='installed app home renders with accessible navigation';pass=$true})
- Click-Control '团队库';Find-Control '登录团队' | Out-Null;Shot 'ui-team-page'
+ Click-Control '团队库';Find-Control '团队服务地址' | Out-Null;Shot 'ui-team-page'
  $checks.Add(@{name='team library page opens from navigation';pass=$true})
  Click-Control '团队资产'
  Set-Input '团队服务地址' $teamBase
  Set-Input '团队账号' 'smoke-bob'
  Set-Input '团队密码' 'isolated-smoke-password-b'
  Click-Control '登录团队'
+ Find-Control '预览 NativeTestBox' | Out-Null
  Click-Control '预览 NativeTestBox'
- Find-Control '复制到本地' | Out-Null
+ Find-Control '获取此固定版本' | Out-Null
  Shot 'ui-team-preview'
- Click-Control '复制到本地'
- Find-Control '已复制为独立本地副本；重新打开本地库即可查看。' | Out-Null
+ Click-Control '获取此固定版本'
+ Click-Control '确认获取并保留旧副本'
+ Find-Control '已获取 1 项，旧副本和本地修改均已保留。' | Out-Null
+ Click-Control '关闭'
  Click-Control '资产库'
  Find-Control '查看资产 NativeTestBox 副本' | Out-Null
  Shot 'ui-team-local-copy'
