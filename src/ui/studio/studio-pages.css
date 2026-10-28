@@ -139,7 +139,7 @@
 .canvas-studio.frosted-studio .resource-page .resource-tile:hover { border-color: var(--sc-ink-muted); box-shadow: none; transform: none; }
 .canvas-studio.frosted-studio .resource-page .resource-tile[aria-pressed='true'] { border-color: var(--sc-ink); box-shadow: 0 0 0 1px var(--sc-ink); }
 .canvas-studio.frosted-studio .resource-tile > :is(img, .resource-no-thumb) { width: 100%; height: auto; min-height: 0; aspect-ratio: 4 / 3; margin: 0 0 4px; border-radius: 0; object-fit: cover; background: var(--sc-surface-muted); color: var(--sc-ink-muted); }
-.canvas-studio.frosted-studio .resource-layout-grid .resource-tile > :is(img, .resource-no-thumb) { aspect-ratio: 1 / 1; object-fit: contain; }
+.canvas-studio.frosted-studio .resource-layout-grid .resource-tile > :is(img, .resource-no-thumb) { aspect-ratio: 4 / 3; object-fit: contain; }
 .canvas-studio.frosted-studio .resource-tile > :not(img):not(.resource-no-thumb) { margin: 0 12px; overflow-wrap: anywhere; }
 .canvas-studio.frosted-studio .resource-tile > strong { color: var(--sc-ink); font-size: 14px; font-weight: 600; line-height: 1.45; }
 .canvas-studio.frosted-studio .resource-tile > span { color: var(--sc-ink-muted); font-size: 12px; line-height: 1.6; }
@@ -245,3 +245,5 @@
   .canvas-studio.frosted-studio .resource-layout-list .resource-tile > :is(img, .resource-no-thumb) { width: 80px; }
   .canvas-studio.frosted-studio .resource-toolbar { gap: 8px; }
 }
+
+.canvas-studio.frosted-studio .settings-refresh .settings-group{padding:24px;border:1px solid var(--sc-border);border-radius:10px;background:var(--sc-surface-elevated)}.canvas-studio.frosted-studio .settings-refresh .settings-row:last-child{border-bottom:0;padding-bottom:0}.canvas-studio.frosted-studio .resource-toolbar{border-radius:10px}.canvas-studio.frosted-studio .resource-page .resource-tile[aria-pressed=true]{border-color:var(--sc-accent);box-shadow:0 0 0 1px var(--sc-accent)}.canvas-studio.frosted-studio .resource-detail.rt-Card{border-radius:10px}.canvas-studio.frosted-studio .task-center-layout>aside .rt-Button[aria-pressed=true]{background:var(--sc-accent-soft);color:var(--sc-accent)}

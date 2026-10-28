@@ -64,12 +64,12 @@
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent-section { display: flex; flex-direction: column; gap: 18px; margin: 0; padding: 0; border: 0; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-library-links { display: flex; flex-wrap: wrap; gap: 8px; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-library-links button { min-height: 32px; padding: 0 9px; border: 1px solid var(--sc-border); border-radius: 6px; background: var(--sc-surface-elevated); color: var(--sc-ink-muted); font-size: 14px; }
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card { min-width: 0; margin: 0; padding: 0; overflow: hidden; border: 1px solid var(--sc-border); border-radius: 8px; background: var(--sc-surface-elevated); box-shadow: none; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card::before, .canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card::after { display: none; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card:has(.home-project-link:not(:disabled):hover) { border-color: var(--sc-ink-muted); }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link { display: block; width: 100%; height: 100%; padding: 0; border: 0; background: none; color: var(--sc-ink); text-align: left; cursor: pointer; }
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link > img, .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link > .resource-no-thumb { box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; width: 100%; height: auto; aspect-ratio: 1.5; object-fit: cover; border: 0; border-bottom: 1px solid var(--sc-border-subtle); border-radius: 0; background: var(--sc-surface-muted); color: var(--sc-ink-muted); font-size: 12px; }
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link > img, .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link > .resource-no-thumb { box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; width: 100%; height: auto; aspect-ratio: 1.9; object-fit: cover; border: 0; border-bottom: 1px solid var(--sc-border-subtle); border-radius: 0; background: var(--sc-surface-muted); color: var(--sc-ink-muted); font-size: 12px; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .resource-no-thumb > svg { width: 26px; height: 26px; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-caption { padding: 13px 14px; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-caption h3 { margin: 0 0 6px; overflow: hidden; color: var(--sc-ink); font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -84,8 +84,8 @@
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-info { flex: 1; min-width: 100px; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-info h3 { margin: 0 0 4px; overflow: hidden; color: var(--sc-ink); font-size: 14px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-info p, .canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-more { margin: 0; color: var(--sc-ink-muted); font-size: 12px; line-height: 1.7; }
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-info small { display:flex;align-items:center;gap:5px;font-size:11px;color:var(--sc-ink-muted); }
-.canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-status { display:inline-flex;padding:1px 6px;border-radius:4px;background:var(--sc-surface-muted);color:var(--sc-ink);font-size:10px;line-height:18px; }
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-info small { display:flex;align-items:center;gap:5px;font-size:12px;color:var(--sc-ink-muted); }
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-status { display:inline-flex;padding:1px 6px;border-radius:4px;background:var(--sc-surface-muted);color:var(--sc-ink);font-size:12px;line-height:18px; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-status.is-review { border:1px solid var(--sc-border);background:transparent; }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-thumb>.resource-no-thumb { display:flex;align-items:center;justify-content:center;width:100%;height:100%;background:var(--sc-surface-muted);color:var(--sc-ink-muted); }
 .canvas-studio.frosted-studio.manager-mode .home-command-center .home-tasks-empty.studio-empty-state { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: flex-start; gap: 12px; min-height: 76px; padding: 16px; border: 1px dashed var(--sc-border); border-radius: 6px; background: none; text-align: left; }
@@ -128,3 +128,46 @@
   .canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-row > .studio-text-link { margin-left: 60px; }
   .canvas-studio.frosted-studio.manager-mode .home-command-center .home-tasks-empty.studio-empty-state { align-items: flex-start; }
 }
+
+/* Creation and active work share the first screen. */
+.canvas-studio.frosted-studio.manager-mode .home-command-center{max-width:1680px;margin:0 auto;gap:28px;padding:32px;background:var(--sc-surface-page)}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-start-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(310px,.48fr);gap:24px;align-items:start}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-creation{padding:24px;gap:18px;border-radius:12px;box-shadow:var(--sc-shadow-panel)}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-new-project{background:var(--sc-surface-elevated);color:var(--sc-ink);border-color:var(--sc-border);min-height:40px;padding:0 16px;border-radius:7px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer{background:var(--sc-surface-subtle);border-radius:8px;min-height:190px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer:focus-within{border-color:var(--sc-accent);box-shadow:0 0 0 3px var(--sc-accent-soft)}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-creation-copy .home-kind-description{font-size:13px;line-height:1.7}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-kind-switch button{min-height:36px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-kind-switch button[aria-pressed=true]{color:var(--sc-accent);background:var(--sc-accent-soft);border-color:transparent;font-weight:600}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-activity{display:flex;flex-direction:column;gap:16px;min-width:0}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-current-tasks.studio-panel{padding:22px;border:1px solid var(--sc-border);border-radius:12px;background:var(--sc-surface-elevated);gap:12px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-current-tasks .studio-section-title{font-size:16px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-current-tasks .studio-text-link{font-size:12px;color:var(--sc-accent)}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-row{gap:10px;padding:12px 0;align-items:flex-start}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-row:last-child{border-bottom:0;padding-bottom:0}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-action{display:flex;align-items:center;gap:5px;border:0;border-radius:5px;padding:7px 0;background:none;color:var(--sc-accent);font-size:13px;cursor:pointer;margin-left:58px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-info{flex-basis:calc(100% - 60px);min-width:0}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-status{background:var(--sc-accent-soft);color:var(--sc-accent);font-size:12px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-task-status.is-review{background:var(--amber-3);border:0;color:var(--amber-11)}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-model-status{display:flex;align-items:flex-start;gap:10px;padding:16px;border:1px solid var(--sc-border);border-radius:10px;background:var(--sc-surface-elevated);font-size:13px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-model-status>svg{flex-shrink:0;width:18px;height:18px;margin-top:3px;color:var(--sc-accent)}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-model-status>div{flex:1;min-width:0}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-model-status strong{font-weight:600}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-model-status p{margin:4px 0 0;color:var(--sc-ink-muted);overflow-wrap:anywhere;font-size:12px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-model-status .rt-Button{flex-shrink:0;font-size:13px;color:var(--sc-accent);margin:0}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-filters{display:flex;gap:4px;padding:4px;border:1px solid var(--sc-border);border-radius:8px;background:var(--sc-surface-elevated)}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-filters button{padding:7px 14px;border:0;border-radius:5px;font:inherit;font-size:13px;background:transparent;color:var(--sc-ink-muted);cursor:pointer}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-filters button[aria-pressed=true]{background:var(--sc-accent-soft);color:var(--sc-accent);font-weight:600}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-toolbar .rt-TextFieldRoot{width:260px;height:38px;border:1px solid var(--sc-border);background:var(--sc-surface-elevated);box-shadow:none;border-radius:7px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-library-links button{border:0;background:none;color:var(--sc-accent)}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-caption{padding:16px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card{border-radius:10px;transition:border-color .15s,box-shadow .15s}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent article.rt-Card:has(.home-project-link:not(:disabled):hover){border-color:var(--sc-accent);box-shadow:0 4px 16px #193b3b0c}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link > img, .canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-link > .resource-no-thumb{aspect-ratio:1.9;object-fit:contain}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-caption h3{font-size:15px}
+.canvas-studio.frosted-studio.manager-mode .home-command-center .home-empty{background:var(--sc-surface-elevated)}
+@media(max-width:1150px){.canvas-studio.frosted-studio.manager-mode .home-command-center .home-start-grid{grid-template-columns:minmax(0,1fr)}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-activity{display:grid;grid-template-columns:minmax(0,1fr) minmax(220px,.6fr);align-items:start}}
+@media(max-width:720px){.canvas-studio.frosted-studio.manager-mode .home-command-center{padding:24px 18px}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-activity{display:flex}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-creation{padding:18px}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-project-toolbar .rt-TextFieldRoot{width:100%}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-recent{grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}}
+
+@media(max-width:520px){.canvas-studio.frosted-studio.manager-mode .home-command-center .home-composer-actions .model-picker-trigger{min-width:105px;max-width:100%;flex:1}.canvas-studio.frosted-studio.manager-mode .home-command-center .home-kind-switch button{min-height:40px}}

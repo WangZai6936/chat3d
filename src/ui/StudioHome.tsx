@@ -1,8 +1,8 @@
 import {prepareReference,isReferenceImage,attachmentInfo,MAX_ATTACHMENT_BYTES} from '../domain/referenceAttachments';
 import {HomeTasks} from './HomeTasks';
-import {Button,Card,Badge,TextArea,Dialog} from '@radix-ui/themes';
+import {Button,Card,Badge,TextArea,TextField,Dialog} from '@radix-ui/themes';
 import {useEffect,useRef,useState} from 'react';
-import {CubeIcon,LayersIcon,ArrowRightIcon,PlusIcon,ArrowUpIcon,Cross1Icon,ImageIcon} from '@radix-ui/react-icons';
+import {CubeIcon,LayersIcon,ArrowRightIcon,PlusIcon,ArrowUpIcon,Cross1Icon,ImageIcon,MagnifyingGlassIcon,MixerHorizontalIcon} from '@radix-ui/react-icons';
 import {createSession,switchSession,useWorkspaceStore} from '../workspace';
 import {useEditorStore} from '../store';
 import {listModelAssets} from '../domain/modelAssetStorage';
@@ -18,13 +18,27 @@ import {StudioEmptyState} from './studio/StudioEmptyState';
 
 export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidden=false}:{onOpen:()=>void;onLibrary:(kind:'asset'|'scene')=>void;onGenerate?:(projectId:string)=>void;onConfigure?:()=>void;onTasks?:()=>void;hidden?:boolean}){
  const sessions=useWorkspaceStore(s=>s.sessions);
+ const config=useEditorStore(s=>s.aiConfig);
+ const configured=!!config&&!config.useMock&&!!config.baseURL.trim()&&!!config.apiKey.trim()&&!!config.model.trim();
  const ready=useWorkspaceStore(s=>s.ready),workspaceError=useWorkspaceStore(s=>s.error);
  const [kind,setKind]=useState<'asset'|'scene'>('asset'),[draft,setDraft]=useState(''),[images,setImages]=useState<string[]>([]),[preview,setPreview]=useState<string|null>(null),[imageBusy,setImageBusy]=useState(false);
  const [items,setItems]=useState<ModelAssetSummary[]>([]),[error,setError]=useState('');
+ const [search,setSearch]=useState(''),[filter,setFilter]=useState<'all'|'asset'|'scene'>('all');
  const creating=useRef(false),imageBusyRef=useRef(false),fileRef=useRef<HTMLInputElement>(null),draftRef=useRef<HTMLTextAreaElement>(null);
  const locked=!ready||!!workspaceError;
  useEffect(()=>{if(hidden)return;let alive=true;listModelAssets().then(a=>{if(alive)setItems(a);}).catch(()=>{if(alive)setItems([]);});return()=>{alive=false;};},[hidden]);
- const recent=sessions.filter(s=>!s.deletedAt&&(s.moduleKind||s.snapshot.doc.nodes.length||s.snapshot.messages.length)).sort((a,b)=>b.updatedAt-a.updatedAt).slice(0,12);
+ const projects=sessions.filter(s=>!s.deletedAt&&(s.moduleKind||s.snapshot.doc.nodes.length||s.snapshot.messages.length)).sort((a,b)=>b.updatedAt-a.updatedAt);
+ const matching=projects.filter(s=>(filter==='all'||(s.moduleKind??'scene')===filter)&&s.title.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+ const recent=matching.slice(0,12);
+ function startBlankProject(){
+  if(creating.current)return;
+  creating.current=true;
+  try{
+   assertLibraryReady();
+   if(!createSession(undefined,{moduleKind:kind,title:kind==='asset'?'未命名资产':'未命名场景',...(kind==='asset'?{assetCategory:'其他' as const}:{})}))throw Error('当前无法新建，请先处理存储异常');
+   setError('');onOpen();
+  }catch(e){setError(e instanceof Error?e.message:'新建失败');creating.current=false;}
+ }
  function startProject(){
   if(creating.current)return;
   creating.current=true;
@@ -48,13 +62,14 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
  useEffect(()=>{if(!hidden)creating.current=false;},[hidden]);
  return <StudioPage className="home-page home-command-center" hidden={hidden}>
   <header className="home-hero">
-   <div><h1 id="home-title">工作空间</h1><p className="home-hero-lead">创建三维模型，管理资产与场景。</p></div>
-   <Button type="button" className="primary home-new-project" disabled={locked} onClick={()=>draftRef.current?.focus()}><PlusIcon/>新建项目</Button>
+   <div><h1 id="home-title">创作工作空间</h1><p className="home-hero-lead">从一个想法开始，或继续打磨你的三维项目。</p></div>
+   <Button type="button" className="home-new-project" aria-label="新建空白项目" disabled={locked} onClick={startBlankProject}><PlusIcon/>新建空白{kind==='asset'?'资产':'场景'}</Button>
   </header>
+  <div className="home-start-grid">
   <section className="home-creation" aria-labelledby="home-create-title">
    <div className="home-creation-copy">
-    <h2 id="home-create-title">开始一个新项目</h2>
-    <p>描述你想创建的内容，或添加参考附件。</p>
+    <h2 id="home-create-title">用 AI 开始创作</h2>
+    <p>先选择类型，再描述你想创建的内容。</p>
     <div className="home-kind-switch" role="group" aria-label="新项目类型"><button type="button" aria-pressed={kind==='asset'} onClick={()=>setKind('asset')}><CubeIcon/>资产</button><button type="button" aria-pressed={kind==='scene'} onClick={()=>setKind('scene')}><LayersIcon/>场景</button></div>
     <p className="home-kind-description">{kind==='asset'?'单个可复用的三维模型，可在场景中组合使用。':'由多个模型组成的空间布局，可继续编辑物件与位置。'}</p>
    </div>
@@ -69,17 +84,29 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
      <Button className="primary home-start composer-send" aria-label="开始生成" title="开始生成" type="submit" disabled={locked||imageBusy||(!draft.trim()&&!images.length)}><span>开始生成</span><ArrowUpIcon/></Button>
     </div>
    </form>
-   <p className="home-composer-note">支持粘贴参考附件 · 不限类型与数量 · 单文件100MB以内 · 连接模型后开始生成，配置时保留输入</p>
+   <p className="home-composer-note">可粘贴图片或上传参考文件，单文件最大 100 MB。生成后可先预览，再确认修改。</p>
    {error&&<p className="resource-error" role="alert">{error}</p>}
    </div>
   </section>
+  <aside className="home-activity" aria-label="创作状态">
+   <HomeTasks items={items} disabled={locked} hidden={hidden} onOpen={onOpen} onAll={onTasks}/>
+   <div className={'home-model-status'+(configured?' is-configured':'')}>
+    <MixerHorizontalIcon/><div><strong>{configured?'已配置生成模型':'连接你的生成模型'}</strong><p>{configured?config.model:'配置后即可用 AI 创作，输入内容会保留。'}</p></div>
+    <Button variant="ghost" color="gray" disabled={locked} onClick={onConfigure}>{configured?'管理':'去配置'}<ArrowRightIcon/></Button>
+   </div>
+  </aside>
+  </div>
   <section className="home-recent-section" aria-labelledby="home-recent-title">
-   <StudioSectionHeader id="home-recent-title" title="最近项目" count={recent.length} actions={<div className="home-library-links"><Button variant="soft" color="gray" disabled={locked} aria-label="查看全部资产" onClick={()=>onLibrary('asset')}>资产库 <ArrowRightIcon/></Button><Button variant="soft" color="gray" disabled={locked} aria-label="查看全部场景" onClick={()=>onLibrary('scene')}>场景库 <ArrowRightIcon/></Button></div>}/>
+   <StudioSectionHeader id="home-recent-title" title="最近项目" count={matching.length} actions={<div className="home-library-links"><Button variant="ghost" color="gray" disabled={locked} aria-label="查看全部资产" onClick={()=>onLibrary('asset')}>资产库 <ArrowRightIcon/></Button><Button variant="ghost" color="gray" disabled={locked} aria-label="查看全部场景" onClick={()=>onLibrary('scene')}>场景库 <ArrowRightIcon/></Button></div>}/>
+   <div className="home-project-toolbar">
+    <div className="home-project-filters" role="group" aria-label="项目类型筛选">{(['all','asset','scene'] as const).map(value=><button key={value} type="button" aria-pressed={filter===value} onClick={()=>setFilter(value)}>{value==='all'?'全部项目':value==='asset'?'资产':'场景'}</button>)}</div>
+    <TextField.Root aria-label="搜索项目" placeholder="搜索项目名称…" value={search} onChange={e=>setSearch(e.target.value)}><TextField.Slot><MagnifyingGlassIcon/></TextField.Slot></TextField.Root>
+   </div>
    <div className="home-recent">{recent.map(s=><Card asChild key={s.id}><article><button className="home-project-link" aria-label={`继续编辑 ${s.title}`} disabled={locked} onClick={()=>{if(switchSession(s.id))onOpen();else setError('请先处理工作区保存异常');}}><ProjectThumb src={s.sceneThumbnail??items.find(a=>a.id===s.assetSource?.id)?.thumbnail} name={s.title} kind={s.moduleKind??'scene'}/><div className="home-project-caption"><h3>{s.title}</h3><p className="home-project-updated">{new Date(s.updatedAt).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} · {s.snapshot.doc.nodes.length} 个零件</p><div><Badge variant="soft" color="gray" className="home-kind">{s.moduleKind==='asset'?<CubeIcon/>:<LayersIcon/>}{s.moduleKind==='asset'?'资产':'场景'}</Badge><span>{projectLabel(s)}</span></div></div></button></article></Card>)}</div>
+   {!recent.length&&<StudioEmptyState className="resource-empty home-empty" icon={<LayersIcon/>} title={projects.length?'没有找到匹配的项目':'开始你的第一个项目'} description={projects.length?'试试其他名称，或切换项目类型。':'描述你的想法让 AI 生成，也可以新建空白项目手动搭建。'}/>}
+   {matching.length>12&&<p className="home-composer-note">显示最近更新的 12 个项目。可搜索名称，或前往资产库与场景库查看。</p>}
   </section>
-  {!recent.length&&<StudioEmptyState className="resource-empty home-empty" icon={<LayersIcon/>} title="开始你的第一个项目" description="在上方描述你的想法，选择资产或场景。"/>}
-  <HomeTasks items={items} disabled={locked} hidden={hidden} onOpen={onOpen} onAll={onTasks}/>
-  <footer className="resource-footer">当前浏览器保存 · 资产与场景独立管理 · 对话保留在对应项目中</footer>
+  <footer className="resource-footer">项目保存在当前设备 · 对话随项目保留 · 建议在设置中定期导出备份</footer>
   <Dialog.Root open={!!preview} onOpenChange={open=>{if(!open)setPreview(null)}}><Dialog.Content maxWidth="800px"><Dialog.Title>参考附件</Dialog.Title>{preview&&<img src={preview} alt="首页参考附件大图" style={{maxHeight:'65vh',width:'100%',objectFit:'contain'}}/>}<Dialog.Close><Button>关闭参考附件</Button></Dialog.Close></Dialog.Content></Dialog.Root>
  </StudioPage>;
 }

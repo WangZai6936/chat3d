@@ -1,12 +1,12 @@
 .redesigned-studio.canvas-studio.frosted-studio {
- --sc-font:Inter,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
- --sc-text-xs:11px;--sc-text-sm:12px;--sc-text-base:13px;--sc-text-md:14px;--sc-text-lg:16px;--sc-text-xl:22px;--sc-text-2xl:26px;
+ --sc-font:"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+ --sc-text-xs:12px;--sc-text-sm:13px;--sc-text-base:14px;--sc-text-md:14px;--sc-text-lg:16px;--sc-text-xl:22px;--sc-text-2xl:26px;
  --sc-leading-tight:1.3;--sc-leading-normal:1.65;
  --sc-space-1:4px;--sc-space-2:8px;--sc-space-3:12px;--sc-space-4:16px;--sc-space-5:24px;--sc-space-6:32px;
  --sc-radius-sm:4px;--sc-radius-md:6px;--sc-radius-lg:9px;--sc-radius-pill:999px;
- --sc-surface-page:#fff;--sc-surface-elevated:#fff;--sc-surface-muted:#f4f4f5;--sc-surface-subtle:#fafafa;
- --sc-border:#dedee3;--sc-border-subtle:#e4e4e7;--sc-ink:#18181b;--sc-ink-muted:#71717a;
- --sc-accent:#18181b;--sc-accent-soft:#f0f0f2;--sc-accent-ink:#fafafa;--sc-focus:#64748b;
+ --sc-surface-page:#f3f6f6;--sc-surface-elevated:#fdfefe;--sc-surface-muted:#eaf0f0;--sc-surface-subtle:#f6f9f9;
+ --sc-border:#ced9d9;--sc-border-subtle:#dce4e4;--sc-ink:#203334;--sc-ink-muted:#5b7071;
+ --sc-accent:#176c6b;--sc-accent-soft:#dfefed;--sc-accent-ink:#f8ffff;--sc-focus:#237b78;--sc-nav:#1c3032;--sc-nav-ink:#eef7f6;--sc-nav-muted:#aec2c2;--sc-nav-active:#2e4d4e;
  --sc-shadow-panel:0 1px 2px #00000004;--sc-shadow-float:0 18px 60px #0002;--sc-shadow-inset:none;
  --sc-gradient-page:var(--sc-surface-page);--sc-gradient-accent:var(--sc-accent);--sc-gradient-panel:var(--sc-surface-elevated);
  --sc-nav-height:0px;--sc-utility-size:32px;
@@ -15,7 +15,7 @@
  font-family:var(--sc-font);
 }
 .dark .redesigned-studio.canvas-studio.frosted-studio {
- --sc-surface-page:#111113;--sc-surface-elevated:#18181b;--sc-surface-muted:#27272a;--sc-surface-subtle:#202023;
- --sc-border:#3f3f46;--sc-border-subtle:#303034;--sc-ink:#f4f4f5;--sc-ink-muted:#a1a1aa;
- --sc-accent:#fafafa;--sc-accent-soft:#27272a;--sc-accent-ink:#18181b;--sc-shadow-panel:none;--sc-shadow-float:0 18px 60px #0005;
+ --sc-surface-page:#152325;--sc-surface-elevated:#1e3032;--sc-surface-muted:#2a4042;--sc-surface-subtle:#243739;
+ --sc-border:#496163;--sc-border-subtle:#354d4f;--sc-ink:#e9f3f2;--sc-ink-muted:#b0c5c5;
+ --sc-accent:#8bd2c8;--sc-accent-soft:#2b4b49;--sc-accent-ink:#173532;--sc-shadow-panel:none;--sc-shadow-float:0 18px 60px #0005;
 }
