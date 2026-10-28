@@ -17,7 +17,6 @@ export interface PersistableWorkspaceSession {
   deletedAt: number | null;
   sceneThumbnail?: string;
   snapshot: PersistedSnapshot;
-  [key: string]: unknown;
 }
 
 const PERSISTED_SNAPSHOT_FIELDS = [
@@ -81,7 +80,7 @@ export function prepareSessionsForStorage<T extends PersistableWorkspaceSession>
       session.sceneThumbnail.length > 160_000
         ? undefined
         : session.sceneThumbnail,
-    snapshot: prepareSnapshot(session.snapshot, tier) as T['snapshot'],
+    snapshot: prepareSnapshot(session.snapshot, tier) as unknown as T['snapshot'],
   }));
 }
 
