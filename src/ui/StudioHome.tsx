@@ -35,7 +35,7 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
   creating.current=true;
   try{
    assertLibraryReady();
-   if(!createSession(undefined,{moduleKind:kind,title:kind==='asset'?'未命名资产':'未命名场景',...(kind==='asset'?{assetCategory:'其他' as const}:{})}))throw Error('当前无法新建，请先处理存储异常');
+   if(!createSession(undefined,{moduleKind:kind,title:kind==='asset'?'未命名资产':'未命名场景',...(kind==='asset'?{assetCategory:'其他' as const}:{})}))throw Error('当前无法新建，请关闭其他标签页后刷新本页');
    setError('');onOpen();
   }catch(e){setError(e instanceof Error?e.message:'新建失败');creating.current=false;}
  }
@@ -50,7 +50,7 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
    if(!config||config.useMock||!config.baseURL.trim()||!config.apiKey.trim()||!config.model.trim()){onConfigure?.();throw Error('请先连接并选择模型，输入内容已保留');}
    if(config.agentMode!=='single'&&config.stream===false)throw Error('请在连接设置中开启流式输出，或选择单次生成模式');
    const title=draft.trim().split('\n')[0].slice(0,36)||(kind==='asset'?'参考附件资产':'参考附件场景');
-   if(!createSession(undefined,{moduleKind:kind,title, ...(kind==='asset'?{assetCategory:'其他' as const}:{})}))throw Error('当前无法新建，请先处理存储异常');
+   if(!createSession(undefined,{moduleKind:kind,title, ...(kind==='asset'?{assetCategory:'其他' as const}:{})}))throw Error('当前无法新建，请关闭其他标签页后刷新本页');
    // An explicit home submit authorizes one generation in a new project. Images stay in that project.
    useEditorStore.getState().setComposerText(draft);useEditorStore.getState().setComposerImages([...images]);
    const projectId=useEditorStore.getState().doc.projectId;
@@ -85,7 +85,7 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
     </div>
    </form>
    <p className="home-composer-note">可粘贴图片或上传参考文件，单文件最大 100 MB。生成后可先预览，再确认修改。</p>
-   {error&&<p className="resource-error" role="alert">{error}</p>}
+   {(error||workspaceError)&&<p className="resource-error" role="alert">{error||'工作区保存异常，请关闭其他标签页后刷新本页'}</p>}
    </div>
   </section>
   <aside className="home-activity" aria-label="创作状态">
@@ -102,7 +102,7 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
     <div className="home-project-filters" role="group" aria-label="项目类型筛选">{(['all','asset','scene'] as const).map(value=><button key={value} type="button" aria-pressed={filter===value} onClick={()=>setFilter(value)}>{value==='all'?'全部项目':value==='asset'?'资产':'场景'}</button>)}</div>
     <TextField.Root aria-label="搜索项目" placeholder="搜索项目名称…" value={search} onChange={e=>setSearch(e.target.value)}><TextField.Slot><MagnifyingGlassIcon/></TextField.Slot></TextField.Root>
    </div>
-   <div className="home-recent">{recent.map(s=><Card asChild key={s.id}><article><button className="home-project-link" aria-label={`继续编辑 ${s.title}`} disabled={locked} onClick={()=>{if(switchSession(s.id))onOpen();else setError('请先处理工作区保存异常');}}><ProjectThumb src={s.sceneThumbnail??items.find(a=>a.id===s.assetSource?.id)?.thumbnail} name={s.title} kind={s.moduleKind??'scene'}/><div className="home-project-caption"><h3>{s.title}</h3><p className="home-project-updated">{new Date(s.updatedAt).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} · {s.snapshot.doc.nodes.length} 个零件</p><div><Badge variant="soft" color="gray" className="home-kind">{s.moduleKind==='asset'?<CubeIcon/>:<LayersIcon/>}{s.moduleKind==='asset'?'资产':'场景'}</Badge><span>{projectLabel(s)}</span></div></div></button></article></Card>)}</div>
+   <div className="home-recent">{recent.map(s=><Card asChild key={s.id}><article><button className="home-project-link" aria-label={`继续编辑 ${s.title}`} disabled={locked} onClick={()=>{if(switchSession(s.id))onOpen();else setError('请关闭其他标签页后刷新本页');}}><ProjectThumb src={s.sceneThumbnail??items.find(a=>a.id===s.assetSource?.id)?.thumbnail} name={s.title} kind={s.moduleKind??'scene'}/><div className="home-project-caption"><h3>{s.title}</h3><p className="home-project-updated">{new Date(s.updatedAt).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} · {s.snapshot.doc.nodes.length} 个零件</p><div><Badge variant="soft" color="gray" className="home-kind">{s.moduleKind==='asset'?<CubeIcon/>:<LayersIcon/>}{s.moduleKind==='asset'?'资产':'场景'}</Badge><span>{projectLabel(s)}</span></div></div></button></article></Card>)}</div>
    {!recent.length&&<StudioEmptyState className="resource-empty home-empty" icon={<LayersIcon/>} title={projects.length?'没有找到匹配的项目':'开始你的第一个项目'} description={projects.length?'试试其他名称，或切换项目类型。':'描述你的想法让 AI 生成，也可以新建空白项目手动搭建。'}/>}
    {matching.length>12&&<p className="home-composer-note">显示最近更新的 12 个项目。可搜索名称，或前往资产库与场景库查看。</p>}
   </section>

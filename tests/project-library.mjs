@@ -33,5 +33,24 @@ try{
   fireEvent.click(ui.getByRole('button',{name:'检查团队更新',exact:true}));assert.ok(ui.getByRole('dialog'));assert.ok(ui.getByLabelText('团队账号'));fireEvent.click(ui.getByRole('button',{name:'取消',exact:true}));await waitFor(()=>assert.equal(ui.queryByRole('dialog'),null));
   fireEvent.click(ui.getByRole('button',{name:'获取新版 v3 并保留旧副本'}));assert.ok(ui.getByRole('dialog'));assert.ok(ui.getByLabelText('团队账号'));assert.match(ui.getByRole('dialog').textContent,/旧内容、修改和预览全部保留/);assert.equal((await storage.listModelAssets()).find(item=>item.id===head.id).description,'本地保留说明');
  });
+ await test('blocked library actions expose recovery guidance and keep detail actions outside the scroll body',async()=>{
+  await act(async()=>w.useWorkspaceStore.setState({error:'另一个标签页已更新会话'}));
+  for(const kind of ['asset','scene']){
+   const ui=render(React.createElement(ProjectLibrary,{kind,onOpen:()=>{throw Error('must not open');},onManage:()=>{}}));
+   await waitFor(()=>assert.ok(ui.container.querySelector('.resource-tile')));
+   fireEvent.click(ui.container.querySelector('.resource-tile'));
+   const detail=ui.getByRole('complementary',{name:kind==='asset'?'资产详情':'项目详情'});
+   assert.ok(detail.querySelector(':scope > footer .resource-detail-actions'));
+   assert.equal(detail.querySelector('.resource-detail-body .resource-detail-actions'),null);
+   for(const name of [kind==='asset'?'编辑资产':'打开场景','编辑信息','发布至团队']){
+    fireEvent.click([...detail.querySelectorAll('button')].find(button=>button.textContent===name));
+    await waitFor(()=>assert.match(detail.querySelector('[role=alert]').textContent,/关闭其他标签页.*刷新/));
+    assert.equal(ui.queryByRole('dialog'),null);
+   }
+   fireEvent.click(ui.getByRole('button',{name:`新建${kind==='asset'?'资产':'场景'}`,exact:true}));
+   await waitFor(()=>assert.match(ui.getAllByRole('alert')[0].textContent,/关闭其他标签页.*刷新/));
+   cleanup();
+  }
+ });
  console.log(count+' dedicated library workflow checks passed');
 }finally{cleanup();await server.close();dom.window.close();}

@@ -236,6 +236,7 @@ try {
   const details = renderInTheme(React.createElement(uiModule.AppUpdateDialog));
   fireEvent.click(noticeDialog.getByRole('button', {name: '查看详情'}));
   assert.ok(details.getByRole('dialog', {name: '关于与更新'}));
+  for (const selector of ['.app-update-dialog-header', '.app-update-dialog-body', '.app-update-dialog-footer']) assert.ok(details.getByRole('dialog', {name: '关于与更新'}).querySelector(selector));
   fireEvent.click(details.getByRole('button', {name: '关闭'}));
   assert.ok(notice.getByRole('dialog', {name: '应用更新'}));
   details.unmount();
