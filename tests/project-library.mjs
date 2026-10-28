@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import assert from 'node:assert/strict';import React from 'react';import {JSDOM} from 'jsdom';import {createServer} from 'vite';
 const dom=new JSDOM('<html><body></body></html>',{url:'https://example.test'});for(const n of ['window','document','HTMLElement','Node','MutationObserver','Event','MouseEvent','localStorage','Element','CustomEvent','HTMLInputElement','NodeFilter','DocumentFragment'])Object.defineProperty(globalThis,n,{value:dom.window[n],configurable:true});Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});globalThis.IS_REACT_ACT_ENVIRONMENT=true;globalThis.getComputedStyle=dom.window.getComputedStyle;globalThis.requestAnimationFrame=fn=>setTimeout(fn,0);globalThis.cancelAnimationFrame=clearTimeout;window.requestAnimationFrame=globalThis.requestAnimationFrame;window.cancelAnimationFrame=clearTimeout;globalThis.ResizeObserver=class{observe(){}unobserve(){}disconnect(){}};
-const {render:renderUI,fireEvent,waitFor,cleanup,act}=await import('@testing-library/react');const {Theme}=await import('@radix-ui/themes');const render=ui=>renderUI(ui,{wrapper:({children})=>React.createElement(Theme,null,children)});const server=await createServer({server:{middlewareMode:true},appType:'custom'});let count=0;const test=async(n,f)=>{await f();count++;console.log('PASS '+n);cleanup();};
+const {render:renderUI,fireEvent,waitFor,within,cleanup,act}=await import('@testing-library/react');const {Theme}=await import('@radix-ui/themes');const render=ui=>renderUI(ui,{wrapper:({children})=>React.createElement(Theme,null,children)});const server=await createServer({server:{middlewareMode:true},appType:'custom'});let count=0;const test=async(n,f)=>{await f();count++;console.log('PASS '+n);cleanup();};
 try{
  const {ProjectLibrary}=await server.ssrLoadModule('/src/ui/ProjectLibrary.tsx'),w=await server.ssrLoadModule('/src/workspace.ts'),{saveLibraryProject}=await server.ssrLoadModule('/src/domain/workspaceLibrary.ts'),{useEditorStore:s}=await server.ssrLoadModule('/src/store.ts'),storage=await server.ssrLoadModule('/src/domain/modelAssetStorage.ts'),{instantiateAsset}=await server.ssrLoadModule('/src/domain/modelAssets.ts');
  await w.initializeWorkspace();let opened=0,assetSession,asset;
@@ -34,17 +34,26 @@ try{
   fireEvent.click(ui.getByRole('button',{name:'获取新版 v3 并保留旧副本'}));assert.ok(ui.getByRole('dialog'));assert.ok(ui.getByLabelText('团队账号'));assert.match(ui.getByRole('dialog').textContent,/旧内容、修改和预览全部保留/);assert.equal((await storage.listModelAssets()).find(item=>item.id===head.id).description,'本地保留说明');
  });
  await test('blocked library actions expose recovery guidance and keep detail actions outside the scroll body',async()=>{
-  await act(async()=>w.useWorkspaceStore.setState({error:'另一个标签页已更新会话'}));
+  const workspaceStorage=await server.ssrLoadModule('/src/domain/workspaceStorage.ts');
+  await act(async()=>w.flushWorkspace());
+  const stored=await workspaceStorage.readWorkspace();
+  // Simulate another tab committing before this manager writes its local draft.
+  await workspaceStorage.writeWorkspace(stored,stored.revision);
+  await act(async()=>{
+   w.getSessionEditor(w.useWorkspaceStore.getState().activeId).getState().setComposerText('冲突草稿');
+   await w.flushWorkspace();
+  });
+  assert.match(w.useWorkspaceStore.getState().error,/另一个标签页/);
   for(const kind of ['asset','scene']){
    const ui=render(React.createElement(ProjectLibrary,{kind,onOpen:()=>{throw Error('must not open');},onManage:()=>{}}));
    await waitFor(()=>assert.ok(ui.container.querySelector('.resource-tile')));
    fireEvent.click(ui.container.querySelector('.resource-tile'));
-   const detail=ui.getByRole('complementary',{name:kind==='asset'?'资产详情':'项目详情'});
-   assert.ok(detail.querySelector(':scope > footer .resource-detail-actions'));
-   assert.equal(detail.querySelector('.resource-detail-body .resource-detail-actions'),null);
+   const detail=()=>ui.getByRole('complementary',{name:kind==='asset'?'资产详情':'项目详情'});
+   assert.ok(detail().querySelector(':scope > footer .resource-detail-actions'));
+   assert.equal(detail().querySelector('.resource-detail-body .resource-detail-actions'),null);
    for(const name of [kind==='asset'?'编辑资产':'打开场景','编辑信息','发布至团队']){
-    fireEvent.click([...detail.querySelectorAll('button')].find(button=>button.textContent===name));
-    await waitFor(()=>assert.match(detail.querySelector('[role=alert]').textContent,/关闭其他标签页.*刷新/));
+    fireEvent.click(within(detail()).getByRole('button',{name,exact:true}));
+    await waitFor(()=>assert.match(within(detail()).queryByRole('alert')?.textContent??'',/关闭其他标签页.*刷新/));
     assert.equal(ui.queryByRole('dialog'),null);
    }
    fireEvent.click(ui.getByRole('button',{name:`新建${kind==='asset'?'资产':'场景'}`,exact:true}));
