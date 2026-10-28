@@ -36,11 +36,18 @@ export async function readWorkspace():Promise<WorkspaceEnvelope|null>{
   tx.onabort=()=>{db.close();reject(new Error(invalid?'会话数据不完整，已有数据不会被覆盖，请从项目备份恢复。':'会话读取失败'));};
  });
 }
+function storageFailureMessage(error:DOMException|Error|null,conflict:boolean):string{
+ if(conflict)return '另一个标签页已更新会话。请先下载本页项目备份，再刷新；本页不会覆盖其他标签页的数据。';
+ if(error?.name==='QuotaExceededError')return '会话保存失败：浏览器本地存储空间已满。请下载项目备份，并清理回收站或其他浏览器数据后重试。';
+ if(error?.name==='DataCloneError')return '会话保存失败：部分数据无法写入本地存储。请下载项目备份后刷新页面。';
+ if(error?.message)return `会话保存失败：${error.message}。请下载项目备份。`;
+ return '会话保存失败，可能存储空间不足或浏览器禁止写入。请下载项目备份。';
+}
 export async function writeWorkspace(data:Omit<WorkspaceEnvelope,'revision'>,expectedRevision:number):Promise<number>{
  const sessions=data.sessions as SessionRecord[];
  if(sessions.some(s=>!s||typeof s.id!=='string'||!s.snapshot||typeof s.snapshot!=='object')||new Set(sessions.map(s=>s.id)).size!==sessions.length)throw Error('会话保存数据无效');
  const db=await openDb();return new Promise((resolve,reject)=>{
-  const tx=db.transaction(STORE,'readwrite'),target=tx.objectStore(STORE),get=target.get('current');let conflict=false;
+  const tx=db.transaction(STORE,'readwrite'),target=tx.objectStore(STORE),get=target.get('current');let conflict=false;let failure:DOMException|Error|null=null;
   const nextCache=new Map<string,Record<string,unknown>>();
   get.onsuccess=()=>{
    if((get.result?.revision??0)!==expectedRevision){conflict=true;tx.abort();return;}
@@ -65,10 +72,10 @@ export async function writeWorkspace(data:Omit<WorkspaceEnvelope,'revision'>,exp
      const key=cursor.key;if(typeof key==='string'&&key.startsWith('["session",')&&!referenced.has(key))target.delete(key);
      cursor.continue();
     };
-   }catch{tx.abort();}
+   }catch(e){failure=e instanceof Error?e:new Error(String(e));tx.abort();}
   };
   tx.oncomplete=()=>{db.close();committedRevision=expectedRevision+1;committed=nextCache;resolve(expectedRevision+1);};
-  tx.onabort=()=>{db.close();reject(new Error(conflict?'另一个标签页已更新会话。请先下载本页项目备份，再刷新；本页不会覆盖其他标签页的数据。':'会话保存失败，可能存储空间不足或浏览器禁止写入。请下载项目备份。'))};
-  tx.onerror=()=>{};
+  tx.onabort=()=>{db.close();reject(new Error(storageFailureMessage(failure,conflict)));};
+  tx.onerror=()=>{failure=tx.error??failure;};
  });
 }
