@@ -36,5 +36,16 @@ try{
  await test('stored data can hydrate in a fresh manager without losing references or draft',async()=>{await w.flushWorkspace();const fresh=await server.ssrLoadModule('/src/workspace.ts?reload-test');editor.setState({doc:createInitialDoc(),messages:[],composerText:'',composerImages:[]});await fresh.initializeWorkspace();assert.equal(editor.getState().messages[0].text,'第一台设备');assert.equal(editor.getState().composerText,'继续修改轮子');assert.equal(editor.getState().doc.nodes.length,1);assert.equal(editor.getState().aiStatus,'previewing');assert.equal(editor.getState().previewDoc.nodes.length,2);assert.equal(editor.getState().pendingBatch.incomplete,true);assert.match(editor.getState().messages.at(-1).text,/阶段草稿/);assert.equal(editor.getState().messages.find(m=>m.text==='继续调整').run.status,'stopped');assert.equal(editor.getState().messages.find(m=>m.id==='queued-guide').steering.status,'interrupted');editor.getState().discardPending();await fresh.flushWorkspace()});
  await test('atomic revision guard rejects stale tab writes instead of overwriting newer workspace',async()=>{const current=await storage.readWorkspace();await assert.rejects(()=>storage.writeWorkspace({version:1,activeId:current.activeId,sessions:[]},current.revision-1),/另一个标签页/);assert.equal((await storage.readWorkspace()).sessions.length,current.sessions.length)});
  await test('built-in module registry rejects duplicates and unknown module IDs',async()=>{const {createModuleRegistry}=await server.ssrLoadModule('/src/modules/registry.ts');const registry=createModuleRegistry();const module={id:'modeling',title:'建模',version:1,Viewport:()=>null,Objects:()=>null,Properties:()=>null,documentFormat:'chat3d-project'};registry.register(module);assert.equal(registry.get('modeling'),module);assert.throws(()=>registry.register(module));assert.throws(()=>registry.get('unknown'));assert.equal(registry.list().length,1)});
+ await test('failed stale-tab flush blocks navigation but keeps idle workspace backup available',async()=>{
+  for(const session of w.useWorkspaceStore.getState().sessions)w.getSessionEditor(session.id)?.setState({aiStatus:'idle',pendingBatch:null,pendingResult:null});
+  editor.setState({aiStatus:'idle',pendingBatch:null,pendingResult:null});
+  const current=await storage.readWorkspace();await storage.writeWorkspace(current,current.revision);
+  w.getSessionEditor(w.useWorkspaceStore.getState().activeId).getState().setComposerText('blocked tab draft');await w.flushWorkspace();
+  assert.match(w.useWorkspaceStore.getState().error,/另一个标签页/);
+  const active=w.useWorkspaceStore.getState().activeId;
+  assert.equal(w.switchSession(first),false);assert.equal(w.createSession(),false);
+  assert.equal(w.useWorkspaceStore.getState().activeId,active);
+  assert.ok(JSON.parse(w.exportWorkspaceBackup()).sessions.some(item=>item.composerText==='blocked tab draft'));
+ });
  console.log(`${count} workspace checks passed using fake IndexedDB`);
 }finally{await server.close()}

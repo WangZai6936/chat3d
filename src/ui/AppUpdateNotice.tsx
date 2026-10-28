@@ -128,9 +128,9 @@ export function AppUpdateDialog() {
   const open = useAppUpdate(s => s.panelOpen);
   return <Dialog.Root open={open} onOpenChange={next => { if (!next) closeAppUpdatePanel(); else openAppUpdatePanel(); }}>
     <Dialog.Content className="settings-module app-update-dialog" maxWidth="520px">
-      <Dialog.Title>关于与更新</Dialog.Title>
-      <Dialog.Description>查看当前版本、检查更新，并在新版本可用时一键安装。</Dialog.Description>
-      <AppUpdatePanel layout="dialog"/>
+      <header className="app-update-dialog-header"><InfoCircledIcon aria-hidden="true"/><Dialog.Title>关于与更新</Dialog.Title>
+      <Dialog.Description>查看当前版本、检查更新，并在新版本可用时一键安装。</Dialog.Description></header>
+      <div className="app-update-dialog-body"><AppUpdatePanel layout="dialog"/></div>
       <div className="app-update-dialog-footer"><Button variant="soft" color="gray" onClick={closeAppUpdatePanel}>关闭</Button></div>
     </Dialog.Content>
   </Dialog.Root>;

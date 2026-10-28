@@ -32,7 +32,7 @@ import { useEditorStore, useDisplayDoc } from './store';
 import { exportGlb } from './scene/export';
 import {openAppUpdatePanel} from './domain/appUpdateClient';
 import {Button,IconButton,Badge,DropdownMenu,Popover,Spinner} from '@radix-ui/themes';
-import {LayersIcon,ChevronDownIcon,GearIcon,CubeIcon,UploadIcon,DownloadIcon,Cross1Icon,CounterClockwiseClockIcon,ReloadIcon,MixerHorizontalIcon,ChatBubbleIcon} from '@radix-ui/react-icons';
+import {LayersIcon,ChevronDownIcon,GearIcon,InfoCircledIcon,CubeIcon,UploadIcon,DownloadIcon,Cross1Icon,CounterClockwiseClockIcon,ReloadIcon,MixerHorizontalIcon,ChatBubbleIcon} from '@radix-ui/react-icons';
 import '@radix-ui/themes/styles.css';
 import './workspace.css';
 import {TaskPanel} from './ui/TaskPanel';
@@ -77,6 +77,8 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
   const modelFileRef=useRef<HTMLInputElement>(null);
   const [projectNotice, setProjectNotice] = useState('');
+  const [conflictDismissed,setConflictDismissed]=useState(false),[backupStatus,setBackupStatus]=useState(''),[backupBusy,setBackupBusy]=useState(false);
+  async function backupConflict(){setBackupBusy(true);setBackupStatus('');try{setBackupStatus(await downloadJson(exportWorkspaceBackup(),'workspace'));}catch(e){setBackupStatus(e instanceof Error?e.message:String(e));}finally{setBackupBusy(false);}}
   const closeSaveNotice=useCallback(()=>setProjectNotice(''),[]);
   const saveNotice=isLibrarySaveNotice(projectNotice)&&!autosaveError;
   const [modulePage,setModulePage]=useState<StudioNavPage>('home');const [libraryRefresh,setLibraryRefresh]=useState(0);
@@ -141,6 +143,7 @@ export default function App() {
   const [showTools,setShowTools]=useState(false);const [showHistory,setShowHistory]=useState(false);
 
   const workspace=useWorkspaceStore();
+  useEffect(()=>{setConflictDismissed(false);setBackupStatus('');},[workspace.error]);
   const active=workspace.sessions.find(s=>s.id===workspace.activeId);
   const [showAssets,setShowAssets]=useState(false);
   const [assistantOpen,setAssistantOpen]=useState(true);
@@ -181,7 +184,8 @@ export default function App() {
 
         <AppUpdateNotice onBackup={()=>setShowTools(true)}/>
         {saveNotice&&!workspace.error&&<SaveToast message={projectNotice} onClose={closeSaveNotice}/>}
-        {(workspace.error||autosaveError||(projectNotice&&!saveNotice))&&<div role="status" className={`workspace-notice ${workspace.error||autosaveError?'is-error':''}`}><span>{workspace.error||autosaveError||projectNotice}</span>{workspace.error&&<Button size="1" variant="soft" color="gray" disabled={locked} onClick={()=>void downloadJson(exportWorkspaceBackup(),'workspace').then(setProjectNotice).catch(e=>setProjectNotice(e instanceof Error?e.message:String(e)))}>下载工作台备份</Button>}{!workspace.error&&!autosaveError&&<IconButton size="1" variant="ghost" color="gray" aria-label="关闭通知" onClick={()=>setProjectNotice('')}><Cross1Icon/></IconButton>}</div>}
+        {workspace.error&&!conflictDismissed&&<div role="alert" className="workspace-notice is-error"><div className="workspace-conflict-copy"><span>{workspace.error}</span><small>请关闭其他标签页，下载备份后刷新本页。</small>{backupStatus&&<span role="status">{backupStatus}</span>}</div><Button size="1" variant="soft" color="gray" disabled={backupBusy} onClick={()=>void backupConflict()}>下载工作台备份</Button><Button size="1" onClick={()=>window.location.reload()}>我已备份，刷新本页</Button><IconButton size="1" variant="ghost" color="gray" aria-label="隐藏冲突提示" onClick={()=>setConflictDismissed(true)}><Cross1Icon/></IconButton></div>}
+        {!workspace.error&&(autosaveError||(projectNotice&&!saveNotice))&&<div role="status" className={`workspace-notice ${autosaveError?'is-error':''}`}><span>{autosaveError||projectNotice}</span>{!autosaveError&&<IconButton size="1" variant="ghost" color="gray" aria-label="关闭通知" onClick={()=>setProjectNotice('')}><Cross1Icon/></IconButton>}</div>}
         {!workspace.ready&&<div className="workspace-loading"><Spinner size="3"/><p>正在恢复项目…</p></div>}
         {workspace.ready&&<StudioHome onTasks={()=>setTaskQueueRequest(v=>v+1)} onConfigure={()=>setShowSettings(true)} onGenerate={projectId=>setAutoStartRequest({id:makeId(),projectId})} hidden={modulePage!=='home'} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);setAssistantTab('chat');}} onLibrary={setModulePage}/>}
         {workspace.ready&&(modulePage==='asset'||modulePage==='scene')&&<ProjectLibrary key={modulePage+libraryRefresh} kind={modulePage} onOpen={()=>{setModulePage('workbench');setAssistantOpen(true);}} onManage={()=>setShowAssets(true)}/>}
@@ -191,7 +195,7 @@ export default function App() {
         {workspace.ready&&<div className={`editor-workspace ${assistantOpen?'assistant-expanded':''} ${inspectorOpen||structureOpen||shelfOpen?'editor-panel-open':''}`} hidden={modulePage!=='workbench'}>
         <header className="studio-header workbench-project-actions" hidden={modulePage!=='workbench'}>
           <IconButton className="workbench-back" variant="ghost" color="gray" aria-label="返回首页" onClick={()=>navigateStudio('home')}><ArrowLeftIcon/></IconButton>
-          <IconButton className="workbench-app-menu" variant="ghost" color="gray" aria-label="关于与更新" onClick={openAppUpdatePanel}><CubeIcon/></IconButton>
+          <IconButton className="workbench-app-menu" variant="ghost" color="gray" aria-label="关于与更新" title="关于 Scenivo 与检查更新" onClick={openAppUpdatePanel}><InfoCircledIcon/></IconButton>
           <div className="workbench-project-summary"><strong title={active?.title}>{active?.title??'未命名项目'}</strong><span className="workbench-kind-tag">{active?.moduleKind==='asset'?'资产':'场景'}</span><span className={`workbench-save-status ${workspace.error?'is-error':''}`}>{workspace.error?'本机保存异常':workspace.saving?'正在保存':'已保存到本机'}<span aria-hidden="true"> · </span>{previewing?'待确认':!active?.librarySavedAt?'草稿':active.savedRevision===revision?'已入库':'修改未入库'}</span></div>
           <div className="workbench-view-controls"/>
           <div className="workbench-document-controls"><Popover.Root><Popover.Trigger><Button variant="ghost" color="gray" aria-label="项目状态" title={active?.title}><LayersIcon/></Button></Popover.Trigger><Popover.Content className="workbench-project-info" aria-label="项目信息" side="top" align="end" sideOffset={12}>          <span className="canvas-project-title" title={active?.title}>{active?.title??'正在恢复工作台…'}</span>
