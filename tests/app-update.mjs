@@ -198,6 +198,7 @@ try {
   const notice = renderInTheme(React.createElement(uiModule.AppUpdateNotice, {onBackup: () => backups++}));
   assert.ok(within(notice.getByRole('dialog', {name: '应用更新'})).getByText('可以稍后更新'));
   assert.equal(notice.queryByRole('button', {name: `刷新到 99.0.0`}) !== null, true);
+  assert.deepEqual(within(notice.getByRole('dialog', {name: '应用更新'})).getAllByRole('button').map(button => button.textContent), ['稍后', '下载备份', '刷新到 99.0.0']);
   await act(async () => client.setAppUpdateContext({busy: true, dirty: true}));
   await waitFor(() => assert.equal(notice.queryByRole('button', {name: `刷新到 99.0.0`}), null));
   fireEvent.click(notice.getByRole('button', {name: '结束后提醒我'}));
@@ -232,9 +233,10 @@ try {
   fireEvent.click(document.querySelector('.rt-DialogOverlay'));
   assert.ok(notice.getByRole('dialog', {name: '应用更新'}));
   assert.equal(client.useAppUpdate.getState().phase, 'installing');
-  assert.deepEqual(noticeDialog.getAllByRole('button').map(button => button.textContent), ['查看详情']);
+  assert.equal(noticeDialog.queryAllByRole('button').length, 0);
+  assert.equal(notice.getByRole('dialog', {name: '应用更新'}).querySelector('.app-update-actions'), null);
   const details = renderInTheme(React.createElement(uiModule.AppUpdateDialog));
-  fireEvent.click(noticeDialog.getByRole('button', {name: '查看详情'}));
+  await act(async () => client.openAppUpdatePanel());
   assert.ok(details.getByRole('dialog', {name: '关于与更新'}));
   const aboutDialog = details.getByRole('dialog', {name: '关于与更新'});
   for (const selector of ['.app-update-dialog-header', '.app-update-dialog-heading', '.app-update-dialog-body', '.app-update-dialog-footer']) assert.ok(aboutDialog.querySelector(selector));
