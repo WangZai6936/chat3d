@@ -7,14 +7,12 @@
 .settings-row .app-update-progress{margin-top:10px;max-width:100%}
 .settings-refresh .app-update-progress-track{background:var(--gray-5)}
 .settings-refresh .app-update-progress-percent{color:var(--gray-11)}
-.app-update-notice{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:10px 16px;background:#243044;color:#d5deea;border-bottom:1px solid #52647d55;font-size:12px;line-height:1.55}
-.app-update-notice[hidden]{display:none}
+.app-update-notice.rt-DialogContent{padding:24px;border-radius:var(--sc-radius-lg,16px);border:1px solid var(--sc-border-subtle,var(--gray-6));box-shadow:var(--sc-shadow-float,0 16px 48px var(--gray-a5))}
+.app-update-notice .app-update-copy{display:flex;flex-direction:column;gap:10px;font-size:14px;line-height:1.65;color:var(--gray-11)}
 .app-update-notice p{margin:0}
-.app-update-notice strong{font-weight:650}
-.app-update-copy{min-width:0}
-.app-update-actions{display:flex;flex-wrap:wrap;gap:8px;flex-shrink:0}
-.app-update-notice .rt-Button{min-height:30px}
-@media(max-width:760px){.app-update-notice{align-items:flex-start;flex-direction:column}}
+.app-update-notice strong{font-weight:650;color:var(--gray-12)}
+.app-update-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-top:20px}
+.app-update-notice .rt-Button{min-height:32px}
 .app-update-primary-action{min-height:36px!important;padding-left:16px!important;padding-right:16px!important;font-weight:650}
 .app-update-panel{display:flex;flex-direction:column;gap:12px;width:100%}
 .app-update-panel-lead,.app-update-release-notes,.app-update-status{margin:0;font-size:13px;line-height:1.65;color:var(--gray-10)}
