@@ -21,18 +21,27 @@ function Shot($name) {
  $b=New-Object System.Drawing.Bitmap($r.Width,$r.Height); $g=[System.Drawing.Graphics]::FromImage($b)
  try { $g.CopyFromScreen($r.Location,[System.Drawing.Point]::Empty,$r.Size); $b.Save((Join-Path $out "$name.png")) } finally { $g.Dispose();$b.Dispose() }
 }
-function Find-Control($name,[switch]$AllowDisabled) {
+function Find-Control($name,[switch]$AllowDisabled,[switch]$NamePrefixMatch) {
  $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$name)
  for($i=0;$i -lt 30;$i++) {
   $found=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
   if($found -and ($AllowDisabled -or $found.Current.IsEnabled)){return $found}
+  if($NamePrefixMatch) {
+   $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+   $found=$all | Where-Object {
+    $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and
+    $_.Current.Name.StartsWith($name) -and
+    ($AllowDisabled -or $_.Current.IsEnabled)
+   } | Select-Object -First 1
+   if($found){return $found}
+  }
   Start-Sleep -Milliseconds 500
  }
  throw "UI control not found: $name"
 }
-function Click-Control($name) {
+function Click-Control($name,[switch]$NamePrefixMatch) {
  Write-Host "Click UI: $name"
- $element=Find-Control $name
+ $element=Find-Control $name -NamePrefixMatch:$NamePrefixMatch
  try { $point=$element.GetClickablePoint() } catch { $element.SetFocus();Start-Sleep -Milliseconds 300;$point=$element.GetClickablePoint() }
  Write-Host "Pointer target $name at $($point.X),$($point.Y), type $($element.Current.ControlType.ProgrammaticName)"
  [SmokeMouse]::SetCursorPos([int]$point.X,[int]$point.Y) | Out-Null
@@ -111,7 +120,7 @@ try {
  Shot 'ui-backup-saved';Dump-Controls 'ui-backup-controls'
  $checks.Add(@{name='real backup button writes two distinct valid JSON files';pass=$true;files=$saved})
  [System.Windows.Forms.SendKeys]::SendWait('{ESC}');Start-Sleep -Seconds 1
- Click-Control '连接模型'
+ Click-Control '连接模型' -NamePrefixMatch
  Set-Input 'API 根地址' 'https://smoke-test.invalid/v1'
  Set-Input 'API Key' 'smoke-test-not-a-secret'
  Click-Control '服务不提供列表？手动填写模型名'
