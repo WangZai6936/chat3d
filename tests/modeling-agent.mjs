@@ -23,8 +23,8 @@ try{
  const opts=(transport,document=createInitialDoc())=>({text:'按参考图建模',config:cfg,document,selection:[],images:[picture],streamFn:transport.fn,capture:async()=>picture});
  await test('task budgets normalize invalid input and preserve bounded defaults',async()=>{
   const {normalizeTaskBudget,taskBudgetReason}=await server.ssrLoadModule('/src/ai/taskBudget.ts');
-  assert.deepEqual(normalizeTaskBudget(),{maxMinutes:30,maxRounds:80,maxReportedTokens:3000000});
-  assert.deepEqual(normalizeTaskBudget({maxMinutes:Infinity,maxRounds:0,maxReportedTokens:NaN}),{maxMinutes:30,maxRounds:1,maxReportedTokens:3000000});
+  assert.deepEqual(normalizeTaskBudget(),{maxMinutes:10,maxRounds:24,maxReportedTokens:500000});
+  assert.deepEqual(normalizeTaskBudget({maxMinutes:Infinity,maxRounds:0,maxReportedTokens:NaN}),{maxMinutes:10,maxRounds:1,maxReportedTokens:500000});
   assert.match(taskBudgetReason(normalizeTaskBudget(),1800000,0,0),/分钟上限/);
  });
  await test('productive task stops at configured round cap and keeps an incomplete atomic draft',async()=>{

@@ -1,9 +1,14 @@
 /** Per-invocation limits. Token usage is provider-reported, not a billing guarantee. */
 export interface TaskBudget { maxMinutes:number; maxRounds:number; maxReportedTokens:number }
-export const DEFAULT_TASK_BUDGET:TaskBudget={maxMinutes:30,maxRounds:80,maxReportedTokens:3_000_000};
+export const TASK_BUDGET_PRESETS = {
+  small: {maxMinutes:5,maxRounds:12,maxReportedTokens:150_000},
+  standard: {maxMinutes:10,maxRounds:24,maxReportedTokens:500_000},
+  extended: {maxMinutes:30,maxRounds:80,maxReportedTokens:3_000_000},
+} as const;
+export const DEFAULT_TASK_BUDGET:TaskBudget={...TASK_BUDGET_PRESETS.standard};
 export function normalizeTaskBudget(value?:Partial<TaskBudget>):TaskBudget {
   const integer=(v:unknown,fallback:number,min:number,max:number)=>typeof v==='number'&&Number.isFinite(v)?Math.max(min,Math.min(max,Math.floor(v))):fallback;
-  return {maxMinutes:integer(value?.maxMinutes,30,1,120),maxRounds:integer(value?.maxRounds,80,1,200),maxReportedTokens:integer(value?.maxReportedTokens,3_000_000,1,20_000_000)};
+  return {maxMinutes:integer(value?.maxMinutes,DEFAULT_TASK_BUDGET.maxMinutes,1,120),maxRounds:integer(value?.maxRounds,DEFAULT_TASK_BUDGET.maxRounds,1,200),maxReportedTokens:integer(value?.maxReportedTokens,DEFAULT_TASK_BUDGET.maxReportedTokens,1,20_000_000)};
 }
 export function taskBudgetReason(budget:TaskBudget,elapsedMs:number,rounds:number,reportedTokens:number,beforeRequest=false):string {
   if(elapsedMs>=budget.maxMinutes*60_000)return `达到本次任务 ${budget.maxMinutes} 分钟上限，已暂停并保留未验收草稿`;

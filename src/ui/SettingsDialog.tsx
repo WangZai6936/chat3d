@@ -1,4 +1,5 @@
-import {normalizeTaskBudget} from '../ai/taskBudget';
+import {modelConfigStorageError} from '../ai/modelConfigStorage';
+import {normalizeTaskBudget,TASK_BUDGET_PRESETS} from '../ai/taskBudget';
 import {SiteAccessRecovery} from './SiteAccessRecovery';
 import {AGENT_LIMITS} from '../ai/agentPolicy';
 import {Dialog} from '@radix-ui/themes';
@@ -10,6 +11,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const config = useEditorStore((s) => s.aiConfig);
   const [baseURL, setBaseURL] = useState(config?.baseURL ?? 'https://api.openai.com/v1');
   const [apiKey, setApiKey] = useState(config?.apiKey ?? '');
+  const [rememberApiKey,setRememberApiKey]=useState(config?.rememberApiKey===true);
   const [model, setModel] = useState(config?.model ?? '');
   const [agentMode, setAgentMode] = useState<'pi'|'single'>(config?.agentMode ?? 'pi');
   const [taskBudget,setTaskBudget]=useState(()=>normalizeTaskBudget(config?.taskBudget));
@@ -19,7 +21,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState('');
   const [manual, setManual] = useState(false);
   const [fetching, setFetching] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(modelConfigStorageError()??'');
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ok:boolean;text:string}|null>(null);
   const sequence = useRef(0);
@@ -67,8 +69,11 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   };
   const save = () => {
     if (!valid) return;
-    const cfg: ModelConfig = {generationQuality:useEditorStore.getState().aiConfig?.generationQuality==='fast'?'fast':'fine',taskBudget:normalizeTaskBudget(taskBudget),baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode,parallelDrafts:agentMode==='pi'&&parallelDrafts};
-    useEditorStore.getState().setAiConfig(cfg); onClose();
+    const cfg: ModelConfig = {rememberApiKey,generationQuality:useEditorStore.getState().aiConfig?.generationQuality==='fast'?'fast':'fine',taskBudget:normalizeTaskBudget(taskBudget),baseURL:baseURL.trim(),apiKey:apiKey.trim(),model:model.trim(),useMock:false,stream,agentMode,parallelDrafts:agentMode==='pi'&&parallelDrafts};
+    useEditorStore.getState().setAiConfig(cfg);
+    const storageFailure=modelConfigStorageError();
+    if(storageFailure){setError(storageFailure);return;}
+    onClose();
   };
   const shown = (models ?? []).filter((id) => id.toLowerCase().includes(query.toLowerCase()));
   const originBlocked = error.includes('origin not allowed');
@@ -82,7 +87,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         <p className="text-sm text-gray-400">1. 填写接口和密钥　2. 获取并选择模型　3. 保存配置（可先测试连接）</p>
         <label className="block text-sm space-y-1"><span>API 根地址</span><input className={inputClass} type="url" value={baseURL} onChange={(e)=>{invalidate();setBaseURL(e.target.value);setApiKey('')}} onBlur={()=>void load(false)} placeholder="https://你的服务/v1" /><span className="block text-xs text-gray-400">填写到 /v1 或服务提供的 API 根路径，不要包含 /models 或 /chat/completions。更换地址后请重新输入对应密钥，避免将旧密钥发送给新服务</span></label>
         <label className="block text-sm space-y-1"><span>API Key</span><input className={inputClass} type="password" autoComplete="off" value={apiKey} onChange={(e)=>{invalidate();setApiKey(e.target.value)}} onBlur={()=>void load(false)} placeholder="填写服务提供的密钥" /></label>
-        <p className="text-xs text-amber-200">密钥以明文保存在当前浏览器，请使用专用低额度密钥。支持自定义公网 HTTPS API。</p>
+        <label className="flex gap-2 text-sm"><input type="checkbox" checked={rememberApiKey} onChange={e=>setRememberApiKey(e.target.checked)}/><span>在此设备记住密钥<span className="block text-xs text-gray-400">默认仅本次会话使用，刷新或关闭后需重新输入。勾选后会以明文保存在本机浏览器中，请仅在可信设备使用。</span></span></label>
         <div className="space-y-3">
           <button onClick={()=>void load()} disabled={!ready || fetching} className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded text-sm">{fetching ? '正在获取模型列表…' : models?.length ? '重新获取模型列表' : '获取可用模型'}</button>
           <SiteAccessRecovery error={error}/>
@@ -97,6 +102,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         </div>
         <details className="rounded border border-white/10 p-3 text-sm"><summary className="cursor-pointer">高级设置 · 执行方式与流式输出</summary><div className="mt-3 space-y-3">        <label className="block text-sm space-y-1"><span>建模执行方式</span><select aria-label="建模执行方式" className={inputClass} value={agentMode} onChange={e=>{setAgentMode(e.target.value as 'pi'|'single');if(e.target.value==='pi')setStream(true);}}><option value="pi">连续建模（推荐）</option><option value="single">单次生成（兼容模式）</option></select><span className="block text-xs text-gray-400">连续建模需要模型支持图片、工具调用与流式输出；在任务预算内有有效进展就继续，到限后保留未验收草稿。连续 {AGENT_LIMITS.noProgressTurns} 轮无进展或 {AGENT_LIMITS.consecutiveErrorTurns} 轮工具失败且无进展会暂停；连续 {AGENT_LIMITS.idleTimeoutMs/60000} 分钟无活动会停止。每轮最多 {AGENT_LIMITS.outputPerTurn} 输出 Token。会将场景截图发送至你配置的同一接口，实际费用以网关为准。</span></label>
         <fieldset disabled={agentMode!=='pi'} className="space-y-2 rounded border border-white/10 p-3"><legend>每次建模任务预算</legend>
+          <div className="flex gap-2" role="group" aria-label="预算预设">{([['small','小改动'],['standard','常规建模'],['extended','复杂场景']] as const).map(([key,label])=><button key={key} type="button" className="px-3 py-1 rounded border border-white/10" aria-pressed={taskBudget.maxMinutes===TASK_BUDGET_PRESETS[key].maxMinutes&&taskBudget.maxRounds===TASK_BUDGET_PRESETS[key].maxRounds&&taskBudget.maxReportedTokens===TASK_BUDGET_PRESETS[key].maxReportedTokens} onClick={()=>setTaskBudget({...TASK_BUDGET_PRESETS[key]})}>{label}</button>)}</div>
           <label className="block">时间上限（分钟）<input aria-label="任务时间上限（分钟）" type="number" min="1" max="120" className={inputClass} value={taskBudget.maxMinutes} onChange={e=>setTaskBudget(b=>({...b,maxMinutes:Number(e.target.value)}))}/></label>
           <label className="block">模型请求轮数上限<input aria-label="任务轮数上限" type="number" min="1" max="200" className={inputClass} value={taskBudget.maxRounds} onChange={e=>setTaskBudget(b=>({...b,maxRounds:Number(e.target.value)}))}/></label>
           <label className="block">已报告 Token 上限<input aria-label="任务已报告Token上限" type="number" min="1" max="20000000" className={inputClass} value={taskBudget.maxReportedTokens} onChange={e=>setTaskBudget(b=>({...b,maxReportedTokens:Number(e.target.value)}))}/></label>

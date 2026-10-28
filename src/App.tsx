@@ -30,7 +30,6 @@ const ObjectTree=modelingModule.Objects;
 const PropertiesPanel=modelingModule.Properties;
 import { useEditorStore, useDisplayDoc } from './store';
 import { exportGlb } from './scene/export';
-import {exportHtml} from './scene/exportHtml';
 import {openAppUpdatePanel} from './domain/appUpdateClient';
 import {Button,IconButton,Badge,DropdownMenu,Popover,Spinner} from '@radix-ui/themes';
 import {LayersIcon,ChevronDownIcon,GearIcon,CubeIcon,UploadIcon,DownloadIcon,Cross1Icon,CounterClockwiseClockIcon,ReloadIcon,MixerHorizontalIcon,ChatBubbleIcon} from '@radix-ui/react-icons';
@@ -99,7 +98,9 @@ export default function App() {
     setExporting(true);
     try {
       const state=useEditorStore.getState(),title=useWorkspaceStore.getState().sessions.find(s=>s.id===useWorkspaceStore.getState().activeId)?.title??'Scenivo 模型';
-      const html=await exportHtml(structuredClone(state.doc),title);
+      const snapshot=structuredClone(state.doc);
+      const {exportHtml}=await import('./scene/exportHtml');
+      const html=await exportHtml(snapshot,title);
       const url=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'}));
       const link=document.createElement('a');link.href=url;link.download=`scenivo-${state.doc.projectId.slice(0,8)}.html`;
       document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);

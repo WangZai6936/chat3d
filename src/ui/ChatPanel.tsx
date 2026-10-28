@@ -145,7 +145,7 @@ export function ChatPanel({onConfigure,onAssets,canvasMode=false,expanded=true,o
         {onAssets&&<button className="chat-starter" onClick={onAssets}>从资产库开始 <span>↗</span></button>}
         <p className="chat-welcome-note">参考图用于近似重建，背面与真实尺寸需要补充说明。</p>
       </div>}
-      {(!aiConfig || aiConfig.useMock)&&<div className="chat-connect-notice"><span>连接模型，开始创作<br/><small>手动编辑、保存与导出始终可用</small></span><button onClick={onConfigure}>连接模型 ↗</button></div>}
+      {(!aiConfig || aiConfig.useMock || !aiConfig.apiKey)&&<div className="chat-connect-notice"><span>连接模型，开始创作<br/><small>手动编辑、保存与导出始终可用</small></span><button onClick={onConfigure}>连接模型 ↗</button></div>}
       {messages.filter(m=>!m.queuedTask).map(m=><div key={m.id}><div className={`chat-message-row ${m.role==='user'?'is-user':'is-assistant'} flex ${m.role==='user'?'justify-end':'justify-start'}`}>
         {canvasMode&&<span className={`chat-avatar ${m.role}`} aria-hidden="true">{m.role==='user'?<PersonIcon/>:<ChatBubbleIcon/>}</span>}
         <div className={`chat-message ${m.role==='user'?'chat-message-user':'chat-message-assistant'} max-w-[94%] rounded-xl px-3 py-2.5 text-sm leading-relaxed ${m.role==='user'?'bg-blue-600 text-white':m.error?'bg-red-950/50 border border-red-500/30 text-red-200':'bg-[#2c323b]'}`}>

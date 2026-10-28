@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Instancing parity</title></head><body><script type="module">
+import * as THREE from 'three';
+import {InstancedRender} from '/src/scene/instancedRender.ts';
+import {rectangleObjectIds} from '/src/scene/rectangleSelection.ts';
+const renderer=new THREE.WebGLRenderer({antialias:false,preserveDrawingBuffer:true});renderer.setSize(640,400);document.body.append(renderer.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color('#e6e8ec');
+const camera=new THREE.PerspectiveCamera(40,640/400,.1,200);camera.position.set(22,25,32);camera.lookAt(9.5,0,9.5);
+const geometry=new THREE.BoxGeometry(.7,1,.7),material=new THREE.MeshStandardMaterial({color:'#326fbd',roughness:.6});
+scene.add(new THREE.HemisphereLight(0xffffff,0x667788,3));const light=new THREE.DirectionalLight(0xffffff,2);light.position.set(5,20,10);scene.add(light);
+const meshes=Array.from({length:400},(_,i)=>{const m=new THREE.Mesh(geometry,material);m.position.set(i%20,0,Math.floor(i/20));m.rotation.y=i*.1;scene.add(m);return m;});
+const pixels=()=>{const gl=renderer.getContext(),p=new Uint8Array(640*400*4);gl.readPixels(0,0,640,400,gl.RGBA,gl.UNSIGNED_BYTE,p);return p;};
+const batch=new InstancedRender(scene);
+function compare(){
+ renderer.render(scene,camera);const before=pixels(),beforeCalls=renderer.info.render.calls;
+ batch.render(()=>renderer.render(scene,camera));const after=pixels(),afterCalls=renderer.info.render.calls;
+ let total=0,max=0;for(let i=0;i<before.length;i++){const d=Math.abs(before[i]-after[i]);total+=d;max=Math.max(max,d);}
+ return {beforeCalls,afterCalls,meanPixelDifference:total/before.length,maxPixelDifference:max};
+}
+batch.rebuild(meshes);const initial=compare();meshes[0].position.y=2;meshes[1].visible=false;const edited=compare();
+const selected=rectangleObjectIds(meshes.map((mesh,i)=>({id:String(i),object:mesh})),camera,{left:-1,right:1,top:1,bottom:-1},false,{through:false,renderer});
+renderer.shadowMap.enabled=true;light.castShadow=true;light.shadow.camera.left=-25;light.shadow.camera.right=25;light.shadow.camera.top=25;light.shadow.camera.bottom=-25;light.shadow.camera.far=80;
+meshes.forEach(m=>{m.castShadow=true;m.receiveShadow=true;});
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(60,60),new THREE.MeshStandardMaterial({color:'#dddddd'}));floor.rotation.x=-Math.PI/2;floor.position.y=-.5;floor.receiveShadow=true;scene.add(floor);
+batch.rebuild(meshes);const shadow=compare();
+window.testResult={initial,edited,shadow,selected: selected.length,includesHidden:selected.includes('1'),restored:meshes[0].visible&&!meshes[1].visible};
+</script></body></html>

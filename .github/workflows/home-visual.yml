@@ -5,6 +5,7 @@ on:
     paths:
       - 'src/**'
       - 'tests/visual/**'
+      - 'tests/instancing-browser.mjs'
       - '.github/workflows/home-visual.yml'
   workflow_dispatch:
 permissions:
@@ -22,6 +23,7 @@ jobs:
       - run: npm ci
       - run: node node_modules/playwright-core/cli.js install --with-deps chromium
       - run: node tests/visual/home-browser.mjs
+      - run: node tests/instancing-browser.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

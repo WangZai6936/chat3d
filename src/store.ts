@@ -1,4 +1,5 @@
-import {normalizeTaskBudget} from './ai/taskBudget';
+import {loadModelConfig,saveModelConfig} from './ai/modelConfigStorage';
+export {loadModelConfig} from './ai/modelConfigStorage';
 // 编辑器状态 — Zustand（React UI 外壳与 Three.js 视口共享的储物间）
 // - SceneDocument 是唯一可信来源；UI 状态（选择/面板）与项目状态（几何/层级/材质）分开
 // - 一次 AI 批量修改 = 一条历史记录；拖动手柄松开时提交一条
@@ -139,22 +140,7 @@ function pushHistory(past: HistoryEntry[], entry: HistoryEntry): HistoryEntry[] 
   return next;
 }
 
-// 模型配置持久化：localStorage（桌面单用户应用；API Key 明文本地存储，
-// P3 可升级到系统密钥链 / Tauri Stronghold）
-const CONFIG_KEY = 'chat3d.modelConfig';
 import type { ModelConfig } from './ai/provider';
-export function loadModelConfig(): ModelConfig | null {
-  try {
-    const s = localStorage.getItem(CONFIG_KEY);
-    if (!s) return null;
-    const c = JSON.parse(s) as Partial<ModelConfig>;
-    if (c.useMock === true) return null;
-    if (typeof c.baseURL !== 'string' || typeof c.apiKey !== 'string' || typeof c.model !== 'string') return null;
-    return { generationQuality:c.generationQuality==='fast'?'fast':'fine', taskBudget:normalizeTaskBudget(c.taskBudget), baseURL: c.baseURL, apiKey: c.apiKey, model: c.model, agentMode: c.agentMode === 'single' ? 'single' : 'pi', parallelDrafts: c.parallelDrafts === true, stream: c.stream !== false, useMock: false };
-  } catch {
-    return null;
-  }
-}
 
 const restoredProject = loadAutosave();
 const EDIT_LOCKED = new Set<AiTaskStatus>(['capturing', 'context', 'generating', 'validating', 'previewing', 'applying']);
@@ -184,12 +170,7 @@ export const createEditorStore = (initial: Partial<EditorState> = {}) => create<
 
   setAiConfig: (cfg) => {
     set({ aiConfig: cfg });
-    try {
-      if (cfg) localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
-      else localStorage.removeItem(CONFIG_KEY);
-    } catch {
-      // 存储失败不阻塞使用
-    }
+    saveModelConfig(cfg);
   },
   aiError: null,
   displayUnit: 'm',

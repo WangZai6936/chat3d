@@ -24,6 +24,14 @@ try {
  assert.equal(ui.getByRole('button',{name:'保存配置'}).disabled,false);
  fireEvent.click(ui.getByRole('button',{name:'保存配置'}));
  assert.equal(store.getState().aiConfig.model,'model-a');console.log('PASS URL/key discovers models and selection saves under StrictMode');passed++;cleanup();
+ assert.equal(JSON.parse(localStorage.getItem('chat3d.modelConfig')).apiKey,undefined);
+ ui=mount();credentials(ui);await waitFor(()=>assert.equal(ui.getByRole('combobox',{name:'选择模型'}).options.length,3));
+ fireEvent.change(ui.getByRole('combobox',{name:'选择模型'}),{target:{value:'model-a'}});
+ assert.equal(ui.getByRole('checkbox',{name:/在此设备记住密钥/}).checked,false);
+ fireEvent.click(ui.getByRole('checkbox',{name:/在此设备记住密钥/}));ui.getByText('高级设置 · 执行方式与流式输出').closest('details').open=true;fireEvent.click(ui.getByRole('button',{name:'小改动'}));
+ assert.equal(ui.getByLabelText('任务轮数上限').value,'12');fireEvent.click(ui.getByRole('button',{name:'保存配置'}));
+ assert.equal(JSON.parse(localStorage.getItem('chat3d.modelConfig')).apiKey,'test-key-only');assert.equal(store.getState().aiConfig.taskBudget.maxReportedTokens,150000);
+ console.log('PASS explicit credential opt-in and bounded task preset persist together');passed++;cleanup();
  handler=async()=>new Response(JSON.stringify({error:'origin not allowed'}),{status:403});
  ui=mount();credentials(ui);await waitFor(()=>assert.ok(ui.getByRole('alert').textContent.includes('origin not allowed')));
  assert.equal(ui.queryByText('服务不提供列表？手动填写模型名'),null);assert.equal(ui.getByRole('button',{name:'保存配置'}).disabled,true);console.log('PASS origin rejection does not suggest manual bypass');passed++;cleanup();

@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import {createServer} from 'vite';
+import {Scene, BoxGeometry, MeshStandardMaterial, Mesh, Matrix4, Raycaster, Vector3} from 'three';
+const server=await createServer({server:{middlewareMode:true},appType:'custom'});
+try {
+  const {InstancedRender}=await server.ssrLoadModule('/src/scene/instancedRender.ts');
+  const scene=new Scene(),geometry=new BoxGeometry(),material=new MeshStandardMaterial();
+  const sources=Array.from({length:400},(_,i)=>{const mesh=new Mesh(geometry,material);mesh.position.x=i*2;mesh.rotation.y=i*.1;mesh.userData.nodeId='node-'+i;scene.add(mesh);return mesh;});
+  const batches=new InstancedRender(scene);batches.rebuild(sources);
+  const batch=scene.children.find(o=>o.isInstancedMesh);
+  assert.ok(batch);assert.equal(batch.visible,false);
+  batches.render(()=>{assert.equal(batch.count,400);assert.equal(batch.visible,true);assert.ok(sources.every(s=>!s.visible));assert.equal(scene.children.filter(o=>o.isMesh&&o.visible).length,1);});
+  assert.ok(sources.every(s=>s.visible));assert.equal(batch.visible,false);
+  const version=batch.instanceMatrix.version;
+  batches.render(()=>{});assert.equal(batch.instanceMatrix.version,version,'camera-only redraw does not upload instance transforms');
+  sources[0].position.set(900,0,0);sources[1].visible=false;sources[2].scale.x=-1;
+  batches.render(()=>{assert.equal(batch.count,398);assert.equal(sources[2].visible,true);const m=new Matrix4();batch.getMatrixAt(0,m);assert.equal(m.elements[12],900);assert.ok(batch.boundingBox.max.x>=900);});
+  assert.equal(sources[1].visible,false);
+  assert.throws(()=>batches.render(()=>{throw Error('context lost');}),/context lost/);
+  assert.equal(sources[0].visible,true);assert.equal(sources[1].visible,false);assert.equal(batch.visible,false);
+  scene.updateMatrixWorld(true);
+  const hit=new Raycaster(new Vector3(900,0,5),new Vector3(0,0,-1)).intersectObjects(sources,false)[0];
+  assert.equal(hit.object.userData.nodeId,'node-0','picking retains the original node ID');
+  let disposed=0;geometry.addEventListener('dispose',()=>disposed++);material.addEventListener('dispose',()=>disposed++);
+  batches.dispose();assert.equal(disposed,0);assert.equal(scene.children.length,400);
+  material.transparent=true;batches.rebuild(sources);assert.equal(scene.children.length,400,'transparent objects keep per-object sorting');
+  material.transparent=false;batches.rebuild(sources.slice(0,5));assert.equal(scene.children.length,400,'small groups remain normal meshes');
+  batches.dispose();geometry.dispose();material.dispose();
+  console.log('PASS instancing reduces 400 draw objects to 1, preserves picking, transforms, hidden/mirrored nodes and failure cleanup');
+} finally {await server.close();}

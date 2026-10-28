@@ -18,6 +18,7 @@ import { GenerationProgress, readChatResponse } from './stream';
 export interface ModelConfig {
   baseURL: string; // 如 https://api.openai.com/v1
   apiKey: string;
+  rememberApiKey?: boolean; // Explicit opt-in; otherwise the key stays in memory.
   model: string; // 如 gpt-4o-mini
   agentMode?: 'pi' | 'single';
   generationQuality?: GenerationQuality; // 缺省为精细；独立于模型、代理模式和预算

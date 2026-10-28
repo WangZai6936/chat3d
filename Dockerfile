@@ -11,6 +11,7 @@ COPY --from=build /app/dist-team ./dist-team
 COPY --from=build /app/dist-team-web ./dist-team-web
 COPY --from=build /app/node_modules/ipaddr.js ./node_modules/ipaddr.js
 COPY server ./server
+COPY shared ./shared
 ENV HOST=0.0.0.0 PORT=1420
 EXPOSE 1420
 RUN mkdir -p /data && chown node:node /data && chmod 700 /data

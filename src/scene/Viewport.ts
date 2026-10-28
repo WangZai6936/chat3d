@@ -1,4 +1,5 @@
 import {ManualInteraction,type CompositionInteraction} from './manualInteraction';
+import {InstancedRender} from './instancedRender';
 import {rectangleObjectIds} from './rectangleSelection';
 import {materialReady,disposeMaterialTextures} from './surfaceTextures';
 import {createAnimationEvaluator} from '../domain/animation';
@@ -22,6 +23,7 @@ interface NodeResources {
 }
 
 export class Viewport {
+  private instancedRender:InstancedRender|null=null;
   private composition:ManualInteraction|null=null;
   setComposition(config:CompositionInteraction|null){if(!this.composition)this.composition=new ManualInteraction(this.renderer.domElement,this.scene,this.camera,()=>this.nodeMap,()=>{this.selectionHelpers.forEach(h=>h.update());this.markDirty();});this.composition.set(config);}
   private renderer: THREE.WebGLRenderer;
@@ -331,6 +333,7 @@ export class Viewport {
     this.cancelPointerGesture?.();
     this.frameMaterialKeys.clear();
     if(doc===this.lastSyncedDoc)return;
+    this.instancedRender?.dispose();
     this.frameMaterialsById = new Map(doc.materials.map(m => [m.id, m]));
     if(!this.animationClock)this.animationClock=new AnimationClock();
     this.animationClock.configure(doc.animation?.duration,doc.animation?.loop);
@@ -351,6 +354,8 @@ export class Viewport {
     const geometries=new Set([...this.nodeMap.values()].map(v=>v.geometry)),materials=new Set([...this.nodeMap.values()].map(v=>v.material));
     for(const [key,g] of this.sharedGeometryCache)if(!geometries.has(g)){g.dispose();this.sharedGeometryCache.delete(key);}
     for(const [key,m] of this.materialCache)if(!materials.has(m)){disposeMaterialTextures(m);this.materialCache.delete(key);}
+    this.instancedRender??=new InstancedRender(this.scene);
+    this.instancedRender.rebuild([...this.nodeMap].filter(([id])=>!animatedIds.has(id)).map(([,res])=>res.mesh));
     this.lastSyncedDoc=doc;
     this.notifyPlayback();
     if(firstContent||!this.nodeMap.size)this.frameScene();
@@ -480,6 +485,7 @@ export class Viewport {
   fitToScene(): void { this.frameScene(); this.markDirty(); }
 
   private disposeAllNodes(): void {
+    this.instancedRender?.dispose();this.instancedRender=null;
     this.clearSelectionHelpers();
     for (const [, res] of this.nodeMap) {
       this.scene.remove(res.mesh);
@@ -502,7 +508,8 @@ export class Viewport {
       this.camera.updateProjectionMatrix();
       this.renderer.setSize(w, h, false);
     }
-    this.renderer.render(this.scene, this.camera);
+    const draw=()=>this.renderer.render(this.scene, this.camera);
+    if(this.instancedRender)this.instancedRender.render(draw);else draw();
   }
 
   // 按需渲染循环：静态场景不持续刷新
