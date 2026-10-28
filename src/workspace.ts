@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { useEditorStore, createEditorStore, setWorkspacePersistenceActive, createInitialDoc, type EditorState, type EditorStore } from './store';
 import {bindConversationStore} from './conversationStores';
 import { parseProject, serializeProject } from './domain/project';
+import { isQuotaExceededError, prepareSessionsForStorage, requestDurableBrowserStorage, storageReclaimNotice, type WorkspaceStorageTier } from './domain/workspacePersist';
 import { readWorkspace, writeWorkspace } from './domain/workspaceStorage';
 import { makeId } from './util/ids';
 
@@ -21,7 +22,7 @@ const busy=anySessionRunning;
 const snapshot=(s:EditorState=useEditorStore.getState()):Snapshot=>{return {doc:s.doc,messages:s.messages,selection:s.selection,dirty:s.dirty,past:s.past,future:s.future,composerText:s.composerText,composerImages:s.composerImages,lastRun:s.lastRun,pendingBatch:s.pendingBatch,pendingResult:s.pendingResult,wasRunning:['capturing','context','generating','validating','applying'].includes(s.aiStatus)}};
 const fresh=():Snapshot=>({doc:createInitialDoc(),messages:[],selection:[],dirty:false,past:[],future:[],composerText:'',composerImages:[],lastRun:null,pendingBatch:null,pendingResult:null,wasRunning:false});
 const record=(snap:Snapshot,title='新建会话'):WorkspaceSession=>({id:makeId(),title,autoTitle:title==='新建会话',createdAt:Date.now(),updatedAt:Date.now(),deletedAt:null,snapshot:snap});
-let hydrating=false, revision=0, pending=false, saving=false, blocked=false;
+let hydrating=false, revision=0, pending=false, saving=false, blocked=false, reclaimNotice:string|null=null;
 let timer:ReturnType<typeof setTimeout>|undefined;
 let initialized:Promise<void>|null=null;
 let waiters:(()=>void)[]=[];
@@ -57,16 +58,30 @@ function schedule(progressOnly=false){
   if(progressOnly&&timer)return;
   if(timer)clearTimeout(timer);timer=setTimeout(()=>void flushWorkspace(),progressOnly?5000:250);
 }
+async function persistWorkspace(tiers:WorkspaceStorageTier[]):Promise<{tier:WorkspaceStorageTier;notice:string|null}>{
+ const w=useWorkspaceStore.getState();let lastError:unknown;
+ for(const tier of tiers){
+  try{
+   revision=await writeWorkspace({version:1,activeId:w.activeId,sessions:prepareSessionsForStorage(w.sessions,tier)},revision);
+   return {tier,notice:storageReclaimNotice(tier)};
+  }catch(e){lastError=e;if(!isQuotaExceededError(e))throw e;}
+ }
+ throw lastError;
+}
 export async function flushWorkspace():Promise<void>{
   if(timer)clearTimeout(timer);timer=undefined;
   if(saving)return new Promise<void>(resolve=>waiters.push(resolve));
   if(blocked||!pending)return;
   saving=true;pending=false;
-  const w=useWorkspaceStore.getState();
-  try{revision=await writeWorkspace({version:1,activeId:w.activeId,sessions:w.sessions},revision);setWorkspacePersistenceActive(true);useWorkspaceStore.setState({error:null});}
-  catch(e){blocked=true;pending=false;useWorkspaceStore.setState({error:e instanceof Error?e.message:'会话保存失败'});}
+  try{
+   const result=await persistWorkspace(['normal','strip-images','omit-trashed']);
+   setWorkspacePersistenceActive(true);reclaimNotice=result.notice;
+   useWorkspaceStore.setState({error:result.notice});
+  }
+  catch(e){blocked=true;pending=false;reclaimNotice=null;useWorkspaceStore.setState({error:e instanceof Error?e.message:'会话保存失败'});}
   finally{saving=false;useWorkspaceStore.setState({saving:pending});if(pending)await flushWorkspace();else {const done=waiters;waiters=[];done.forEach(resolve=>resolve());}}
 }
+export function workspaceReclaimNotice(){return reclaimNotice;}
 function validate(raw:unknown):WorkspaceSession{
   const s=raw as WorkspaceSession;
   if(!s||typeof s.id!=='string'||typeof s.title!=='string'||!s.snapshot||!Array.isArray(s.snapshot.messages))throw new Error('会话数据格式不正确');
@@ -82,6 +97,7 @@ export function initializeWorkspace():Promise<void>{
   if(initialized)return initialized;
   initialized=(async()=>{
     try{
+      await requestDurableBrowserStorage();
       const stored=await readWorkspace();
       if(stored){
         if(stored.version!==1||!Array.isArray(stored.sessions))throw new Error('会话数据版本不受支持，请先备份本页项目');
