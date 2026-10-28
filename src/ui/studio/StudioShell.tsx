@@ -28,11 +28,11 @@ export function StudioShell({activePage,onNavigate,disabled,taskQueueRequest,onT
     <Button variant="ghost" color="gray" className="studio-nav-item" aria-label="任务记录" disabled={disabled} aria-current={activePage==='tasks'?'page':undefined} onClick={onTaskHistory}><ClockIcon/><span>任务记录</span></Button>
     <Button variant="ghost" color="gray" className="studio-nav-item" aria-label="设置" disabled={disabled} aria-current={activePage==='settings'?'page':undefined} onClick={()=>onNavigate('settings')}><GearIcon/><span>设置</span></Button>
    </div>
-   <div className="studio-sidebar-footer"><AppUpdateNavEntry disabled={disabled} layout="sidebar"/><div className="studio-local-note"><span>S</span><div><strong>本地工作空间</strong><small>数据保存在当前设备</small></div></div></div>
+   <div className="studio-sidebar-footer"><AppUpdateNavEntry disabled={disabled} layout="sidebar"/><div className="studio-local-note"><div><strong>本地工作空间</strong><small>数据保存在当前设备</small></div></div></div>
   </nav>
   <header className={`studio-global-header ${activePage==='workbench'?'workbench-global-header':''}`}>
    {activePage!=='workbench'&&<div className="studio-breadcrumb"><RowsIcon/><span/>工作空间<ChevronRightIcon/><strong>{PAGE_LABELS[activePage]}</strong></div>}
-   <div className="studio-global-utilities"><TaskQueue openRequest={taskQueueRequest} disabled={disabled} onOpen={onTaskOpen} onHistory={onTaskHistory}/><AppearanceMenu/>{activePage!=='workbench'&&<span className="studio-user-avatar" aria-hidden="true">S</span>}</div>
+   <div className="studio-global-utilities"><TaskQueue openRequest={taskQueueRequest} disabled={disabled} onOpen={onTaskOpen} onHistory={onTaskHistory}/><AppearanceMenu/></div>
   </header>
  </>;
 }

@@ -2,7 +2,7 @@ import {prepareReference,isReferenceImage,attachmentInfo,MAX_ATTACHMENT_BYTES} f
 import {HomeTasks} from './HomeTasks';
 import {Button,Card,Badge,TextArea,Dialog} from '@radix-ui/themes';
 import {useEffect,useRef,useState} from 'react';
-import {CubeIcon,LayersIcon,ArrowRightIcon,PlusIcon,ArrowUpIcon,Cross1Icon,ImageIcon,ChatBubbleIcon} from '@radix-ui/react-icons';
+import {CubeIcon,LayersIcon,ArrowRightIcon,PlusIcon,ArrowUpIcon,Cross1Icon,ImageIcon} from '@radix-ui/react-icons';
 import {createSession,switchSession,useWorkspaceStore} from '../workspace';
 import {useEditorStore} from '../store';
 import {listModelAssets} from '../domain/modelAssetStorage';
@@ -53,7 +53,6 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
   </header>
   <section className="home-creation" aria-labelledby="home-create-title">
    <div className="home-creation-copy">
-    <span className="home-creation-icon" aria-hidden="true"><ChatBubbleIcon/></span>
     <h2 id="home-create-title">开始一个新项目</h2>
     <p>描述你想创建的内容，或添加参考附件。</p>
     <div className="home-kind-switch" role="group" aria-label="新项目类型"><button type="button" aria-pressed={kind==='asset'} onClick={()=>setKind('asset')}><CubeIcon/>资产</button><button type="button" aria-pressed={kind==='scene'} onClick={()=>setKind('scene')}><LayersIcon/>场景</button></div>
@@ -65,12 +64,12 @@ export function StudioHome({onOpen,onLibrary,onGenerate,onConfigure,onTasks,hidd
     {!!images.length&&<div className="home-reference-images">{images.map((image,i)=><div key={i}>{isReferenceImage(image)?<button type="button" aria-label={`预览首页参考附件 ${i+1}`} onClick={()=>setPreview(image)}><img src={image} alt={`首页参考附件 ${i+1}`}/></button>:<span>{attachmentInfo(image).name}</span>}<Button type="button" variant="ghost" color="gray" aria-label={`移除首页参考附件 ${i+1}`} onClick={()=>setImages(old=>old.filter((_,j)=>i!==j))}><Cross1Icon/></Button></div>)}</div>}
     <div className="home-composer-actions">
      <input ref={fileRef} type="file" multiple hidden onChange={e=>{const files=Array.from(e.target.files??[]);e.target.value='';void addImages(files);}}/>
-     <Button type="button" className="home-add-image" aria-label={imageBusy?'正在处理参考附件':'添加参考附件'} title="添加参考附件（每个附件100MB以内）" variant="ghost" color="gray" disabled={imageBusy} onClick={()=>fileRef.current?.click()}><ImageIcon/><span>{imageBusy?'处理中':'参考附件'}</span>{images.length>0&&<span className="attachment-count">{images.length}</span>}</Button>
+     <Button type="button" className="home-add-image" aria-label={imageBusy?'正在处理参考附件':'添加参考附件'} title="添加参考附件（不限类型与数量，单文件100MB以内）" variant="ghost" color="gray" disabled={imageBusy} onClick={()=>fileRef.current?.click()}><ImageIcon/><span>{imageBusy?'处理中':'参考附件'}</span>{images.length>0&&<span className="attachment-count">{images.length}</span>}</Button>
      <div className="composer-spacer"/><QualityPicker forNewProject onConfigure={onConfigure}/><ModelPicker forNewProject onConfigure={onConfigure}/>
      <Button className="primary home-start composer-send" aria-label="开始生成" title="开始生成" type="submit" disabled={locked||imageBusy||(!draft.trim()&&!images.length)}><span>开始生成</span><ArrowUpIcon/></Button>
     </div>
    </form>
-   <p className="home-composer-note">支持粘贴参考附件 · 每个附件100MB以内 · 连接模型后开始生成，配置时保留输入</p>
+   <p className="home-composer-note">支持粘贴参考附件 · 不限类型与数量 · 单文件100MB以内 · 连接模型后开始生成，配置时保留输入</p>
    {error&&<p className="resource-error" role="alert">{error}</p>}
    </div>
   </section>
