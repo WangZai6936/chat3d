@@ -1,3 +1,4 @@
+import {isReferenceImage,referenceText} from '../domain/referenceAttachments';
 import {createStore} from 'zustand/vanilla';
 import {buildSceneContext,generateBatch,type ModelConfig} from '../ai/provider';
 import type {AgentActivity,AgentResult,AgentControl} from '../ai/modelingAgent';
@@ -81,16 +82,16 @@ function createConversationController(editor:EditorStore) {
     const text = input.trim();
     if (!text && !attachments.length) return;
     if(runningRef.current){
-      if(sendMode==='later'){const id=store().addUserMessage(text||'请根据参考图建模',[...attachments]);editor.setState(state=>({messages:state.messages.map(m=>m.id===id?{...m,queuedTask:{status:'waiting' as const}}:m)}));setInput('');setAttachments([]);setNotice('');return;}
+      if(sendMode==='later'){const id=store().addUserMessage(text||'请根据参考附件建模',[...attachments]);editor.setState(state=>({messages:state.messages.map(m=>m.id===id?{...m,queuedTask:{status:'waiting' as const}}:m)}));setInput('');setAttachments([]);setNotice('');return;}
       if(!controlRef.current){setNotice('当前请求暂不能接收引导，输入已保留；可停止后继续');return;}
-      const id=store().addUserMessage(text||'请根据补充参考图调整',[...attachments]);markSteering(id,'queued');
-      try{if(!controlRef.current.steer(id,text||'请根据补充参考图调整',[...attachments],sendMode)){editor.setState(state=>({messages:state.messages.filter(m=>m.id!==id)}));setNotice('当前任务已收尾，输入已保留，请直接发送下一条');return;}}catch{markSteering(id,'interrupted');setNotice('补充要求未送达，输入已保留');return;}
+      const id=store().addUserMessage(text||'请根据补充参考附件调整',[...attachments]);markSteering(id,'queued');
+      try{if(!controlRef.current.steer(id,referenceText(text||'请根据补充参考附件调整',attachments),attachments.filter(isReferenceImage),sendMode)){editor.setState(state=>({messages:state.messages.filter(m=>m.id!==id)}));setNotice('当前任务已收尾，输入已保留，请直接发送下一条');return;}}catch{markSteering(id,'interrupted');setNotice('补充要求未送达，输入已保留');return;}
       setInput('');setAttachments([]);setNotice('补充要求已排队，当前操作结束后接收');return;
     }
     const sourceConfig = options.config===undefined?useEditorStore.getState().aiConfig:options.config;
     const cfg=sourceConfig?structuredClone(sourceConfig):null;
     if(!cfg || cfg.useMock || !cfg.baseURL.trim() || !cfg.apiKey.trim() || !cfg.model.trim()) {
-      setNotice('请先打开顶部“模型配置”，获取并选择模型；指令和图片已保留'); return;
+      setNotice('请先打开顶部“模型配置”，获取并选择模型；指令和附件已保留'); return;
     }
     const usePi = cfg.agentMode !== 'single';
     if(usePi && cfg.stream === false) { setNotice('Pi 分步建模需要流式输出，请在模型配置中开启；也可选择单次生成兼容模式'); return; }
@@ -107,16 +108,17 @@ function createConversationController(editor:EditorStore) {
     if(!parent){store().setPendingBatch(null);store().setPendingResult(null);}
     setRunPi(usePi); setAgentActivity(null);store().setLastRun(null);
     const sentImages = [...attachments];
-    // Current reference stays visible in the conversation; a follow-up may reuse the latest image.
+    // Current reference stays visible in the conversation; a follow-up may reuse the latest references.
     const reference = sentImages.length ? sentImages : reuseReference ? [...messages].reverse().find(m=>m.role==='user' && !m.queuedTask && m.images?.length)?.images ?? [] : [];
-    const images = reference;
-    const history = messages.filter(m=>m.role!=='system' && !m.error && !m.queuedTask).map(m=>({role:m.role as 'user'|'assistant',text:m.batch ? `${m.text}\n[${m.outcome==='applied'?'已应用':m.outcome==='discarded'?'已放弃，不要视作已存在':m.outcome==='superseded'?'已合并到后续草稿':'仅预览'}]` : m.text}));
+    const images = reference.filter(isReferenceImage);
+    const modelText = referenceText(text,reference);
+    const history = messages.filter(m=>m.role!=='system' && !m.error && !m.queuedTask).map(m=>({role:m.role as 'user'|'assistant',text:m.batch ? `${m.text}\n[${m.outcome==='applied'?'已应用':m.outcome==='discarded'?'已放弃，不要视作已存在':m.outcome==='superseded'?'已合并到后续草稿':'仅预览'}]` : referenceText(m.text,m.images??[])}));
     const myRun = ++runRef.current;
     const alive = () => myRun === runRef.current;
     runningRef.current = true; 
     setInput(''); setAttachments([]); setNotice(''); setLastRequest({text, images:sentImages});
     setStarted(Date.now()); setProgress(null);
-    runMessageId.current=store().addUserMessage(text || '请根据参考图建模', sentImages);
+    runMessageId.current=store().addUserMessage(text || '请根据参考附件建模', sentImages);
     ui.setState({runMessageId:runMessageId.current});
     store().updateMessageRun(runMessageId.current,{startedAt:Date.now(),status:'running',generationQuality:cfg.generationQuality==='fast'?'fast':'fine',mode:usePi?'pi':'single'});
     store().setAiError(null); store().setAiStatus('capturing');
@@ -147,14 +149,14 @@ function createConversationController(editor:EditorStore) {
       if(usePi) {
         const {runModelingAgent} = await import('../ai/modelingAgent');
         if(!alive()) return;
-        const generated = await runModelingAgent({text,config:cfg,document:working,qualityBaseline:parent?original:working,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:isIsolatedCaptureAvailable,captureEvidence:captureIsolatedSceneEvidence,
+        const generated = await runModelingAgent({text:modelText,config:cfg,document:working,qualityBaseline:parent?original:working,selection:selectedIds,images,history,signal:controller.signal,editScope,captureAvailable:isIsolatedCaptureAvailable,captureEvidence:captureIsolatedSceneEvidence,
           onControl:control=>{if(alive()){controlRef.current=control;setCanSteer(!!control);if(!control)clearControl();}},
           onSteeringApplied:id=>{if(alive()){markSteering(id,'received');setNotice('补充要求已送入模型上下文');}},
           onCheckpoint:cp=>{if(alive()){const combined=continueDraft(original,parent,cp.batch,cp.result);checkpointRef.current={...cp,...combined};editor.setState({pendingBatch:combined.batch,pendingResult:combined.result});}},
           onActivity:event=>{if(alive()){armTimeout();setAgentActivity(event);if(Date.now()-lastActivitySave>=1000||/暂停|中断|工具失败/.test(event.title)){store().setLastRun(event);if(runMessageId.current)store().updateMessageRun(runMessageId.current,{activity:event});lastActivitySave=Date.now();}if(checkpointRef.current)checkpointRef.current.activity=event;}},onPreview:document=>{if(alive())store().setPreviewDoc(document);}});
         batch=generated.batch;prepared=generated.result;if(alive()){setAgentActivity(generated.activity);store().setLastRun(generated.activity);}
       } else {
-        const generated = await generateBatch(text+`\n本次编辑范围约束：${JSON.stringify(editScope)}。${editScope.nodeIds?'只允许修改范围内对象；allowAssemblyAdditions=true时可给完整组件追加部件，不能新增其他组件或改范围外对象。':'允许编辑全场景。高亮对象只是指代参考，不是权限边界，不能因此拒绝其他对象的修改。'}${editScope.lockPlacement?'保留所有已有位置与朝向。':'遵守用户描述中的布局和局部修改要求。'}`, cfg, ctx, controller.signal, images, history, event => { if(alive()) setProgress(event); });
+        const generated = await generateBatch(modelText+`\n本次编辑范围约束：${JSON.stringify(editScope)}。${editScope.nodeIds?'只允许修改范围内对象；allowAssemblyAdditions=true时可给完整组件追加部件，不能新增其他组件或改范围外对象。':'允许编辑全场景。高亮对象只是指代参考，不是权限边界，不能因此拒绝其他对象的修改。'}${editScope.lockPlacement?'保留所有已有位置与朝向。':'遵守用户描述中的布局和局部修改要求。'}`, cfg, ctx, controller.signal, images, history, event => { if(alive()) setProgress(event); });
         batch = {requestId:makeId(),projectId,baseRevision,selectedIds,summary:generated.summary,operations:generated.operations};
       }
       batch.editScope=editScope;
@@ -185,7 +187,7 @@ function createConversationController(editor:EditorStore) {
     const message=store().messages.find(m=>m.id===id&&m.queuedTask?.status==='waiting');
     if(!message||!controlRef.current||!runningRef.current)return;
     editor.setState(state=>({messages:state.messages.map(item=>{if(item.id!==id)return item;const {queuedTask,...rest}=item;return {...rest,steering:{runId:runMessageId.current??'',status:'queued' as const}};})}));
-    try{if(!controlRef.current.steer(id,message.text,message.images??[],mode))throw Error('当前任务已收尾，请稍后发送');}
+    try{if(!controlRef.current.steer(id,referenceText(message.text,message.images??[]),(message.images??[]).filter(isReferenceImage),mode))throw Error('当前任务已收尾，请稍后发送');}
     catch(error){editor.setState(state=>({messages:state.messages.map(item=>item.id===id?message:item)}));setNotice(error instanceof Error?error.message:'引导未送达，消息仍在队列中');}
   };
   const removeQueued=(id:string)=>{editor.setState(state=>({messages:state.messages.map(m=>m.id===id&&m.queuedTask?.status==='waiting'?{...m,queuedTask:{status:'cancelled' as const}}:m)}));ui.setState({removedQueueId:id});};

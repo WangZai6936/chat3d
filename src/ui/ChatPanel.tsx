@@ -1,3 +1,4 @@
+import {prepareReference,isReferenceImage,attachmentInfo,MAX_ATTACHMENT_BYTES} from '../domain/referenceAttachments';
 import {Button,TextArea,DropdownMenu} from '@radix-ui/themes';
 import {PlusIcon,ArrowUpIcon,StopIcon,ImageIcon,PersonIcon,ChatBubbleIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon} from '@radix-ui/react-icons';
 import {SiteAccessRecovery} from './SiteAccessRecovery';
@@ -14,7 +15,6 @@ import {activeConversationStore} from '../conversationStores';
 import {conversationController} from '../runtime/conversationController';
 export {REQUEST_TIMEOUT_MS} from '../runtime/conversationController';
 
-const MAX_IMAGES = 4;
 export async function compressImage(file: File | Blob): Promise<string> {
   const bitmap = await createImageBitmap(file);
   const maxSide = 1024;
@@ -88,13 +88,11 @@ export function ChatPanel({onConfigure,onAssets,canvasMode=false,expanded=true,o
     const imgs: string[] = [];
     try {
       for (const f of files) {
-        if (attachments.length + imgs.length >= MAX_IMAGES) { setNotice(`每条指令最多 ${MAX_IMAGES} 张参考图`); break; }
-        if (!f.type.startsWith('image/')) continue;
-        if (f.size > 20*1024*1024) { setNotice('单张图片不能超过 20 MB'); continue; }
-        imgs.push(await compressImage(f));
+        if (f.size > MAX_ATTACHMENT_BYTES) { setNotice('单个附件不能超过 100 MB'); continue; }
+        try { imgs.push(await prepareReference(f,compressImage)); } catch { setNotice('附件处理失败，请重新选择'); }
       }
-      if (aliveRef.current) setAttachments(prev => [...prev, ...imgs].slice(0,MAX_IMAGES));
-    } catch { if(aliveRef.current) setNotice('图片处理失败，请换一张图片重试'); }
+      if (aliveRef.current) setAttachments(prev => [...prev, ...imgs]);
+    } catch { if(aliveRef.current) setNotice('附件处理失败，请重新选择'); }
     finally { imageBusyRef.current = false; if(aliveRef.current) setImageBusy(false); }
   };
   const send=async(mode:'guide'|'question'|'later'='guide')=>{
@@ -140,7 +138,7 @@ export function ChatPanel({onConfigure,onAssets,canvasMode=false,expanded=true,o
       {!messages.length && <div className="chat-welcome text-sm text-gray-400 py-5 leading-relaxed">
         <span className="chat-welcome-mark" aria-hidden="true"><ChatBubbleIcon/></span>
         <p className="chat-welcome-title">{doc.nodes.length?'让模型更进一步。':'把想法，变成立体。'}</p>
-        <p>{doc.nodes.length?'描述你想改变的地方，或选择对象精确调整。每次修改都会先预览，由你决定是否应用。':'告诉我用途、尺寸和你在意的细节，也可以上传参考图，一起完成你的第一个模型。'}</p>
+        <p>{doc.nodes.length?'描述你想改变的地方，或选择对象精确调整。每次修改都会先预览，由你决定是否应用。':'告诉我用途、尺寸和你在意的细节，也可以上传参考附件，一起完成你的第一个模型。'}</p>
         <div className="chat-starter-label">从这里开始</div>
         <button className="chat-starter" onClick={()=>setInput('创建一个长 1.2 米、宽 0.8 米、高 0.75 米的工作台')}>创建一个有明确尺寸的工作台 <span>↗</span></button>
         {!doc.nodes.length&&<button className="chat-starter" onClick={()=>setInput('创建一个小型仓储场景，包含货架、周转箱和一条清晰通道；先给出布局和尺寸假设，再生成可编辑模型')}>组合一个场景 <span>↗</span></button>}
@@ -152,7 +150,7 @@ export function ChatPanel({onConfigure,onAssets,canvasMode=false,expanded=true,o
         {canvasMode&&<span className={`chat-avatar ${m.role}`} aria-hidden="true">{m.role==='user'?<PersonIcon/>:<ChatBubbleIcon/>}</span>}
         <div className={`chat-message ${m.role==='user'?'chat-message-user':'chat-message-assistant'} max-w-[94%] rounded-xl px-3 py-2.5 text-sm leading-relaxed ${m.role==='user'?'bg-blue-600 text-white':m.error?'bg-red-950/50 border border-red-500/30 text-red-200':'bg-[#2c323b]'}`}>
           <div className="text-[10px] opacity-60 mb-1">{m.role==='user'?'你':'Scenivo'} · {new Date(m.createdAt).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</div>
-          {!!m.images?.length && <div className="flex flex-wrap gap-2 mb-2">{m.images.map((src,i)=><button key={i} onClick={()=>setImageView(src)} title="放大参考图"><img src={src} alt={`参考图 ${i+1}`} className="w-20 h-16 rounded object-cover"/></button>)}</div>}
+          {!!m.images?.length && <div className="flex flex-wrap gap-2 mb-2">{m.images.map((src,i)=>isReferenceImage(src)?<button key={i} onClick={()=>setImageView(src)} title="放大参考图"><img src={src} alt={`参考图 ${i+1}`} className="w-20 h-16 rounded object-cover"/></button>:<span key={i} className="rounded border p-2">{attachmentInfo(src).name}</span>)}</div>}
           {m.role==='assistant'&&m.error?<><MessageText text={m.text.includes('倒角半径')?'零件倒角超出尺寸限制，生成已暂停。请恢复指令后重试。':'本次生成未完成，请查看错误详情。'}/>{!(aiError&&m.text.includes(aiError))&&<details><summary>错误详情</summary><MessageText text={m.text}/></details>}</>:m.role==='assistant'&&m.batch?<ResultMessage text={m.text}/>:<MessageText text={m.text}/>}
           {m.queuedTask&&<div className="mt-2 text-xs">{m.queuedTask.status==='waiting'?'后续任务 · 尚未执行':'后续任务 · 已放入输入框，尚未发送'}<button disabled={busy} className="ml-2 underline disabled:opacity-40" onClick={()=>{if(input.trim()||attachments.length){setNotice('请先处理输入框中的内容');return;}setInput(m.text);setAttachments(m.images??[]);editor.setState(state=>({messages:state.messages.map(item=>item.id===m.id?{...item,queuedTask:{status:'prepared' as const}}:item)}));inputRef.current?.focus();}}>准备发送</button></div>}
           {m.steering&&<div className="mt-1 text-xs opacity-75">{m.steering.status==='queued'?'补充要求 · 等待接收':m.steering.status==='received'?'补充要求 · 已送入模型上下文':'补充要求 · 未送达，可重新发送'}{m.steering.status==='interrupted'&&<button className="ml-2 underline" onClick={()=>{if(input.trim()||attachments.length){setNotice('请先处理输入框中的内容，再恢复补充要求');return;}setInput(m.text);setAttachments(m.images??[]);inputRef.current?.focus();}}>恢复补充要求</button>}</div>}
@@ -171,7 +169,7 @@ export function ChatPanel({onConfigure,onAssets,canvasMode=false,expanded=true,o
     {newMessages && <button className="text-xs text-blue-300 py-1" onClick={()=>{stickRef.current=true;setNewMessages(false);if(scrollRef.current)scrollRef.current.scrollTop=scrollRef.current.scrollHeight;}}>查看最新消息 ↓</button>}
     {notice && <div role="status" className="px-3 py-2 text-xs text-amber-200">{notice}</div>}
     {busy && agentActivity && (agentActivity.inputTokens+agentActivity.outputTokens>=100000 || elapsed>=300) && <p role="status" className="px-3 pb-2 text-xs text-amber-300">任务耗时较长，详情见任务记录。可随时停止并保留已生成草稿。</p>}
-    {!!attachments.length && <div className="flex gap-2 p-2 flex-wrap">{attachments.map((src,i)=><div key={i} className="relative"><button onClick={()=>setImageView(src)}><img src={src} alt={`待发送参考图 ${i+1}`} className="w-16 h-14 rounded object-cover"/></button><button aria-label={`移除参考图 ${i+1}`} onClick={()=>setAttachments(prev=>prev.filter((_,j)=>i!==j))} className="absolute -top-1 -right-1 rounded-full bg-red-600 w-5 h-5 text-xs">×</button></div>)}</div>}
+    {!!attachments.length && <div className="flex gap-2 p-2 flex-wrap">{attachments.map((src,i)=><div key={i} className="relative">{isReferenceImage(src)?<button onClick={()=>setImageView(src)}><img src={src} alt={`待发送参考图 ${i+1}`} className="w-16 h-14 rounded object-cover"/></button>:<span className="inline-block rounded border p-3">{attachmentInfo(src).name}</span>}<button aria-label={`移除参考附件 ${i+1}`} onClick={()=>setAttachments(prev=>prev.filter((_,j)=>i!==j))} className="absolute -top-1 -right-1 rounded-full bg-red-600 w-5 h-5 text-xs">×</button></div>)}</div>}
     {doc.nodes.length>0&&<details className="scope-disclosure" open={!canvasMode}><summary hidden={!canvasMode}>修改范围：{scopeMode==='selection'?'仅选中对象':'全场景'}</summary><fieldset disabled={busy} className="edit-scope-controls mx-3 mb-2 space-y-2 text-xs text-gray-200 disabled:opacity-50"><label className="flex items-center justify-between gap-2">修改范围<select aria-label="对话修改范围" value={scopeMode} onChange={e=>setScopeMode(e.target.value as 'scene'|'selection')} className="rounded bg-[#252A31] border border-white/20 px-2 py-1"><option value="scene">全场景</option><option value="selection">仅选中对象（{selection.length}）</option></select></label><p>{scopeMode==='selection'?(selection.length?`仅允许修改选中的 ${selection.length} 个零件；其他对象受保护。`:'请先在对象列表中选择对象，再发送指令。'):'可以修改全场景；选中对象仅用于指代，仍遵守指令中的局部限制。'}</p><details><summary>更多修改选项</summary><label className="flex gap-2 items-center mt-2"><input type="checkbox" checked={lockPlacement} onChange={e=>setLockPlacement(e.target.checked)}/>锁定已有对象的位置与朝向</label></details></fieldset></details>}
     {canvasMode&&!expanded&&previewing&&<div className="canvas-preview-strip"><span>修改结果待确认</span><button onClick={onExpand}>查看详情</button><button disabled={compareBefore} onClick={commit}>应用修改</button><button onClick={discard}>放弃修改</button></div>}
     {canvasMode&&!expanded&&busy&&<div className="canvas-preview-strip"><span>正在处理 · {{idle:'就绪',capturing:'检查画面',context:'准备上下文',generating:'生成中',validating:'校验修改',applying:'应用修改',previewing:'待确认',error:'失败',cancelled:'已停止'}[aiStatus]}</span><button onClick={onExpand}>查看过程</button></div>}
@@ -183,15 +181,15 @@ export function ChatPanel({onConfigure,onAssets,canvasMode=false,expanded=true,o
 
       <div className="composer-input-shell">
       <TextArea ref={inputRef} value={input} onChange={e=>setInput(e.target.value)} aria-label="建模指令" rows={canvasMode?4:3}
-        onPaste={e=>{const items=Array.from(e.clipboardData.items).filter(it=>it.type.startsWith('image/'));if(items.length){e.preventDefault();void addImages(items.map(it=>it.getAsFile()).filter((f): f is File=>!!f));}}}
+        onPaste={e=>{const items=Array.from(e.clipboardData.items).filter(it=>it.kind==='file');if(items.length){e.preventDefault();void addImages(items.map(it=>it.getAsFile()).filter((f): f is File=>!!f));}}}
         onCompositionStart={()=>composingRef.current=true} onCompositionEnd={()=>composingRef.current=false}
         onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!composingRef.current&&!e.nativeEvent.isComposing){e.preventDefault();void send(busy?'later':'guide');}}}
         placeholder={busy ? canSteer?'输入后发送到上方队列，可选择引导当前任务…':'正在准备，可先输入补充要求…' : previewing?'继续描述调整要求，将修改当前预览…': '描述结构、尺寸与需要修改的细节…'}
         className="w-full bg-black/20 border border-white/15 rounded-lg p-3 text-sm resize-none focus:outline-none focus:border-blue-400"/>
       </div>
       <div className="composer-toolbar">
-        <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={e=>{void addImages(Array.from(e.target.files??[]));e.target.value='';}}/>
-        <DropdownMenu.Root><DropdownMenu.Trigger><Button type="button" variant="ghost" color="gray" aria-label="添加与参考图选项" title="添加参考图与图片选项" className="composer-icon"><PlusIcon/>{attachments.length>0&&<span className="attachment-count">{attachments.length}</span>}</Button></DropdownMenu.Trigger><DropdownMenu.Content className="composer-action-menu" align="start" side="top" color="gray"><DropdownMenu.Item disabled={imageBusy||attachments.length>=MAX_IMAGES} onSelect={()=>fileRef.current?.click()}><ImageIcon/>{imageBusy?'正在处理参考图':'添加参考图'}</DropdownMenu.Item>{!attachments.length&&messages.some(m=>m.images?.length)&&<><DropdownMenu.Separator/><DropdownMenu.CheckboxItem checked={reuseReference} onCheckedChange={setReuseReference}>沿用最近参考图</DropdownMenu.CheckboxItem></>}<DropdownMenu.Label>最多4张 · 每张20MB以内</DropdownMenu.Label></DropdownMenu.Content></DropdownMenu.Root>
+        <input ref={fileRef} type="file" multiple className="hidden" onChange={e=>{void addImages(Array.from(e.target.files??[]));e.target.value='';}}/>
+        <DropdownMenu.Root><DropdownMenu.Trigger><Button type="button" variant="ghost" color="gray" aria-label="添加与参考附件选项" title="添加参考附件与附件选项" className="composer-icon"><PlusIcon/>{attachments.length>0&&<span className="attachment-count">{attachments.length}</span>}</Button></DropdownMenu.Trigger><DropdownMenu.Content className="composer-action-menu" align="start" side="top" color="gray"><DropdownMenu.Item disabled={imageBusy} onSelect={()=>fileRef.current?.click()}><ImageIcon/>{imageBusy?'正在处理参考附件':'添加参考附件'}</DropdownMenu.Item>{!attachments.length&&messages.some(m=>m.images?.length)&&<><DropdownMenu.Separator/><DropdownMenu.CheckboxItem checked={reuseReference} onCheckedChange={setReuseReference}>沿用最近参考附件</DropdownMenu.CheckboxItem></>}<DropdownMenu.Label>每个附件100MB以内</DropdownMenu.Label></DropdownMenu.Content></DropdownMenu.Root>
         <QualityPicker onConfigure={onConfigure}/><div className="composer-spacer"/><ModelPicker onConfigure={onConfigure}/>
         {busy&&(!!input.trim()||!!attachments.length)&&<Button variant="solid" className="composer-send is-running" aria-label="停止生成" title="停止当前任务，保留输入和已生成草稿" onClick={cancel}><StopIcon/></Button>}<Button key={busy&&!input.trim()&&!attachments.length?'stop-current':'send-message'} variant="solid" onClick={()=>busy&&!input.trim()&&!attachments.length?cancel():void send(busy?'later':'guide')} disabled={imageBusy||(!busy&&!input.trim()&&!attachments.length)} className={`composer-send ${busy?'is-running':''}`} aria-label={busy&&!input.trim()&&!attachments.length?'停止生成':busy?'加入消息队列':'发送'} title={busy&&!input.trim()&&!attachments.length?'停止当前任务，保留已生成草稿':busy?'加入上方消息队列，可引导或移除':'发送（Enter发送，Shift+Enter换行）'}>{busy&&!input.trim()&&!attachments.length?<StopIcon/>:<ArrowUpIcon/>}</Button>
 
