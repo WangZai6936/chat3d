@@ -1,5 +1,5 @@
-/* Library captures use a 4:3 camera. Keep that frame everywhere so the
-   same model has the same framing, rather than letterboxing or zooming it. */
+/* Captures use a 4:3 camera. Most surfaces preserve that frame; library
+   tiles use square previews with contain to keep the full model visible. */
 .canvas-studio.frosted-studio .home-project-link > img,
 .canvas-studio.frosted-studio .home-project-link > .resource-no-thumb,
 .canvas-studio.frosted-studio .resource-tile > img,
@@ -36,6 +36,12 @@
 .canvas-studio.frosted-studio.manager-mode .home-featured-choices img,
 .canvas-studio.frosted-studio.manager-mode .home-featured-choices .resource-no-thumb {
   border-radius: 0;
+}
+/* Library grid only: keep square previews separate from details and lists. */
+.canvas-studio.frosted-studio .resource-layout-grid .resource-tile > img,
+.canvas-studio.frosted-studio .resource-layout-grid .resource-tile > .resource-no-thumb {
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
 }
 .canvas-studio.frosted-studio .resource-layout-list .resource-tile > img,
 .canvas-studio.frosted-studio .resource-layout-list .resource-tile > .resource-no-thumb {
