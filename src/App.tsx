@@ -117,7 +117,7 @@ export default function App() {
     try {
       const doc = useEditorStore.getState().doc;
       const message=await exportFile(serializeProject(doc),'json',`scenivo-${doc.projectId.slice(0,8)}.chat3d.json`);
-      if(message)setExportNotice({message});
+      if(message){useEditorStore.getState().markSaved();setExportNotice({message});}
     } catch (e) { setExportNotice({message:`项目下载失败：${e instanceof Error ? e.message : String(e)}`}); }
     finally{setExporting(false);}
   };
