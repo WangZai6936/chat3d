@@ -73,6 +73,7 @@ export function AppUpdateBanner({view, onLater, onRemind, onApply, onBackup, onR
 
 export function AppUpdateNotice({onBackup}: {onBackup: () => void}) {
   const state = useAppUpdate();
+  if (state.panelOpen) return null;
   return <AppUpdateBanner view={appUpdateView(state)} onLater={dismissUpdate} onRemind={remindUpdateAfterTask} onApply={() => void applyAppUpdate()} onBackup={onBackup} onRestart={() => void relaunchInstalledUpdate()}/>;
 }
 

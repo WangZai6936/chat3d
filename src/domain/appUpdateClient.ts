@@ -232,7 +232,7 @@ export async function applyAppUpdate() {
   try {
     await installDesktopUpdate(progress => useAppUpdate.setState({progress: progress.label, progressMetrics: progress}));
     if (useAppUpdate.getState().busy) {
-      useAppUpdate.setState({phase: 'installed', progress: '更新已安装。请先结束当前任务，并确认项目备份已保存在电脑上，再重启应用。'});
+      useAppUpdate.setState({phase: 'installed', progress: '已就绪，重启生效。'});
       return;
     }
     useAppUpdate.setState({phase: 'installed', progress: '正在重启以完成更新…'});
