@@ -30,9 +30,8 @@ const ObjectTree=modelingModule.Objects;
 const PropertiesPanel=modelingModule.Properties;
 import { useEditorStore, useDisplayDoc } from './store';
 import { exportGlb } from './scene/export';
-import {openAppUpdatePanel} from './domain/appUpdateClient';
 import {Button,IconButton,Badge,DropdownMenu,Popover,Spinner} from '@radix-ui/themes';
-import {LayersIcon,ChevronDownIcon,GearIcon,InfoCircledIcon,CubeIcon,UploadIcon,DownloadIcon,Cross1Icon,CounterClockwiseClockIcon,ReloadIcon,MixerHorizontalIcon,ChatBubbleIcon} from '@radix-ui/react-icons';
+import {LayersIcon,ChevronDownIcon,GearIcon,CubeIcon,UploadIcon,DownloadIcon,Cross1Icon,CounterClockwiseClockIcon,ReloadIcon,MixerHorizontalIcon,ChatBubbleIcon} from '@radix-ui/react-icons';
 import '@radix-ui/themes/styles.css';
 import './workspace.css';
 import {TaskPanel} from './ui/TaskPanel';
@@ -195,7 +194,6 @@ export default function App() {
         {workspace.ready&&<div className={`editor-workspace ${assistantOpen?'assistant-expanded':''} ${inspectorOpen||structureOpen||shelfOpen?'editor-panel-open':''}`} hidden={modulePage!=='workbench'}>
         <header className="studio-header workbench-project-actions" hidden={modulePage!=='workbench'}>
           <IconButton className="workbench-back" variant="ghost" color="gray" aria-label="返回首页" onClick={()=>navigateStudio('home')}><ArrowLeftIcon/></IconButton>
-          <IconButton className="workbench-app-menu" variant="ghost" color="gray" aria-label="关于与更新" title="关于 Scenivo 与检查更新" onClick={openAppUpdatePanel}><InfoCircledIcon/></IconButton>
           <div className="workbench-project-summary"><strong title={active?.title}>{active?.title??'未命名项目'}</strong><span className="workbench-kind-tag">{active?.moduleKind==='asset'?'资产':'场景'}</span><span className={`workbench-save-status ${workspace.error?'is-error':''}`}>{workspace.error?'本机保存异常':workspace.saving?'正在保存':'已保存到本机'}<span aria-hidden="true"> · </span>{previewing?'待确认':!active?.librarySavedAt?'草稿':active.savedRevision===revision?'已入库':'修改未入库'}</span></div>
           <div className="workbench-view-controls"/>
           <div className="workbench-document-controls"><Popover.Root><Popover.Trigger><Button variant="ghost" color="gray" aria-label="项目状态" title={active?.title}><LayersIcon/></Button></Popover.Trigger><Popover.Content className="workbench-project-info" aria-label="项目信息" side="top" align="end" sideOffset={12}>          <span className="canvas-project-title" title={active?.title}>{active?.title??'正在恢复工作台…'}</span>
