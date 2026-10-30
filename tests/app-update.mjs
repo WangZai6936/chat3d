@@ -238,6 +238,7 @@ try {
   const details = renderInTheme(React.createElement(uiModule.AppUpdateDialog));
   await act(async () => client.openAppUpdatePanel());
   assert.ok(details.getByRole('dialog', {name: '关于与更新'}));
+  assert.equal(notice.queryByRole('dialog', {name: '应用更新'}), null, 'banner hidden while about panel is open');
   const aboutDialog = details.getByRole('dialog', {name: '关于与更新'});
   for (const selector of ['.app-update-dialog-header', '.app-update-dialog-heading', '.app-update-dialog-body', '.app-update-dialog-footer']) assert.ok(aboutDialog.querySelector(selector));
   const aboutHeading = aboutDialog.querySelector('.app-update-dialog-heading');
