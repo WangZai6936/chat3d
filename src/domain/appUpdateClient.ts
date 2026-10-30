@@ -117,8 +117,8 @@ function scheduleFailedCheckRetry() {
   }, delay);
 }
 
-function shouldSkipAutoCheck(reason: 'startup' | 'interval' | 'visible' | 'retry', now: number) {
-  if (reason === 'retry') return false;
+function shouldSkipAutoCheck(reason: 'startup' | 'interval' | 'visible' | 'retry' | 'manual', now: number) {
+  if (reason === 'manual' || reason === 'retry') return false;
   if (reason === 'interval') {
     if (lastCheck && now - lastCheck < CHECK_INTERVAL) return true;
     if (lastFailure && now - lastFailure < FAILURE_BACKOFF) return true;
@@ -136,7 +136,7 @@ export async function checkForAppUpdate(options?: {manual?: boolean; reason?: 's
   const state = useAppUpdate.getState();
   if (state.phase === 'installing' || inflight) return;
   const now = Date.now();
-  if (!manual && shouldSkipAutoCheck(reason === 'manual' ? 'interval' : reason, now)) return;
+  if (!manual && shouldSkipAutoCheck(reason, now)) return;
   inflight = true;
   if (manual) useAppUpdate.setState({checking: true, checkMessage: '正在检查更新…'});
   try {
