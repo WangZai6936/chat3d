@@ -40,8 +40,11 @@
 .app-update-settings-row{align-items:flex-start!important;flex-direction:column}
 .app-update-settings-group{border-color:var(--blue-5)}
 .app-update-dialog .app-update-dialog-footer{display:flex;justify-content:flex-end;margin-top:18px}
-.canvas-studio.frosted-studio .navigation-utilities .app-update-nav-entry{position:relative}
-.canvas-studio.frosted-studio .navigation-utilities .app-update-nav-badge{position:absolute;min-width:17px;height:17px;padding:0 4px;border:2px solid var(--color-panel-solid);border-radius:9px;font-size:10px;font-weight:700;line-height:13px;text-align:center;background:var(--blue-9);color:#fff;pointer-events:none}
+.canvas-studio.frosted-studio .navigation-utilities .app-update-nav-entry,
+.canvas-studio.frosted-studio .studio-sidebar-footer .app-update-nav-entry{position:relative}
+.canvas-studio.frosted-studio .navigation-utilities .app-update-nav-badge,
+.canvas-studio.frosted-studio .studio-sidebar-footer .app-update-nav-badge{position:absolute;top:6px;right:8px;min-width:17px;height:17px;padding:0 4px;border:2px solid #1b2430;border-radius:9px;font-size:10px;font-weight:700;line-height:13px;text-align:center;background:var(--blue-9);color:#fff;pointer-events:none}
+.canvas-studio.frosted-studio .studio-sidebar-footer .app-update-nav-badge{top:4px;right:4px;font-size:9px;min-width:auto;height:auto;padding:1px 5px;line-height:1.4;border-color:#243041}
 .app-update-dialog.rt-DialogContent{border-radius:var(--sc-radius-lg,16px);border:1px solid var(--sc-border-subtle,var(--gray-6));box-shadow:var(--sc-shadow-float,0 16px 48px var(--gray-a5))}
 .app-update-dialog.rt-DialogContent{padding:0;overflow:hidden;background:var(--color-panel-solid);color:var(--gray-12)}
 .app-update-dialog-header{display:grid;grid-template-columns:24px 1fr;gap:8px 12px;align-items:start;padding:24px 24px 0;background:var(--color-panel-solid)}
