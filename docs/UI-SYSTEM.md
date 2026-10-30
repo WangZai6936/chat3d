@@ -30,7 +30,7 @@ Defined in `src/ui/studio/tokens.css` on `.redesigned-studio.canvas-studio.frost
 
 Legacy `--studio-*` and `--glass-*` names in frosted CSS are bridged to the same Radix scales so older rules keep working.
 
-Sidebar rhythm is defined once in `src/ui/studio/studio-shell.css` and shared by studio navigation, session history (including its portaled dialog), and library category trees/managers. Use `--sidebar-pad-x: 12px`, `--sidebar-radius: 7px`, `--sidebar-font: 14px`, `--sidebar-font-meta: 11px`, `--sidebar-font-caption: 12px`, `--sidebar-icon: 14px`, `--sidebar-icon-gap: 8px`, `--sidebar-row-min-h: 44px`, `--sidebar-category-row-min-h: 36px`, `--sidebar-gap-in: 3px`, and `--sidebar-gap-group: 20px`. Rail insets are symmetric; the icon-only shell uses 7px on both sides. Preserve each rail's existing palette and state styling.
+Sidebar rhythm is defined once in `src/ui/studio/studio-shell.css` and shared by studio navigation, session history (including its portaled dialog), and library category trees/managers. Use `--sidebar-pad-x: 12px`, `--sidebar-radius: 7px`, `--sidebar-font: 14px`, `--sidebar-font-meta: 11px`, `--sidebar-font-caption: 12px`, `--sidebar-icon: 12px`, `--sidebar-icon-gap: 8px`, `--sidebar-row-min-h: 44px`, `--sidebar-category-row-min-h: 36px`, `--sidebar-gap-in: 3px`, and `--sidebar-gap-group: 20px`. Rail insets are symmetric; the icon-only shell uses 7px on both sides. Preserve each rail's existing palette and state styling.
 
 ## Shared React wrappers (`src/ui/studio/`)
 
