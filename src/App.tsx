@@ -58,6 +58,7 @@ import './ui/studio/studio-pages.css';
 import './ui/studio/studio-workbench.css';
 import './ui/studio/studio-shared.css';
 import {downloadJson} from './util/downloadJson';
+import {exportFile} from './util/exportFile';
 import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning,exportWorkspaceBackup} from './workspace';
 import { MAX_PROJECT_BYTES, parseProject, serializeProject } from './domain/project';
 
@@ -77,6 +78,8 @@ export default function App() {
   const fileRef = useRef<HTMLInputElement>(null);
   const modelFileRef=useRef<HTMLInputElement>(null);
   const [projectNotice, setProjectNotice] = useState('');
+  const [exportNotice,setExportNotice]=useState<{message:string}|null>(null);
+  const closeExportNotice=useCallback(()=>setExportNotice(null),[]);
   const [conflictDismissed,setConflictDismissed]=useState(false),[backupStatus,setBackupStatus]=useState(''),[backupBusy,setBackupBusy]=useState(false);
   async function backupConflict(){setBackupBusy(true);setBackupStatus('');try{setBackupStatus(await downloadJson(exportWorkspaceBackup(),'workspace'));}catch(e){setBackupStatus(e instanceof Error?e.message:String(e));}finally{setBackupBusy(false);}}
   const closeSaveNotice=useCallback(()=>setProjectNotice(''),[]);
@@ -86,41 +89,37 @@ export default function App() {
 
   const [exporting, setExporting] = useState(false);
   const downloadGlb = async () => {
+    setExportNotice(null);
     setExporting(true);
     try {
       const data = await exportGlb(structuredClone(useEditorStore.getState().doc));
-      const url = URL.createObjectURL(new Blob([data], { type: 'model/gltf-binary' }));
-      const a = document.createElement('a'); a.href = url; a.download = 'scenivo-model.glb';
-      document.body.appendChild(a); a.click(); a.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setProjectNotice('已发起 GLB 下载：包含可见模型及材质，不包含背景、灯光、选中框或动画。保存动画与编辑工程请下载项目 JSON。');
-    } catch (e) { setProjectNotice(`GLB 导出失败：${e instanceof Error ? e.message : String(e)}`); }
+      const message=await exportFile(data,'glb','scenivo-model.glb');
+      if(message)setExportNotice({message});
+    } catch (e) { setExportNotice({message:`GLB 导出失败：${e instanceof Error ? e.message : String(e)}`}); }
     finally { setExporting(false); }
   };
   const downloadHtml = async () => {
+    setExportNotice(null);
     setExporting(true);
     try {
       const state=useEditorStore.getState(),title=useWorkspaceStore.getState().sessions.find(s=>s.id===useWorkspaceStore.getState().activeId)?.title??'Scenivo 模型';
       const snapshot=structuredClone(state.doc);
       const {exportHtml}=await import('./scene/exportHtml');
       const html=await exportHtml(snapshot,title);
-      const url=URL.createObjectURL(new Blob([html],{type:'text/html;charset=utf-8'}));
-      const link=document.createElement('a');link.href=url;link.download=`scenivo-${state.doc.projectId.slice(0,8)}.html`;
-      document.body.appendChild(link);link.click();link.remove();window.setTimeout(()=>URL.revokeObjectURL(url),1000);
-      setProjectNotice('已发起 HTML 下载。保存后双击即可离线查看静态模型、旋转和缩放；不包含动画或聊天，编辑工程请保存项目 JSON。请确认文件已落盘。');
-    }catch(error){setProjectNotice(`HTML 导出失败：${error instanceof Error?error.message:String(error)}`);}
+      const message=await exportFile(html,'html',`scenivo-${state.doc.projectId.slice(0,8)}.html`);
+      if(message)setExportNotice({message});
+    }catch(error){setExportNotice({message:`HTML 导出失败：${error instanceof Error?error.message:String(error)}`});}
     finally{setExporting(false);}
   };
-  const saveProject = () => {
+  const saveProject = async () => {
+    setExportNotice(null);
+    setExporting(true);
     try {
       const doc = useEditorStore.getState().doc;
-      const url = URL.createObjectURL(new Blob([serializeProject(doc)], { type: 'application/json' }));
-      const link = document.createElement('a');
-      link.href = url; link.download = `scenivo-${doc.projectId.slice(0, 8)}.chat3d.json`;
-      document.body.appendChild(link); link.click(); link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-      useEditorStore.getState().markSaved();
-      setProjectNotice('已发起项目下载，请确认文件已保存在电脑上；模型密钥不会写入项目。');
-    } catch (e) { setProjectNotice(`项目下载失败：${e instanceof Error ? e.message : String(e)}`); }
+      const message=await exportFile(serializeProject(doc),'json',`scenivo-${doc.projectId.slice(0,8)}.chat3d.json`);
+      if(message)setExportNotice({message});
+    } catch (e) { setExportNotice({message:`项目下载失败：${e instanceof Error ? e.message : String(e)}`}); }
+    finally{setExporting(false);}
   };
   const openProject = async (file: File) => {
     try {
@@ -184,6 +183,7 @@ export default function App() {
 
         <AppUpdateNotice onBackup={()=>setShowTools(true)}/>
         {saveNotice&&!workspace.error&&<SaveToast message={projectNotice} onClose={closeSaveNotice}/>}
+        {exportNotice&&<SaveToast key={exportNotice.message} message={exportNotice.message} onClose={closeExportNotice} duration={4000} verbatim/>}
         {workspace.error&&!conflictDismissed&&<div role="alert" className="workspace-notice is-error"><div className="workspace-conflict-copy"><span>{workspace.error}</span><small>请关闭其他标签页，下载备份后刷新本页。</small>{backupStatus&&<span role="status">{backupStatus}</span>}</div><Button size="1" variant="soft" color="gray" disabled={backupBusy} onClick={()=>void backupConflict()}>下载工作台备份</Button><Button size="1" onClick={()=>window.location.reload()}>我已备份，刷新本页</Button><IconButton size="1" variant="ghost" color="gray" aria-label="隐藏冲突提示" onClick={()=>setConflictDismissed(true)}><Cross1Icon/></IconButton></div>}
         {!workspace.error&&(autosaveError||(projectNotice&&!saveNotice))&&<div role="status" className={`workspace-notice ${autosaveError?'is-error':''}`}><span>{autosaveError||projectNotice}</span>{!autosaveError&&<IconButton size="1" variant="ghost" color="gray" aria-label="关闭通知" onClick={()=>setProjectNotice('')}><Cross1Icon/></IconButton>}</div>}
         {!workspace.ready&&<div className="workspace-loading"><Spinner size="3"/><p>正在恢复项目…</p></div>}
@@ -210,7 +210,7 @@ export default function App() {
             <DropdownMenu.Item onSelect={()=>fileRef.current?.click()}><UploadIcon/>导入项目 JSON</DropdownMenu.Item>
             <DropdownMenu.Item title="静态网格，导入到新会话" onSelect={()=>modelFileRef.current?.click()}><CubeIcon/>导入模型 GLB</DropdownMenu.Item>
             <DropdownMenu.Separator/>
-            <DropdownMenu.Item title="保存可重新编辑的工程，包含动画" onSelect={saveProject}><DownloadIcon/>下载项目 JSON</DropdownMenu.Item>
+            <DropdownMenu.Item title="保存可重新编辑的工程，包含动画" disabled={exporting} onSelect={()=>void saveProject()}><DownloadIcon/>下载项目 JSON</DropdownMenu.Item>
 
             <DropdownMenu.Item title="导出静态模型和材质，不含动画" disabled={exporting||nodeCount===0} onSelect={()=>void downloadGlb()}><CubeIcon/>{exporting?'导出中…':'导出模型 GLB'}</DropdownMenu.Item>
             <DropdownMenu.Item title="离线单文件，双击用浏览器打开" disabled={exporting||nodeCount===0} onSelect={()=>void downloadHtml()}><DownloadIcon/>{exporting?'导出中…':'导出模型 HTML'}</DropdownMenu.Item>
