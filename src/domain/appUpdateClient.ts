@@ -7,6 +7,9 @@ import {DOWNLOAD_PROBE_BYTES, candidateDownloadUrls, installerTotalBytes, platfo
 const DISMISS_KEY = 'chat3d.update.dismissed';
 const REMIND_KEY = 'chat3d.update.remind';
 const CHECK_INTERVAL = 30 * 60 * 1000;
+const STARTUP_CHECK_DELAY = 1500;
+const FAILURE_RETRY_DELAYS = [15_000, 60_000, 3 * 60_000];
+const VISIBILITY_FAILURE_BACKOFF = 30_000;
 
 interface AppUpdateState {
   busy: boolean;
@@ -84,21 +87,56 @@ async function fetchDesktopRelease(): Promise<ReleaseNotice | null> {
   const {check} = await import('@tauri-apps/plugin-updater');
   const update = await check();
   if (!update) return null;
-  return {version: update.version, notes: cleanNotes(update.body ?? '')};
+  const parsed = parseVersion(update.version);
+  if (!parsed) throw new Error('更新信息无效');
+  return {version: parsed.version, notes: cleanNotes(update.body ?? '')};
 }
 
 let inflight = false;
 let lastCheck = 0;
 let lastFailure = 0;
+let failureStreak = 0;
 let checksStarted = false;
+let retryTimer: number | null = null;
 const FAILURE_BACKOFF = 5 * 60 * 1000;
+const VISIBLE_RECHECK_GAP = 2 * 60 * 1000;
 
-export async function checkForAppUpdate(options?: {manual?: boolean}) {
-  const manual = options?.manual ?? false;
+function clearRetryTimer() {
+  if (retryTimer == null) return;
+  window.clearTimeout(retryTimer);
+  retryTimer = null;
+}
+
+function scheduleFailedCheckRetry() {
+  if (typeof window === 'undefined') return;
+  clearRetryTimer();
+  const delay = FAILURE_RETRY_DELAYS[Math.min(failureStreak - 1, FAILURE_RETRY_DELAYS.length - 1)] ?? FAILURE_BACKOFF;
+  retryTimer = window.setTimeout(() => {
+    retryTimer = null;
+    void checkForAppUpdate({reason: 'retry'});
+  }, delay);
+}
+
+function shouldSkipAutoCheck(reason: 'startup' | 'interval' | 'visible' | 'retry', now: number) {
+  if (reason === 'retry') return false;
+  if (reason === 'interval') {
+    if (lastCheck && now - lastCheck < CHECK_INTERVAL) return true;
+    if (lastFailure && now - lastFailure < FAILURE_BACKOFF) return true;
+    return false;
+  }
+  // startup / visible: allow sooner after failures so a cold start is not stuck for 5 minutes
+  if (lastFailure && now - lastFailure < VISIBILITY_FAILURE_BACKOFF) return true;
+  if (reason === 'visible' && lastCheck && now - lastCheck < VISIBLE_RECHECK_GAP) return true;
+  return false;
+}
+
+export async function checkForAppUpdate(options?: {manual?: boolean; reason?: 'startup' | 'interval' | 'visible' | 'retry' | 'manual'}) {
+  const reason = options?.reason ?? (options?.manual ? 'manual' : 'interval');
+  const manual = options?.manual === true || reason === 'manual';
   const state = useAppUpdate.getState();
   if (state.phase === 'installing' || inflight) return;
   const now = Date.now();
-  if (!manual && ((lastCheck && now - lastCheck < CHECK_INTERVAL) || (lastFailure && now - lastFailure < FAILURE_BACKOFF))) return;
+  if (!manual && shouldSkipAutoCheck(reason === 'manual' ? 'interval' : reason, now)) return;
   inflight = true;
   if (manual) useAppUpdate.setState({checking: true, checkMessage: '正在检查更新…'});
   try {
@@ -126,9 +164,13 @@ export async function checkForAppUpdate(options?: {manual?: boolean}) {
     });
     lastCheck = Date.now();
     lastFailure = 0;
+    failureStreak = 0;
+    clearRetryTimer();
   } catch (error) {
     lastFailure = Date.now();
+    failureStreak += 1;
     if (manual) useAppUpdate.setState({checking: false, checkMessage: classifyUpdaterError(error) === 'unconfigured' ? '此安装包未配置自动更新。请从受信任的发布渠道获取新版本，不要运行来历不明的安装包。' : '暂时无法检查更新。请确认网络后再试。'});
+    else scheduleFailedCheckRetry();
   } finally {
     inflight = false;
     if (manual) useAppUpdate.setState({checking: false});
@@ -245,9 +287,12 @@ export async function applyAppUpdate() {
 export function startAppUpdateChecks() {
   if (checksStarted || typeof window === 'undefined') return;
   checksStarted = true;
-  window.setTimeout(() => void checkForAppUpdate(), 4000);
-  window.setInterval(() => void checkForAppUpdate(), CHECK_INTERVAL);
+  window.setTimeout(() => void checkForAppUpdate({reason: 'startup'}), STARTUP_CHECK_DELAY);
+  window.setInterval(() => void checkForAppUpdate({reason: 'interval'}), CHECK_INTERVAL);
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') void checkForAppUpdate();
+    if (document.visibilityState === 'visible') void checkForAppUpdate({reason: 'visible'});
+  });
+  window.addEventListener('focus', () => {
+    void checkForAppUpdate({reason: 'visible'});
   });
 }
