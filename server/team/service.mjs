@@ -19,6 +19,23 @@ const passwordLogin=options.passwordLogin??process.env.CHAT3D_TEAM_PASSWORD_LOGI
 const oauthClientId=options.oauthClientId??process.env.CHAT3D_PLATFORM_OAUTH_CLIENT_ID??'scenivo';
 const oauthClientSecret=options.oauthClientSecret??process.env.CHAT3D_PLATFORM_OAUTH_CLIENT_SECRET??'';
 const oauthTokenPath=options.oauthTokenPath??process.env.CHAT3D_PLATFORM_OAUTH_TOKEN_PATH??'/admin-api/system/oauth2/token';
+/** One-time platform-token handoff for desktop: callback page and Tauri do not share origin/BroadcastChannel. */
+const pendingClaims=new Map();
+const PENDING_TTL_MS=300000;
+function prunePendingClaims(now=Date.now()){for(const [key,entry] of pendingClaims)if(entry.expires<=now)pendingClaims.delete(key);}
+function stashPendingClaim(state,platform){
+ if(typeof state!=='string'||!state.trim()||!platform?.accessToken)return;
+ prunePendingClaims();
+ pendingClaims.set(hash(state.trim()),{platform:{accessToken:platform.accessToken,refreshToken:platform.refreshToken??'',expiresTime:platform.expiresTime??0},expires:Date.now()+PENDING_TTL_MS});
+}
+function claimPending(state){
+ if(typeof state!=='string'||!state.trim()||state.length>256)fail(400,'领取参数无效');
+ prunePendingClaims();
+ const key=hash(state.trim()),entry=pendingClaims.get(key);
+ if(!entry)fail(404,'授权尚未完成或已过期');
+ pendingClaims.delete(key);
+ return {platform:entry.platform};
+}
 
 async function platformUser(accessToken,tenantId){
  if(typeof accessToken!=='string'||!accessToken||accessToken.length>4096||typeof tenantId!=='string'||!/^[0-9]{1,16}$/.test(tenantId))fail(400,'协同登录参数无效');
@@ -67,7 +84,9 @@ async function loginSsoCode(code,redirectUri,tenantId=platformTenant,state){
  if(response.status===401||data?.code===401)fail(401,'协同登录已失效');
  if(!response.ok||(data?.code!==undefined&&data.code!==0)||typeof accessToken!=='string'||!accessToken)fail(502,data?.msg||'协同授权码兑换失败');
  const session=await loginSso(accessToken,tenantId);
- return {...session,platform:{accessToken,refreshToken,expiresTime}};
+ const platform={accessToken,refreshToken,expiresTime};
+ stashPendingClaim(state,platform);
+ return {...session,platform};
 }
 async function recheck(row,force){
  if(!row.platform_access)return;
@@ -97,7 +116,7 @@ function publish(user,body,validate,token){
    const result={id,version};db.prepare('INSERT INTO requests VALUES(?,?,?,?)').run(user.id,key,digest,JSON.stringify(result));return result;
   });
 }
-return {db,provision,login,loginSso,loginSsoCode,authenticate,list,read,publish,logout:token=>db.prepare('DELETE FROM sessions WHERE token=?').run(hash(token??'')),disable:name=>transaction(()=>{db.prepare('UPDATE users SET disabled=1 WHERE name=?').run(name);db.prepare('DELETE FROM sessions WHERE user IN (SELECT id FROM users WHERE name=?)').run(name);}),close:()=>db.close()};
+return {db,provision,login,loginSso,loginSsoCode,claimPending,authenticate,list,read,publish,logout:token=>db.prepare('DELETE FROM sessions WHERE token=?').run(hash(token??'')),disable:name=>transaction(()=>{db.prepare('UPDATE users SET disabled=1 WHERE name=?').run(name);db.prepare('DELETE FROM sessions WHERE user IN (SELECT id FROM users WHERE name=?)').run(name);}),close:()=>db.close()};
 }
 export function teamMiddleware(team,validate,{origins=[]}={}){
  return async(req,res,next)=>{
@@ -114,6 +133,7 @@ export function teamMiddleware(team,validate,{origins=[]}={}){
    if(req.method==='POST'&&url.pathname==='/api/team/login')return send(200,team.login(body.name,body.password));
    if(req.method==='POST'&&url.pathname==='/api/team/login/sso')return send(200,await team.loginSso(body.accessToken,body.tenantId));
    if(req.method==='POST'&&url.pathname==='/api/team/login/sso/code')return send(200,await team.loginSsoCode(body.code,body.redirectUri,body.tenantId,body.state));
+   if(req.method==='POST'&&url.pathname==='/api/team/login/sso/claim')return send(200,team.claimPending(body.state));
    const token=req.headers.authorization?.replace(/^Bearer /,'');const user=await team.authenticate(token);
    if(req.method==='GET'&&url.pathname==='/api/team/me')return send(200,user);
    if(req.method==='POST'&&url.pathname==='/api/team/logout'){team.logout(token);return send(200,{ok:true});}

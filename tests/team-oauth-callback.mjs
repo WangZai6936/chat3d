@@ -14,7 +14,8 @@ class Channel {
  close(){channels.delete(this);}
 }
 Object.defineProperty(globalThis,'BroadcastChannel',{value:Channel,configurable:true});
-let exchanges=0,tokenLogins=0;
+let exchanges=0,tokenLogins=0,claims=0;
+const pendingByState=new Map();
 const requests=[];
 const service=createServer(async(req,res)=>{
  let body='';for await(const chunk of req)body+=chunk;
@@ -25,7 +26,14 @@ const service=createServer(async(req,res)=>{
   assert.equal(new URL(window.location.href).searchParams.has('code'),false);
   if(exchanges>1){res.statusCode=400;res.end(JSON.stringify({error:'code 不存在'}));return;}
   assert.equal(value.state,'original-state');
+  pendingByState.set(value.state,{accessToken:'platform-access',refreshToken:'platform-refresh',expiresTime:1999999999999});
   res.end(JSON.stringify({token:'callback-session',user:{name:'Alice',role:'member'},platform:{accessToken:'platform-access',refreshToken:'platform-refresh',expiresTime:1999999999999}}));
+ }else if(req.url==='/api/team/login/sso/claim'){
+  claims++;
+  const entry=pendingByState.get(value?.state);
+  if(!entry){res.statusCode=404;res.end(JSON.stringify({error:'授权尚未完成或已过期'}));return;}
+  pendingByState.delete(value.state);
+  res.end(JSON.stringify({platform:entry}));
  }else if(req.url==='/api/team/login/sso'){
   tokenLogins++;assert.equal(value.accessToken,'platform-access');
   // Keep login in flight while both transports deliver the result.
@@ -41,7 +49,8 @@ try{
  const callback=await callbackVite.ssrLoadModule('/src/domain/teamLibrary.ts');
  const oauth=await callbackVite.ssrLoadModule('/src/domain/platformOAuth.ts');
  const opener=await openerVite.ssrLoadModule('/src/domain/teamLibrary.ts');
- window.open=()=>({opener:null});
+ window.open=(url)=>{window.__lastOpenUrl=url;return {opener:null};};
+ Object.defineProperty(globalThis,'__TAURI_INTERNALS__',{value:undefined,configurable:true});
  const rawCallback=oauth.parsePlatformOAuthCallback();
  window.history.replaceState({},'','/team/');
  const waiting=opener.beginTeamAuthorization({base,timeoutMs:2000});
@@ -55,18 +64,39 @@ try{
  window.dispatchEvent(new window.Event('focus'));
  assert.equal((await waiting).user.name,'Alice');
  assert.equal(exchanges,1);assert.equal(tokenLogins,1);
- assert.deepEqual(requests.map(r=>r.url),['/api/team/login/sso/code','/api/team/login/sso']);
+ assert.deepEqual(requests.filter(r=>r.url!=='/api/team/login/sso/claim').map(r=>r.url),['/api/team/login/sso/code','/api/team/login/sso']);
+ assert.equal(exchanges,1);assert.equal(tokenLogins,1);
  console.log('PASS callback exchanges once with state; opener accepts token delivery across BroadcastChannel/storage/focus without exchanging code');
  await callback.logoutTeamSession();await opener.logoutTeamSession();
- messages.length=0;
+ messages.length=0;claims=0;exchanges=0;tokenLogins=0;pendingByState.clear();requests.length=0;
+ // Cross-origin desktop path: no BroadcastChannel/storage delivery; opener polls claim by state.
+ window.history.replaceState({},'','/team/');
+ const desktopWaiting=opener.beginTeamAuthorization({base,timeoutMs:4000,pollMs:50});
+ await new Promise(resolve=>setTimeout(resolve,0));
+ // Capture authorize state from the opened URL
+ const opened=window.__lastOpenUrl;assert.ok(opened);
+ const openedState=new URL(opened.slice(opened.indexOf('?')),'http://local.invalid').searchParams.get('state');
+ assert.ok(openedState);
+ window.history.replaceState({},'',`/team/sso/callback?code=one-time&state=${openedState}`);
+ const desktopCallback=oauth.parsePlatformOAuthCallback();
+ window.history.replaceState({},'','/team/');
+ // Simulate portal callback exchange that stashes by state (no BC/localStorage to desktop)
+ pendingByState.set(openedState,{accessToken:'platform-access',refreshToken:'platform-refresh',expiresTime:1999999999999});
+ // Also exercise completeTeamOAuthCallbackPage publish path is optional for desktop; claim alone is enough
+ assert.equal((await desktopWaiting).user.name,'Alice');
+ assert.ok(claims>=1);assert.equal(tokenLogins,1);assert.equal(exchanges,0);
+ assert.ok(requests.some(r=>r.url==='/api/team/login/sso/claim'));
+ console.log('PASS desktop opener claims platform tokens by OAuth state without BroadcastChannel or code re-exchange');
+ await opener.logoutTeamSession();
+ messages.length=0;claims=0;exchanges=0;tokenLogins=0;pendingByState.clear();requests.length=0;
  await callback.completeTeamOAuthCallbackPage({accessToken:'platform-access',code:'spent-code',state:'stale-state',refreshToken:'platform-refresh'},{base});
- assert.equal(exchanges,1);assert.equal(tokenLogins,2);
+ assert.equal(exchanges,0);assert.equal(tokenLogins,1);
  assert.deepEqual(messages,[{accessToken:'platform-access',refreshToken:'platform-refresh',expiresTime:undefined}]);
  console.log('PASS access token takes precedence over stale code and publication omits code/state');
  await callback.logoutTeamSession();
  await assert.rejects(callback.completeTeamOAuthCallbackPage({error:'denied'},{base}),/denied/);
  await assert.rejects(callback.completeTeamOAuthCallbackPage({},{base}),/缺少令牌或授权码/);
- assert.equal(exchanges,1);
+ assert.equal(exchanges,0);
 }finally{
  await callbackVite.close();await openerVite.close();
  await new Promise(resolve=>service.close(resolve));dom.window.close();

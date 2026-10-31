@@ -37,8 +37,8 @@ Dockerfile 同时包含团队校验器。容器部署时将受限持久卷挂载
 - 地址示例：`https://portal.jiezi-ai.com/team/`（同域调用 `/api/team/`，无需在网页里填写端口）。
 - 能力：登录、搜索、预览固定版本、**下载桌面导入包**（资产 JSON / 场景 `.chat3d.json`，含新 id，不写入浏览器 IndexedDB）。
 - 不在 Web 端提供 AI 生成、工作台编辑或选择性发布；发布仍在桌面客户端顶部导航 **团队** 页完成。
-- OAuth 回调页 `/team/sso/callback` 先清除 URL 中的凭据，再携带 `state` 单次调用 `/api/team/login/sso/code`。成功后仅通过 BroadcastChannel/localStorage 发布平台 `accessToken`、`refreshToken`、`expiresTime`，不发布授权码或 `state`；等待中的桌面/网页使用 `/api/team/login/sso` 建立自己的团队会话，不再兑换授权码。回调失败后重试可重新打开授权窗口。
-- 单次兑换回归：`node tests/team-oauth-callback.mjs`（本地 HTTP 服务，覆盖回调兑换、令牌优先级及 BroadcastChannel/storage/focus 重复通知）。
+- OAuth 回调页 `/team/sso/callback` 先清除 URL 中的凭据，再携带 `state` 单次调用 `/api/team/login/sso/code`。服务端兑换成功后按 `state` 暂存平台令牌（约 5 分钟、一次性）；成功后仍可通过 BroadcastChannel/localStorage 通知**同域**等待页。桌面端系统浏览器与 Tauri 不同源，BroadcastChannel/localStorage 不可达，因此桌面用同一 `state` 轮询 `POST /api/team/login/sso/claim` 领取平台令牌，再调用 `/api/team/login/sso` 建立自己的团队会话，不再二次兑换授权码。回调页兑换成功后只提示可关闭本页并返回 Scenivo，**不进入**门户团队库浏览。回调失败后请回桌面重新点「登录授权」。
+- 单次兑换回归：`node tests/team-oauth-callback.mjs`（本地 HTTP 服务，覆盖回调兑换、令牌优先级、BroadcastChannel/storage/focus，以及跨源桌面 `claim` 轮询）。
 - 平台授权码兑换支持 `{code:0,data:{access_token,refresh_token,expires_in}}`，优先读取内层 snake_case 令牌，兼容内层 camelCase 与顶层 OAuth 令牌字段；有效期优先使用 `expiresTime` / `expires_time` 绝对时间，否则将内层或顶层 `expires_in` 秒数换算为毫秒时间戳，缺失时为 `0`。`node tests/team-library.mjs` 使用本地平台 HTTP mock 验证兑换、团队会话、有效期优先级及未配置 secret 的 503。
 
 **OpenResty / Nginx 要点（与现有门户并存）：**
@@ -77,7 +77,7 @@ unset TEAM_PASSWORD
 node server/team/admin.mjs disable alice
 ```
 
-角色：`viewer` 只能读取和获取；`member` 可发布新原件和追加自己的原件版本；`admin` 可追加任意原件版本。现有版本不可编辑或删除。账号管理仍使用服务器命令，不向客户端提供提升权限入口。数据库保存 scrypt 密码哈希和会话 token 哈希，会话8小时过期。团队会话 token 仅在内存中：切换资产/场景或离开团队页再返回保留连接；关闭应用后需重新换票。勾选「记住协同登录」时，协同 access/refresh 可写入本机 localStorage（与模型 API Key 同级的显式同意存储），下次打开会用已保存的 accessToken 静默兑换团队会话；不保存协同密码。仅服务根地址与可选协同令牌保存在 localStorage；客户端不跟随 API 重定向。Windows/Tauri 沿用原生 HTTP 插件的既有权限范围与正常 TLS 校验。
+角色：`viewer` 只能读取和获取；`member` 可发布新原件和追加自己的原件版本；`admin` 可追加任意原件版本。现有版本不可编辑或删除。账号管理仍使用服务器命令，不向客户端提供提升权限入口。数据库保存 scrypt 密码哈希和会话 token 哈希，会话8小时过期。团队会话 token 保存在桌面进程内共享单例：切换资产库/场景库/团队资源等模块或离开团队页再返回仍保留连接，无需重新授权。关闭应用后需重新换票；默认会把协同 access/refresh 写入本机 localStorage（与模型 API Key 同级），下次打开用已保存的 accessToken 静默兑换团队会话；不保存协同密码。仅服务根地址与可选协同令牌保存在 localStorage；客户端不跟随 API 重定向。Windows/Tauri 沿用原生 HTTP 插件的既有权限范围与正常 TLS 校验。
 
 ## 使用
 

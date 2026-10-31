@@ -72,7 +72,15 @@ try{
   [{access_token:'pat-admin',refresh_token:'top'},['top',0]],
  ]){oauthResponse=response;const session=await exchange();assert.equal(session.platform.accessToken,'pat-admin');assert.deepEqual([session.platform.refreshToken,session.platform.expiresTime],expected);}
  oauthResponse={access_token:'pat-admin',expires_in:60};const start=Date.now(),top=await exchange();assert.ok(top.platform.expiresTime>=start+60000&&top.platform.expiresTime<=Date.now()+60000);
- console.log('PASS OAuth snake_case exchange, authenticated session, expiry precedence and legacy fallbacks');
+ oauthResponse={code:0,data:{access_token:'pat-admin',refresh_token:'claim-refresh',expiresTime:1_700_000_000_000}};
+ const claimedLogin=await oauthTeam.loginSsoCode('code','https://portal.jiezi-ai.com/team/oauth/callback','1','claim-state');
+ assert.equal(claimedLogin.platform.accessToken,'pat-admin');
+ const claimed=oauthTeam.claimPending('claim-state');
+ assert.deepEqual(claimed.platform,{accessToken:'pat-admin',refreshToken:'claim-refresh',expiresTime:1_700_000_000_000});
+ assert.throws(()=>oauthTeam.claimPending('claim-state'),e=>e.status===404);
+ assert.throws(()=>oauthTeam.claimPending(''),e=>e.status===400);
+ assert.throws(()=>oauthTeam.claimPending('missing'),e=>e.status===404);
+ console.log('PASS OAuth snake_case exchange, authenticated session, expiry precedence, legacy fallbacks and one-time claim-by-state');
 }finally{oauthTeam.close();}
 console.log('PASS platform SSO upsert, role keep, disabled, 401, password lock, publish recheck and OAuth secret requirement');
 
