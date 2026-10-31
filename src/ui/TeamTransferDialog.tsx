@@ -1,11 +1,13 @@
 import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {Badge,Button,Dialog,TextField} from '@radix-ui/themes';
 import {Cross1Icon,LockClosedIcon,UploadIcon,DownloadIcon} from '@radix-ui/react-icons';
-import {acquireLinkedTeamVersion,defaultTeamServiceBase,getTeamSession,listTeamPublishSources,loginTeamSession,loginTeamWithPlatform,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPublishSource} from '../domain/teamLibrary';
+import {acquireLinkedTeamVersion,defaultTeamServiceBase,getTeamSession,listTeamPublishSources,loginTeamSession,loginTeamWithPlatform,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,resumeTeamFromPlatformAuth,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPublishSource} from '../domain/teamLibrary';
+import {loadPlatformAuth} from '../domain/platformAuthStorage';
 import './team-library.css';
 
 export function TeamSessionLogin({onConnected,serviceOrigin}:{onConnected?:()=>void;serviceOrigin?:string}){
-const [address,setAddress]=useState(()=>serviceOrigin??defaultTeamServiceBase()),[username,setUsername]=useState(''),[password,setPassword]=useState(''),[teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[remember,setRemember]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');const lock=useRef(false);
+const [address,setAddress]=useState(()=>serviceOrigin??defaultTeamServiceBase()),[username,setUsername]=useState(()=>loadPlatformAuth()?.username??''),[password,setPassword]=useState(''),[teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[remember,setRemember]=useState(()=>loadPlatformAuth()?.remember===true),[busy,setBusy]=useState(false),[error,setError]=useState('');const lock=useRef(false);
+useEffect(()=>{if(getTeamSession()?.user||!address)return;let alive=true;void resumeTeamFromPlatformAuth(address).then(next=>{if(alive&&next)onConnected?.();}).catch(()=>{});return ()=>{alive=false;};},[address,onConnected]);
 function submit(action:()=>Promise<unknown>){if(lock.current)return;lock.current=true;setBusy(true);setError('');void action().then(()=>{setPassword('');setTeamPassword('');onConnected?.();}).catch(error=>setError(error instanceof Error?error.message:'团队登录失败')).finally(()=>{lock.current=false;setBusy(false);});}
 return <form className="team-login-card" onSubmit={event=>{event.preventDefault();submit(()=>loginTeamWithPlatform(address,username,password,remember));}}>
  <header><h3>登录团队服务</h3><p>优先使用协同账号。团队会话仍只在内存中保留；退出后清除凭据。</p></header>

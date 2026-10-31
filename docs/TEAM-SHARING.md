@@ -74,7 +74,7 @@ unset TEAM_PASSWORD
 node server/team/admin.mjs disable alice
 ```
 
-角色：`viewer` 只能读取和获取；`member` 可发布新原件和追加自己的原件版本；`admin` 可追加任意原件版本。现有版本不可编辑或删除。账号管理仍使用服务器命令，不向客户端提供提升权限入口。数据库保存 scrypt 密码哈希和会话 token 哈希，会话8小时过期。客户端 token 仅在内存中：切换资产/场景或离开团队页再返回保留连接，显式退出或关闭/刷新应用后需重新登录。仅服务根地址保存在 localStorage；客户端不跟随 API 重定向。Windows/Tauri 沿用原生 HTTP 插件的既有权限范围与正常 TLS 校验。
+角色：`viewer` 只能读取和获取；`member` 可发布新原件和追加自己的原件版本；`admin` 可追加任意原件版本。现有版本不可编辑或删除。账号管理仍使用服务器命令，不向客户端提供提升权限入口。数据库保存 scrypt 密码哈希和会话 token 哈希，会话8小时过期。团队会话 token 仅在内存中：切换资产/场景或离开团队页再返回保留连接；关闭应用后需重新换票。勾选「记住协同登录」时，协同 access/refresh 可写入本机 localStorage（与模型 API Key 同级的显式同意存储），下次打开会用已保存的 accessToken 静默兑换团队会话；不保存协同密码。仅服务根地址与可选协同令牌保存在 localStorage；客户端不跟随 API 重定向。Windows/Tauri 沿用原生 HTTP 插件的既有权限范围与正常 TLS 校验。
 
 ## 使用
 

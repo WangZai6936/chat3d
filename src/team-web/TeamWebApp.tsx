@@ -1,8 +1,8 @@
-import {useRef,useState} from 'react';
+import {useEffect,useRef,useState} from 'react';
 import {Button,TextField,Badge} from '@radix-ui/themes';
 import {CubeIcon,LayersIcon,MagnifyingGlassIcon,LockClosedIcon,PersonIcon,DesktopIcon} from '@radix-ui/react-icons';
-import {TeamClient,defaultTeamServiceBase,rememberTeamServiceBase,type TeamItem,type TeamVersion} from '../domain/teamLibrary';
-import {DEFAULT_PLATFORM_BASE,DEFAULT_PLATFORM_TENANT,savePlatformAuth} from '../domain/platformAuthStorage';
+import {TeamClient,defaultTeamServiceBase,rememberTeamServiceBase,resumeTeamFromPlatformAuth,type TeamItem,type TeamVersion} from '../domain/teamLibrary';
+import {DEFAULT_PLATFORM_BASE,DEFAULT_PLATFORM_TENANT,loadPlatformAuth,savePlatformAuth} from '../domain/platformAuthStorage';
 import {teamFetch} from '../domain/teamTransport';
 import {assetDocument,parseModelAsset} from '../domain/modelAssets';
 import {parseProject} from '../domain/project';
@@ -11,8 +11,9 @@ import {downloadTeamCopyFile} from '../domain/teamCopyExport';
 import {BrandMark} from '../ui/BrandMark';
 
 export function TeamWebApp(){
-const [kind,setKind]=useState<'asset'|'scene'>('asset'),[address,setAddress]=useState(()=>defaultTeamServiceBase()||window.location.origin),[username,setUsername]=useState(''),[password,setPassword]=useState(''),[teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[remember,setRemember]=useState(false),[client,setClient]=useState<TeamClient>(),[rows,setRows]=useState<TeamItem[]>([]),[query,setQuery]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[preview,setPreview]=useState<TeamVersion>(),[image,setImage]=useState('');
+const [kind,setKind]=useState<'asset'|'scene'>('asset'),[address,setAddress]=useState(()=>defaultTeamServiceBase()||window.location.origin),[username,setUsername]=useState(()=>loadPlatformAuth()?.username??''),[password,setPassword]=useState(''),[teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[remember,setRemember]=useState(()=>loadPlatformAuth()?.remember===true),[client,setClient]=useState<TeamClient>(),[rows,setRows]=useState<TeamItem[]>([]),[query,setQuery]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[preview,setPreview]=useState<TeamVersion>(),[image,setImage]=useState('');
  const lock=useRef(false);
+ useEffect(()=>{if(client||!address)return;let alive=true;void resumeTeamFromPlatformAuth(address).then(async next=>{if(!alive||!next)return;setClient(next);try{setRows(await next.list(kind));}catch{/* keep form if list fails */}});return ()=>{alive=false;};},[address,client,kind]);
  const kindLabel=kind==='asset'?'资产':'场景';
  async function run(fn:()=>Promise<void>){if(lock.current)return;lock.current=true;setBusy(true);setNotice('');try{await fn();}catch(e){setNotice(e instanceof Error?e.message:'操作失败，可重试');}finally{lock.current=false;setBusy(false);}}
  return <div className="team-web-shell">

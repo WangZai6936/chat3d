@@ -7,7 +7,7 @@ import {createSession,flushWorkspace,useWorkspaceStore} from '../workspace';
 import {assertLibraryReady} from './libraryNavigation';
 import {listModelAssets,readModelAsset} from './modelAssetStorage';
 import {listTeamResourceLinks,listLocalTeamResourceStates,reserveTeamResourceLink,saveTeamResourceLink,rememberTeamResourceHeads,teamLocalFingerprint,teamResourceKey,type TeamResourceLink,type LocalTeamResourceState} from './teamResourceLinks';
-import {DEFAULT_PLATFORM_BASE,DEFAULT_PLATFORM_TENANT,savePlatformAuth,type PlatformAuth} from './platformAuthStorage';
+import {DEFAULT_PLATFORM_BASE,DEFAULT_PLATFORM_TENANT,loadPlatformAuth,savePlatformAuth,type PlatformAuth} from './platformAuthStorage';
 type PublicationShape=true|{[key:string]:PublicationShape}|readonly PublicationShape[];
 const vectorShape=[true] as const,transformShape={position:vectorShape,rotationQuaternion:vectorShape,scale:vectorShape};
 const geometryShape={type:true,params:{width:true,height:true,depth:true,bevelRadius:true,radius:true,widthSegments:true,heightSegments:true,radiusTop:true,radiusBottom:true,radialSegments:true,cornerRadius:true,holeRadius:true,length:true,thickness:true,outerRadius:true,innerRadius:true,widthTop:true,widthBottom:true,positions:vectorShape,indices:vectorShape,normals:vectorShape,uvs:vectorShape,points:[vectorShape],rings:[{center:vectorShape,radiusX:true,radiusZ:true}],segments:true,smooth:true,wallThickness:true,capStart:true,capEnd:true,holes:[[vectorShape]],edgeRadius:true}} satisfies PublicationShape;
@@ -73,6 +73,19 @@ export async function loginTeamWithPlatform(base:string,username:string,password
  const next=new TeamClient(base);await next.loginWithPlatform(auth);savePlatformAuth(auth);rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
 }
 export async function logoutTeamSession(){const previous=sharedClient;sharedClient=undefined;for(const listener of sessionListeners)listener();await previous?.logout();}
+export async function resumeTeamFromPlatformAuth(base:string,platformBase?:string,tenantId?:string){
+ if(sharedClient?.user)return sharedClient;
+ const saved=loadPlatformAuth();if(!saved?.accessToken)return undefined;
+ if(saved.expiresTime>0&&saved.expiresTime<Date.now()){savePlatformAuth(null);return undefined;}
+ const next=new TeamClient(base||defaultTeamServiceBase()||saved.base);
+ try{
+  await next.loginWithPlatform({accessToken:saved.accessToken,tenantId:tenantId??saved.tenantId??DEFAULT_PLATFORM_TENANT});
+  rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
+ }catch{
+  // Expired or revoked platform token: drop durable credentials so the form is shown.
+  savePlatformAuth(null);return undefined;
+ }
+}
 export function teamItemFromLink(link:TeamResourceLink,version=link.latestVersion):TeamItem{return {id:link.teamItemId,kind:link.kind,version,name:link.teamName,owner:'',description:'',created:''};}
 export async function refreshLinkedTeamResources(kind:'asset'|'scene'):Promise<LocalTeamResourceState[]>{const client=sharedClient;if(!client?.user)throw Error('请先登录团队服务');const heads=await client.list(kind);await rememberTeamResourceHeads(client.base,kind,heads);return listLocalTeamResourceStates(kind);}
 // Explicit allowlist prevents session/chat/settings data from entering a publication.
