@@ -154,7 +154,7 @@ export async function beginTeamAuthorization(options:{base?:string;remember?:boo
  });
 }
 export async function logoutTeamSession(){const previous=sharedClient;sharedClient=undefined;clearPendingPlatformOAuth();savePlatformAuth(null);for(const listener of sessionListeners)listener();await previous?.logout();}
-export async function resumeTeamFromPlatformAuth(base:string,platformBase?:string,tenantId?:string){
+export async function resumeTeamFromPlatformAuth(base:string,tenantId?:string){
  if(sharedClient?.user)return sharedClient;
  const saved=loadPlatformAuth();if(!saved?.accessToken)return undefined;
  if(saved.expiresTime>0&&saved.expiresTime<Date.now()){savePlatformAuth(null);return undefined;}

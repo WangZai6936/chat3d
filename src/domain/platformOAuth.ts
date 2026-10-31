@@ -164,8 +164,8 @@ export function watchPlatformOAuthResult(onResult:(result:PlatformOAuthCallback)
 export async function openPlatformAuthorizationWindow(url:string){
  const desktop=Boolean((globalThis as {__TAURI_INTERNALS__?:unknown}).__TAURI_INTERNALS__);
  if(desktop){
-  const {open}=await import('@tauri-apps/plugin-opener');
-  await open(url);
+  const {openUrl}=await import('@tauri-apps/plugin-opener');
+  await openUrl(url);
   return;
  }
  // Do not pass "noopener" in windowFeatures: modern browsers then return null from window.open,
