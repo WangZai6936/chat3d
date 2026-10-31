@@ -16,7 +16,19 @@ try{
   const withRef=buildModelingPrompt({...base,hasReferenceImages:true});
   assert.match(withRef,/禁止用read_component_recipe或add_reference_component/);
   assert.match(withRef,/用户已提供参考图/);
+  assert.match(withRef,/双立柱/);
+  assert.match(withRef,/货叉/);
+  assert.match(withRef,/禁止借用机床或矮平AGV/);
+  assert.match(withRef,/有参考图时禁止读取或套用/);
+  assert.doesNotMatch(withRef,/可先读取read_component_recipe作为可编辑结构参考/);
+  const withRefFast=buildModelingPrompt({...base,hasReferenceImages:true,generationQuality:'fast'});
+  assert.match(withRefFast,/有参考图时即使快速档也必须先按图做完整特征清单/);
+  assert.doesNotMatch(withRefFast,/复杂或参考图对象用简短plan_object_structure/);
   const noRef=buildModelingPrompt({...base,hasReferenceImages:false});
   assert.doesNotMatch(noRef,/禁止用read_component_recipe或add_reference_component/);
-  console.log('PASS reference-image-no-recipe + 2M soft budget');
+  assert.match(noRef,/可先读取read_component_recipe作为可编辑结构参考/);
+  const {REFERENCE_IMAGE_MAX_SIDE,REFERENCE_IMAGE_JPEG_QUALITY}=await server.ssrLoadModule('/src/domain/referenceImageLimits.ts');
+  assert.equal(REFERENCE_IMAGE_MAX_SIDE,1536);
+  assert.equal(REFERENCE_IMAGE_JPEG_QUALITY,0.85);
+  console.log('PASS reference-image fidelity prompt + 2M soft budget + image limits');
 }finally{await server.close();}

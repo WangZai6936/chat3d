@@ -1,4 +1,5 @@
 import {prepareReference,isReferenceImage,attachmentInfo,MAX_ATTACHMENT_BYTES} from '../domain/referenceAttachments';
+import {REFERENCE_IMAGE_JPEG_QUALITY,REFERENCE_IMAGE_MAX_SIDE} from '../domain/referenceImageLimits';
 import {Button,TextArea,DropdownMenu} from '@radix-ui/themes';
 import {PlusIcon,ArrowUpIcon,StopIcon,ImageIcon,PersonIcon,ChatBubbleIcon,DotsHorizontalIcon,Pencil1Icon,TrashIcon} from '@radix-ui/react-icons';
 import {SiteAccessRecovery} from './SiteAccessRecovery';
@@ -17,7 +18,7 @@ export {REQUEST_TIMEOUT_MS} from '../runtime/conversationController';
 
 export async function compressImage(file: File | Blob): Promise<string> {
   const bitmap = await createImageBitmap(file);
-  const maxSide = 1024;
+  const maxSide = REFERENCE_IMAGE_MAX_SIDE;
   const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
   const w = Math.max(1, Math.round(bitmap.width * scale));
   const h = Math.max(1, Math.round(bitmap.height * scale));
@@ -28,7 +29,7 @@ export async function compressImage(file: File | Blob): Promise<string> {
   if (!ctx) throw new Error('无法处理图片（浏览器不支持 canvas）');
   ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close?.();
-  return canvas.toDataURL('image/jpeg', 0.8);
+  return canvas.toDataURL('image/jpeg', REFERENCE_IMAGE_JPEG_QUALITY);
 }
 
 export function ChatPanel({onConfigure,onAssets,canvasMode=false,expanded=true,onExpand,autoStartRequest,onAutoStartConsumed}:{autoStartRequest?:{id:string;projectId:string}|null;onAutoStartConsumed?:(id:string)=>void;executionDetails?:boolean;onConfigure?:()=>void;onAssets?:()=>void;canvasMode?:boolean;expanded?:boolean;onExpand?:()=>void}={}) {
