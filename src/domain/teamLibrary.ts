@@ -30,6 +30,9 @@ export interface TeamUser {id:string;name:string;role:'admin'|'member'|'viewer'}
 export interface TeamItem {id:string;owner:string;kind:'asset'|'scene';version:number;name:string;description:string;created:string}
 export interface TeamVersion extends TeamItem {payload:unknown}
 export interface TeamPublish {kind:'asset'|'scene';name:string;description:string;payload:unknown;key:string;itemId?:string;expectedVersion:number}
+export class TeamServiceError extends Error {
+ constructor(readonly status:number,message:string){super(message);this.name='TeamServiceError';}
+}
 const TEAM_ADDRESS_KEY='chat3d.team.address';
 export function teamAddress(value:string){const url=new URL(value);if(url.username||url.password||url.search||url.hash||url.pathname!=='/'||(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))))throw Error('请输入 HTTPS 服务根地址（本机测试可用 HTTP localhost）');return url.origin;}
 export function defaultTeamServiceBase(){
@@ -47,11 +50,17 @@ export class TeamClient {
  constructor(base:string){this.base=teamAddress(base);}
  async request<T>(path:string,body?:unknown):Promise<T>{
   const response=await teamFetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
-  const data=await response.json();if(!response.ok)throw Error(data.error??'团队服务请求失败');return data as T;
+  const data=await response.json().catch(()=>null);
+  if(!response.ok){
+   if(response.status===401&&this.token&&sharedClient===this){expireTeamSession(this);throw new TeamServiceError(401,'团队登录已失效，请重新登录。');}
+   throw new TeamServiceError(response.status,typeof data?.error==='string'?data.error:'团队服务请求失败');
+  }
+  return data as T;
  }
 async login(name:string,password:string){const result=await this.request<{token:string;user:TeamUser}>('login',{name,password});this.token=result.token;this.user=result.user;return result.user;}
 async loginWithPlatform(auth:{accessToken:string;tenantId:string}){const result=await this.request<{token:string;user:TeamUser}>('login/sso',{accessToken:auth.accessToken,tenantId:auth.tenantId});this.token=result.token;this.user=result.user;return result.user;}
  acceptSession(token:string,user:TeamUser){this.token=token;this.user=user;}
+ clearSession(){this.token='';this.user=undefined;}
  async logout(){const pending=this.request('logout',{});this.token='';this.user=undefined;await pending;}
  list(kind:'asset'|'scene',q=''){return this.request<TeamItem[]>('items?kind='+kind+'&q='+encodeURIComponent(q));}
  async read(item:TeamItem){const value=await this.request<TeamVersion>(`items/${encodeURIComponent(item.id)}/${item.version}`);if(value.id!==item.id||value.kind!==item.kind||value.version!==item.version)throw Error('团队服务返回的固定版本不匹配');return value;}
@@ -59,11 +68,20 @@ async loginWithPlatform(auth:{accessToken:string;tenantId:string}){const result=
 }
 const sessionListeners=new Set<()=>void>();
 let sharedClient:TeamClient|undefined;
+let sessionExpired=false,sessionRevision=0;
+let resumeRequest:Promise<TeamClient|undefined>|undefined;
 export function getTeamSession(){return sharedClient;}
+export function getTeamSessionStatus(){return sharedClient?.user?'authenticated':resumeRequest?'restoring':sessionExpired?'expired':'guest';}
 export function subscribeTeamSession(listener:()=>void){sessionListeners.add(listener);return ()=>{sessionListeners.delete(listener);};}
+function notifyTeamSession(){for(const listener of sessionListeners)listener();}
+function activateTeamSession(client:TeamClient){sharedClient=client;sessionExpired=false;sessionRevision++;notifyTeamSession();}
+function expireTeamSession(client:TeamClient){
+ if(sharedClient!==client)return;
+ client.clearSession();sharedClient=undefined;sessionExpired=true;sessionRevision++;savePlatformAuth(null);notifyTeamSession();
+}
 export async function loginTeamSession(base:string,name:string,password:string){
  if(sharedClient?.user)throw Error('请先退出当前团队账号');
- const next=new TeamClient(base);await next.login(name,password);rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
+ const next=new TeamClient(base);await next.login(name,password);rememberTeamServiceBase(next.base);activateTeamSession(next);return next;
 }
 export async function loginTeamWithPlatform(base:string,username:string,password:string,remember:boolean,platformBase=DEFAULT_PLATFORM_BASE,tenantId=DEFAULT_PLATFORM_TENANT){
  if(sharedClient?.user)throw Error('请先退出当前团队账号');
@@ -73,7 +91,7 @@ export async function loginTeamWithPlatform(base:string,username:string,password
  if(response.status===401||data?.code===401)throw Error('协同账号或密码错误');
  if(!response.ok||data?.code!==0||typeof data.data?.accessToken!=='string')throw Error(data?.msg||'协同登录失败');
  const auth:PlatformAuth={base:root,tenantId,username,accessToken:data.data.accessToken,refreshToken:data.data.refreshToken??'',expiresTime:data.data.expiresTime??0,remember};
- const next=new TeamClient(base);await next.loginWithPlatform(auth);savePlatformAuth(auth);rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
+ const next=new TeamClient(base);await next.loginWithPlatform(auth);savePlatformAuth(auth);rememberTeamServiceBase(next.base);activateTeamSession(next);return next;
 }
 export async function loginTeamWithAccessToken(accessToken:string,options:{base?:string;tenantId?:string;refreshToken?:string;expiresTime?:number;username?:string;remember?:boolean}={}){
  if(sharedClient?.user)throw Error('请先退出当前团队账号');
@@ -83,7 +101,7 @@ export async function loginTeamWithAccessToken(accessToken:string,options:{base?
  const next=new TeamClient(base);
  await next.loginWithPlatform({accessToken,tenantId});
  const auth:PlatformAuth={base:DEFAULT_PLATFORM_BASE,tenantId,username:options.username??next.user?.name??'',accessToken,refreshToken:options.refreshToken??'',expiresTime:options.expiresTime??0,remember:options.remember!==false};
- savePlatformAuth(auth);rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
+ savePlatformAuth(auth);rememberTeamServiceBase(next.base);activateTeamSession(next);return next;
 }
 export async function exchangeTeamAuthorizationCode(code:string,options:{base?:string;redirectUri?:string;tenantId?:string;state?:string;remember?:boolean}={}){
  return (await exchangeTeamAuthorizationCodeResult(code,options)).client;
@@ -97,7 +115,7 @@ async function exchangeTeamAuthorizationCodeResult(code:string,options:{base?:st
  if(result.platform?.accessToken){
   savePlatformAuth({base:DEFAULT_PLATFORM_BASE,tenantId:options.tenantId||platformTenantId(),username:result.user.name,accessToken:result.platform.accessToken,refreshToken:result.platform.refreshToken??'',expiresTime:result.platform.expiresTime??0,remember:options.remember!==false});
  }
- rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return {client:next,platform:result.platform};
+ rememberTeamServiceBase(next.base);activateTeamSession(next);return {client:next,platform:result.platform};
 }
 /** The callback page consumes the one-time code; other windows receive only platform tokens. */
 export async function completeTeamOAuthCallbackPage(callback:PlatformOAuthCallback,options:{base?:string;remember?:boolean}={}):Promise<TeamClient>{
@@ -170,19 +188,33 @@ export async function beginTeamAuthorization(options:{base?:string;remember?:boo
   const timer=window.setTimeout(()=>settle(()=>reject(Error('协同登录超时，请重试「登录授权」'))),timeoutMs);
  });
 }
-export async function logoutTeamSession(){const previous=sharedClient;sharedClient=undefined;clearPendingPlatformOAuth();savePlatformAuth(null);for(const listener of sessionListeners)listener();await previous?.logout();}
+export async function logoutTeamSession(){const previous=sharedClient;sharedClient=undefined;sessionExpired=false;resumeRequest=undefined;sessionRevision++;clearPendingPlatformOAuth();savePlatformAuth(null);notifyTeamSession();await previous?.logout();}
+/** Restore automatically only for the service that originally accepted this remembered account. */
+export async function restoreRememberedTeamSession(){
+ const base=defaultTeamServiceBase();
+ try{const remembered=localStorage.getItem(TEAM_ADDRESS_KEY);if(!remembered||teamAddress(remembered)!==teamAddress(base))return undefined;}catch{return undefined;}
+ return resumeTeamFromPlatformAuth(base);
+}
 export async function resumeTeamFromPlatformAuth(base:string,tenantId?:string){
  if(sharedClient?.user)return sharedClient;
+ if(resumeRequest)return resumeRequest;
  const saved=loadPlatformAuth();if(!saved?.accessToken)return undefined;
- if(saved.expiresTime>0&&saved.expiresTime<Date.now()){savePlatformAuth(null);return undefined;}
- const next=new TeamClient(base||defaultTeamServiceBase()||saved.base);
- try{
-  await next.loginWithPlatform({accessToken:saved.accessToken,tenantId:tenantId??saved.tenantId??DEFAULT_PLATFORM_TENANT});
-  rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
- }catch{
-  // Expired or revoked platform token: drop durable credentials so the form is shown.
-  savePlatformAuth(null);return undefined;
- }
+ if(saved.expiresTime>0&&saved.expiresTime<Date.now()){savePlatformAuth(null);sessionExpired=true;notifyTeamSession();return undefined;}
+ const revision=sessionRevision;
+ const pending=(async()=>{
+  try{
+   const next=new TeamClient(base||defaultTeamServiceBase()||saved.base);
+   await next.loginWithPlatform({accessToken:saved.accessToken,tenantId:tenantId??saved.tenantId??DEFAULT_PLATFORM_TENANT});
+   // A delayed restore cannot sign the user back in after logout or replace a newer login.
+   if(revision!==sessionRevision)return sharedClient;
+   rememberTeamServiceBase(next.base);activateTeamSession(next);return next;
+  }catch(error){
+   if(revision===sessionRevision&&error instanceof TeamServiceError&&error.status===401){savePlatformAuth(null);sessionExpired=true;}
+   return undefined;
+  }
+ })();
+ resumeRequest=pending;notifyTeamSession();
+ try{return await pending;}finally{if(resumeRequest===pending){resumeRequest=undefined;notifyTeamSession();}}
 }
 export function teamItemFromLink(link:TeamResourceLink,version=link.latestVersion):TeamItem{return {id:link.teamItemId,kind:link.kind,version,name:link.teamName,owner:'',description:'',created:''};}
 export async function refreshLinkedTeamResources(kind:'asset'|'scene'):Promise<LocalTeamResourceState[]>{const client=sharedClient;if(!client?.user)throw Error('请先登录团队服务');const heads=await client.list(kind);await rememberTeamResourceHeads(client.base,kind,heads);return listLocalTeamResourceStates(kind);}

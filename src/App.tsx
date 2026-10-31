@@ -56,6 +56,7 @@ import './ui/studio/studio-home.css';
 import './ui/studio/studio-pages.css';
 import './ui/studio/studio-workbench.css';
 import './ui/studio/studio-shared.css';
+import './ui/studio/studio-account.css';
 import {downloadJson} from './util/downloadJson';
 import {exportFile} from './util/exportFile';
 import {initializeWorkspace,useWorkspaceStore,createSession,anySessionRunning,exportWorkspaceBackup} from './workspace';
@@ -147,7 +148,7 @@ export default function App() {
   const [assistantOpen,setAssistantOpen]=useState(true);
   const [assistantWidth,setAssistantWidth]=useConversationWidth();
   const [inspectorOpen,setInspectorOpen]=useState(false);
-  const [structureOpen,setStructureOpen]=useState(()=>window.innerWidth>=1200),[shelfOpen,setShelfOpen]=useState(false),[advancedOpen,setAdvancedOpen]=useState(false);
+  const [structureOpen,setStructureOpen]=useState(false),[shelfOpen,setShelfOpen]=useState(false),[advancedOpen,setAdvancedOpen]=useState(false);
   const [propertyTab,setPropertyTab]=useState<CanvasPropertyTab>('position');
   const selectionBox=useSelectionTool(s=>s.box),wholeModelBox=useSelectionTool(s=>s.wholeModel),throughBox=useSelectionTool(s=>s.through);
   const selection=useEditorStore(s=>s.selection);const viewportReady=useEditorStore(s=>s.viewportStatus==='ready');
@@ -238,6 +239,7 @@ export default function App() {
           <main className="scene-region">
             <div className="scene-stage"><ViewportPanel/></div>
             <div className="canvas-context-label"><LayersIcon/>{previewing?'修改预览':locked?'正在处理草稿':active?.title??'三维视图'}<small>{nodeCount} 个零件 · m</small></div>
+            {nodeCount===0&&!locked&&viewportReady&&<div className="canvas-empty-guide"><span className="canvas-empty-symbol" aria-hidden="true"><CubeIcon/></span><h2>{active?.moduleKind==='asset'?'从一个模型开始':'搭建你的三维场景'}</h2><p>向 AI 描述想法，也可以从本地资源开始。</p><div><Button variant="soft" color="gray" onClick={()=>openEditorPanel('asset')}><CubeIcon/>浏览本地资产</Button><Button variant="soft" color="gray" onClick={()=>modelFileRef.current?.click()}><UploadIcon/>导入 GLB 模型</Button></div><small>模型可继续编辑，并保存为本地资产或场景</small></div>}
             <footer className="scene-footer"><span><span className="status-dot"/>{previewing?'预览尚未提交':locked?'正在处理草稿':'可编辑场景'}</span><span>单位 m · Y 轴向上</span><span>{dirty?'当前修改尚未导出备份':'项目文件无待导出修改'}</span></footer>
           </main>
           {!inspectorOpen&&<CanvasSelectionSummary onEdit={()=>openInspector()}/>}

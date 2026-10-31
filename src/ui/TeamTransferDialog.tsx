@@ -1,20 +1,22 @@
 import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {Badge,Button,Dialog,TextField} from '@radix-ui/themes';
 import {Cross1Icon,UploadIcon,DownloadIcon} from '@radix-ui/react-icons';
-import {acquireLinkedTeamVersion,beginTeamAuthorization,defaultTeamServiceBase,getTeamSession,listTeamPublishSources,loginTeamSession,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,resumeTeamFromPlatformAuth,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPublishSource} from '../domain/teamLibrary';
+import {acquireLinkedTeamVersion,beginTeamAuthorization,defaultTeamServiceBase,getTeamSession,getTeamSessionStatus,listTeamPublishSources,loginTeamSession,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,resumeTeamFromPlatformAuth,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPublishSource} from '../domain/teamLibrary';
 import {showTeamPasswordLogin} from '../domain/platformOAuth';
 import './team-library.css';
 
 export function TeamSessionLogin({onConnected,serviceOrigin}:{onConnected?:()=>void;serviceOrigin?:string}){
+ const sessionStatus=useSyncExternalStore(subscribeTeamSession,getTeamSessionStatus,getTeamSessionStatus);
  const address=serviceOrigin??defaultTeamServiceBase();
  const [teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[waiting,setWaiting]=useState(false);const lock=useRef(false);
  const debugPassword=showTeamPasswordLogin();
  useEffect(()=>{if(getTeamSession()?.user||!address)return;let alive=true;void resumeTeamFromPlatformAuth(address).then(next=>{if(alive&&next)onConnected?.();}).catch(()=>{});return ()=>{alive=false;};},[address,onConnected]);
- function submit(action:()=>Promise<unknown>){if(lock.current)return;lock.current=true;setBusy(true);setError('');void action().then(()=>{setTeamPassword('');setWaiting(false);onConnected?.();}).catch(error=>setError(error instanceof Error?error.message:'团队登录失败')).finally(()=>{lock.current=false;setBusy(false);});}
+ function submit(action:()=>Promise<unknown>){if(lock.current)return;lock.current=true;setBusy(true);setError('');void action().then(()=>{setTeamPassword('');setWaiting(false);onConnected?.();}).catch(error=>{setWaiting(false);setError(error instanceof Error?error.message:'团队登录失败');}).finally(()=>{lock.current=false;setBusy(false);});}
  return <form className="team-login-card" onSubmit={event=>{event.preventDefault();setWaiting(true);submit(()=>beginTeamAuthorization({base:address}));}}>
-  <header><h3>登录团队服务</h3><p>点击登录授权，在协同平台完成登录后自动返回。登录后各模块共用本次团队会话；关闭应用后可用已保存的协同登录恢复。</p></header>
+  <header><h3>通过协同平台登录</h3><p>在授权页面完成登录后自动返回，登录状态在应用内共用。</p></header>
+  {!address&&<p className="team-security-note" role="status">团队授权服务尚未配置，请联系管理员。你可以继续使用本地资源。</p>}
   {error&&<p className="team-error" role="alert">{error}</p>}
-  <Button type="submit" disabled={busy||!address}>{busy||waiting?'等待协同登录…':'登录授权'}</Button>
+  <Button type="submit" disabled={busy||!address||sessionStatus==='restoring'}>{sessionStatus==='restoring'?'正在恢复登录…':busy||waiting?'等待协同登录…':'登录授权'}</Button>
   {waiting&&!error&&<p className="team-security-note">已打开协同登录，请在浏览器完成授权后回到本窗口。</p>}
   {debugPassword&&<>
    <label className="team-field"><span>团队账号</span><TextField.Root aria-label="团队账号" autoComplete="username" value={teamUser} onChange={event=>setTeamUser(event.target.value)} disabled={busy}/></label>
