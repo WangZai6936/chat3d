@@ -50,27 +50,40 @@ export function platformSsoUiBase(){
 export function platformOAuthRedirectUri(teamBase:string){
  const configured=env().VITE_CHAT3D_PLATFORM_OAUTH_REDIRECT_URI?.trim();
  if(configured)return configured;
- const base=(teamBase||configuredTeamServiceBase()).replace(/\/$/,'');
- // Desktop Tauri may use a custom scheme when set at build time; default HTTP callback on the team origin.
- if(typeof window!=='undefined'&&(globalThis as {__TAURI_INTERNALS__?:unknown}).__TAURI_INTERNALS__){
+ // Local dev/desktop always callbacks to the running origin (e.g. http://127.0.0.1:1420/…).
+ if(typeof window!=='undefined'){
   const origin=window.location?.origin??'';
   if(/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin))return origin+SSO_CALLBACK_PATH;
  }
- return base+SSO_CALLBACK_PATH;
+ return (teamBase||configuredTeamServiceBase()).replace(/\/$/,'')+SSO_CALLBACK_PATH;
 }
 
-/** Build collaborative SSO authorize URL: {SSO_UI}/sso?client_id&redirect_uri&response_type=code&scope=user.read */
+/**
+ * Build collaborative SSO authorize URL.
+ * 协同 admin UI uses Vue hash history, so the route must be `/#/sso?…` (not path `/sso?…`).
+ * Path `/sso` only hits SPA fallback HTML; the router then lands on `#/home` and never issues a code.
+ */
 export function buildPlatformAuthorizeUrl(teamBase:string,state:string){
  const redirect=platformOAuthRedirectUri(teamBase);
  const clientId=platformOAuthClientId();
  const loginOverride=env().VITE_CHAT3D_PLATFORM_LOGIN_URL?.trim();
- const url=new URL(loginOverride||(platformSsoUiBase()+'/sso'));
- url.searchParams.set('client_id',clientId);
- url.searchParams.set('redirect_uri',redirect);
- url.searchParams.set('response_type','code');
- url.searchParams.set('scope','user.read');
- url.searchParams.set('state',state);
- return url.toString();
+ if(loginOverride){
+  const url=new URL(loginOverride);
+  url.searchParams.set('client_id',clientId);
+  url.searchParams.set('redirect_uri',redirect);
+  url.searchParams.set('response_type','code');
+  url.searchParams.set('scope','user.read');
+  url.searchParams.set('state',state);
+  return url.toString();
+ }
+ const q=new URLSearchParams({
+  client_id:clientId,
+  redirect_uri:redirect,
+  response_type:'code',
+  scope:'user.read',
+  state,
+ });
+ return platformSsoUiBase()+'/#/sso?'+q.toString();
 }
 
 export interface PlatformOAuthCallback {
@@ -117,12 +130,18 @@ export function publishPlatformOAuthResult(result:PlatformOAuthCallback){
  try{new BroadcastChannel(CHANNEL).postMessage(result);}catch{/* ignore */}
 }
 
+export function clearPendingPlatformOAuth(){
+ try{localStorage.removeItem(PENDING_KEY);}catch{/* ignore */}
+}
 export function consumePendingPlatformOAuth():PlatformOAuthCallback|undefined{
  try{
   const raw=localStorage.getItem(PENDING_KEY);if(!raw)return undefined;
   localStorage.removeItem(PENDING_KEY);
   const parsed=JSON.parse(raw) as PlatformOAuthCallback & {at?:number};
   if(parsed.at&&Date.now()-parsed.at>600000)return undefined;
+  // After clearing remember / failed attempts, ignore leftovers without a usable credential.
+  if(parsed.error&&!parsed.code&&!parsed.accessToken)return undefined;
+  if(!parsed.code&&!parsed.accessToken)return undefined;
   return parsed;
  }catch{return undefined;}
 }
@@ -149,6 +168,9 @@ export async function openPlatformAuthorizationWindow(url:string){
   await open(url);
   return;
  }
- const popup=window.open(url,'_blank','noopener,noreferrer');
+ // Do not pass "noopener" in windowFeatures: modern browsers then return null from window.open,
+ // which falsely triggers「无法打开协同登录窗口」. Null opener after open is enough.
+ const popup=window.open(url,'_blank');
  if(!popup)throw Error('无法打开协同登录窗口，请允许弹窗后重试');
+ try{popup.opener=null;}catch{/* ignore */}
 }

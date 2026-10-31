@@ -8,7 +8,7 @@ import {assertLibraryReady} from './libraryNavigation';
 import {listModelAssets,readModelAsset} from './modelAssetStorage';
 import {listTeamResourceLinks,listLocalTeamResourceStates,reserveTeamResourceLink,saveTeamResourceLink,rememberTeamResourceHeads,teamLocalFingerprint,teamResourceKey,type TeamResourceLink,type LocalTeamResourceState} from './teamResourceLinks';
 import {DEFAULT_PLATFORM_BASE,DEFAULT_PLATFORM_TENANT,loadPlatformAuth,savePlatformAuth,type PlatformAuth} from './platformAuthStorage';
-import {buildPlatformAuthorizeUrl,clearPlatformOAuthCallbackFromUrl,configuredTeamServiceBase,consumePendingPlatformOAuth,openPlatformAuthorizationWindow,parsePlatformOAuthCallback,platformOAuthRedirectUri,platformTenantId,publishPlatformOAuthResult,watchPlatformOAuthResult,type PlatformOAuthCallback} from './platformOAuth';
+import {buildPlatformAuthorizeUrl,clearPendingPlatformOAuth,clearPlatformOAuthCallbackFromUrl,configuredTeamServiceBase,consumePendingPlatformOAuth,openPlatformAuthorizationWindow,parsePlatformOAuthCallback,platformOAuthRedirectUri,platformTenantId,publishPlatformOAuthResult,watchPlatformOAuthResult,type PlatformOAuthCallback} from './platformOAuth';
 type PublicationShape=true|{[key:string]:PublicationShape}|readonly PublicationShape[];
 const vectorShape=[true] as const,transformShape={position:vectorShape,rotationQuaternion:vectorShape,scale:vectorShape};
 const geometryShape={type:true,params:{width:true,height:true,depth:true,bevelRadius:true,radius:true,widthSegments:true,heightSegments:true,radiusTop:true,radiusBottom:true,radialSegments:true,cornerRadius:true,holeRadius:true,length:true,thickness:true,outerRadius:true,innerRadius:true,widthTop:true,widthBottom:true,positions:vectorShape,indices:vectorShape,normals:vectorShape,uvs:vectorShape,points:[vectorShape],rings:[{center:vectorShape,radiusX:true,radiusZ:true}],segments:true,smooth:true,wallThickness:true,capStart:true,capEnd:true,holes:[[vectorShape]],edgeRadius:true}} satisfies PublicationShape;
@@ -100,7 +100,7 @@ async function applyOAuthCallback(callback:PlatformOAuthCallback,base:string,rem
  if(callback.error)throw Error(callback.error);
  if(callback.accessToken)return loginTeamWithAccessToken(callback.accessToken,{base,refreshToken:callback.refreshToken,expiresTime:callback.expiresTime,remember});
  if(callback.code)return exchangeTeamAuthorizationCode(callback.code,{base,remember});
- throw Error('协同登录回调缺少令牌');
+ throw Error('协同登录回调缺少令牌或授权码');
 }
 /** Open 协同 login/authorize; resolve when callback delivers accessToken or code. */
 export async function beginTeamAuthorization(options:{base?:string;remember?:boolean;timeoutMs?:number}={}){
@@ -128,7 +128,7 @@ export async function beginTeamAuthorization(options:{base?:string;remember?:boo
   const timer=window.setTimeout(()=>settle(()=>reject(Error('协同登录超时，请重试「登录授权」'))),timeoutMs);
  });
 }
-export async function logoutTeamSession(){const previous=sharedClient;sharedClient=undefined;for(const listener of sessionListeners)listener();await previous?.logout();}
+export async function logoutTeamSession(){const previous=sharedClient;sharedClient=undefined;clearPendingPlatformOAuth();savePlatformAuth(null);for(const listener of sessionListeners)listener();await previous?.logout();}
 export async function resumeTeamFromPlatformAuth(base:string,platformBase?:string,tenantId?:string){
  if(sharedClient?.user)return sharedClient;
  const saved=loadPlatformAuth();if(!saved?.accessToken)return undefined;
