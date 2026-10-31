@@ -54,10 +54,10 @@ async function loginSso(accessToken,tenantId=platformTenant){
  if(u.disabled)fail(401,'账号已停用');
  return {token:issue(u.id,now,{access:accessToken,tenant}),user:{id:u.id,name:u.name,role:u.role}};
 }
-async function loginSsoCode(code,redirectUri,tenantId=platformTenant){
+async function loginSsoCode(code,redirectUri,tenantId=platformTenant,state){
  if(!oauthClientId||!oauthClientSecret)fail(503,'协同 OAuth client 尚未配置');
- if(typeof code!=='string'||!code||typeof redirectUri!=='string'||!redirectUri)fail(400,'授权码参数无效');
- const body=new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:redirectUri,client_id:oauthClientId,client_secret:oauthClientSecret});
+ if(typeof code!=='string'||!code||typeof redirectUri!=='string'||!redirectUri||typeof state!=='string'||!state.trim()||state.length>256)fail(400,'授权码参数无效');
+ const body=new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:redirectUri,client_id:oauthClientId,client_secret:oauthClientSecret,state});
  let response;try{response=await fetch(platformAuthBase+oauthTokenPath,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','tenant-id':String(tenantId??platformTenant)},body,signal:AbortSignal.timeout(15000),redirect:'error'});}catch{fail(502,'无法连接协同认证服务');}
  let data;try{data=await response.json();}catch{fail(502,'协同认证响应无效');}
  const accessToken=data?.data?.accessToken??data?.access_token;
@@ -112,7 +112,7 @@ export function teamMiddleware(team,validate,{origins=[]}={}){
    }
    if(req.method==='POST'&&url.pathname==='/api/team/login')return send(200,team.login(body.name,body.password));
    if(req.method==='POST'&&url.pathname==='/api/team/login/sso')return send(200,await team.loginSso(body.accessToken,body.tenantId));
-   if(req.method==='POST'&&url.pathname==='/api/team/login/sso/code')return send(200,await team.loginSsoCode(body.code,body.redirectUri,body.tenantId));
+   if(req.method==='POST'&&url.pathname==='/api/team/login/sso/code')return send(200,await team.loginSsoCode(body.code,body.redirectUri,body.tenantId,body.state));
    const token=req.headers.authorization?.replace(/^Bearer /,'');const user=await team.authenticate(token);
    if(req.method==='GET'&&url.pathname==='/api/team/me')return send(200,user);
    if(req.method==='POST'&&url.pathname==='/api/team/logout'){team.logout(token);return send(200,{ok:true});}

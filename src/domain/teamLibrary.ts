@@ -85,11 +85,11 @@ export async function loginTeamWithAccessToken(accessToken:string,options:{base?
  const auth:PlatformAuth={base:DEFAULT_PLATFORM_BASE,tenantId,username:options.username??next.user?.name??'',accessToken,refreshToken:options.refreshToken??'',expiresTime:options.expiresTime??0,remember:options.remember!==false};
  savePlatformAuth(auth);rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
 }
-export async function exchangeTeamAuthorizationCode(code:string,options:{base?:string;redirectUri?:string;tenantId?:string;remember?:boolean}={}){
+export async function exchangeTeamAuthorizationCode(code:string,options:{base?:string;redirectUri?:string;tenantId?:string;state?:string;remember?:boolean}={}){
  if(sharedClient?.user)throw Error('请先退出当前团队账号');
  const base=options.base||defaultTeamServiceBase();
  const next=new TeamClient(base);
- const result=await next.request<{token:string;user:TeamUser;platform?:{accessToken:string;refreshToken?:string;expiresTime?:number}}>('login/sso/code',{code,redirectUri:options.redirectUri||platformOAuthRedirectUri(base),tenantId:options.tenantId||platformTenantId()});
+ const result=await next.request<{token:string;user:TeamUser;platform?:{accessToken:string;refreshToken?:string;expiresTime?:number}}>('login/sso/code',{code,redirectUri:options.redirectUri||platformOAuthRedirectUri(base),tenantId:options.tenantId||platformTenantId(),...(options.state!==undefined?{state:options.state}:{})});
  next.acceptSession(result.token,result.user);
  if(result.platform?.accessToken){
   savePlatformAuth({base:DEFAULT_PLATFORM_BASE,tenantId:options.tenantId||platformTenantId(),username:result.user.name,accessToken:result.platform.accessToken,refreshToken:result.platform.refreshToken??'',expiresTime:result.platform.expiresTime??0,remember:options.remember!==false});
@@ -99,7 +99,7 @@ export async function exchangeTeamAuthorizationCode(code:string,options:{base?:s
 async function applyOAuthCallback(callback:PlatformOAuthCallback,base:string,remember:boolean){
  if(callback.error)throw Error(callback.error);
  if(callback.accessToken)return loginTeamWithAccessToken(callback.accessToken,{base,refreshToken:callback.refreshToken,expiresTime:callback.expiresTime,remember});
- if(callback.code)return exchangeTeamAuthorizationCode(callback.code,{base,remember});
+ if(callback.code)return exchangeTeamAuthorizationCode(callback.code,{base,remember,state:callback.state});
  throw Error('协同登录回调缺少令牌或授权码');
 }
 /** Open 协同 login/authorize; resolve when callback delivers accessToken or code. */
