@@ -23,9 +23,12 @@ try{
  const opts=(transport,document=createInitialDoc())=>({text:'按参考图建模',config:cfg,document,selection:[],images:[picture],streamFn:transport.fn,capture:async()=>picture});
  await test('task budgets normalize invalid input and preserve bounded defaults',async()=>{
   const {normalizeTaskBudget,taskBudgetReason}=await server.ssrLoadModule('/src/ai/taskBudget.ts');
-  assert.deepEqual(normalizeTaskBudget(),{maxMinutes:10,maxRounds:24,maxReportedTokens:500000});
-  assert.deepEqual(normalizeTaskBudget({maxMinutes:Infinity,maxRounds:0,maxReportedTokens:NaN}),{maxMinutes:10,maxRounds:1,maxReportedTokens:500000});
+  assert.deepEqual(normalizeTaskBudget(),{maxMinutes:10,maxRounds:24,maxReportedTokens:2000000});
+  assert.deepEqual(normalizeTaskBudget({maxMinutes:Infinity,maxRounds:0,maxReportedTokens:NaN}),{maxMinutes:10,maxRounds:1,maxReportedTokens:2000000});
   assert.match(taskBudgetReason(normalizeTaskBudget(),1800000,0,0),/分钟上限/);
+  assert.match(taskBudgetReason(normalizeTaskBudget(),0,0,2_000_000),/软上限/);
+  assert.match(taskBudgetReason(normalizeTaskBudget(),0,0,2_000_000),/不是单个资产的价格或账单/);
+  assert.match(taskBudgetReason(normalizeTaskBudget(),0,0,2_000_000),/继续/);
  });
  await test('productive task stops at configured round cap and keeps an incomplete atomic draft',async()=>{
   const f=fake([[edit],[{name:'edit_scene',args:{summary:'second',operations:[{...create,name:'second',tempId:'second'}]}}],[edit]]);
