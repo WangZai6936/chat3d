@@ -78,7 +78,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
   const shown = (models ?? []).filter((id) => id.toLowerCase().includes(query.toLowerCase()));
   const originBlocked = error.includes('origin not allowed');
   return <Dialog.Root open onOpenChange={open=>{if(!open)onClose();}}>
-    <Dialog.Content className="settings-module model-settings-module" aria-describedby={undefined} maxWidth="680px" style={{padding:0,maxHeight:'92vh',overflowY:'auto',background:'var(--color-panel-solid)'}} onInteractOutside={e=>e.preventDefault()}>
+    <Dialog.Content className="settings-module model-settings-module" aria-describedby={undefined} maxWidth="680px" style={{padding:0,maxHeight:'92vh',overflowY:'auto',background:'var(--sc-surface-elevated, var(--color-panel-solid))'}} onInteractOutside={e=>e.preventDefault()}>
       <header className="flex items-center justify-between px-5 py-4 border-b border-black/40">
         <Dialog.Title id="model-settings-title" className="font-bold text-lg" style={{margin:0}}>连接模型服务</Dialog.Title>
         <button aria-label="关闭模型配置" onClick={onClose} className="px-2 py-1">✕</button>
@@ -89,7 +89,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
         <label className="block text-sm space-y-1"><span>API Key</span><input className={inputClass} type="password" autoComplete="off" value={apiKey} onChange={(e)=>{invalidate();setApiKey(e.target.value)}} onBlur={()=>void load(false)} placeholder="填写服务提供的密钥" /></label>
         <label className="flex gap-2 text-sm"><input type="checkbox" checked={rememberApiKey} onChange={e=>setRememberApiKey(e.target.checked)}/><span>在此设备记住密钥<span className="block text-xs text-gray-400">默认仅本次会话使用，刷新或关闭后需重新输入。勾选后会以明文保存在本机浏览器中，请仅在可信设备使用。</span></span></label>
         <div className="space-y-3">
-          <button onClick={()=>void load()} disabled={!ready || fetching} className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 rounded text-sm">{fetching ? '正在获取模型列表…' : models?.length ? '重新获取模型列表' : '获取可用模型'}</button>
+          <button onClick={()=>void load()} disabled={!ready || fetching} className="model-settings-primary w-full px-4 py-2 disabled:opacity-40 rounded text-sm">{fetching ? '正在获取模型列表…' : models?.length ? '重新获取模型列表' : '获取可用模型'}</button>
           <SiteAccessRecovery error={error}/>
           {error && <div role="alert" className="text-sm p-3 bg-red-950/50 text-red-200 rounded break-words">{error}</div>}
           {!!models?.length && !manual && <>
@@ -115,7 +115,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
       </div>
       <footer className="flex items-center justify-between p-4 border-t border-black/40">
         <button onClick={()=>void test()} disabled={!valid || testing || fetching} className="px-3 py-2 bg-white/10 rounded disabled:opacity-40">{testing?'测试中…':'测试连接'}</button>
-        <div className="flex gap-2"><button onClick={onClose} className="px-3 py-2 bg-white/10 rounded">取消</button><button onClick={save} disabled={!valid || fetching} className="px-4 py-2 rounded bg-blue-600 disabled:opacity-40">保存配置</button></div>
+        <div className="flex gap-2"><button onClick={onClose} className="px-3 py-2 bg-white/10 rounded">取消</button><button onClick={save} disabled={!valid || fetching} className="model-settings-primary px-4 py-2 rounded disabled:opacity-40">保存配置</button></div>
       </footer>
     </Dialog.Content>
   </Dialog.Root>;

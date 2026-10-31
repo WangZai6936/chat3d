@@ -1,4 +1,16 @@
 .canvas-studio.frosted-studio .studio-shell-main { min-height: 0; min-width: 0; display: flex; flex-direction: column; background: var(--sc-surface-page); }
+/* Include portaled dialogs in the same typography and control system. */
+body:has(.frosted-studio) .radix-themes{--default-font-family:var(--sc-font);font-family:var(--sc-font)}
+body:has(.frosted-studio) .settings-module.model-settings-module{background:var(--sc-surface-elevated);color:var(--sc-ink);font-family:var(--sc-font);border:1px solid var(--sc-border);border-radius:10px}
+body:has(.frosted-studio) .model-settings-module :is(input:not([type=checkbox]),select){background:var(--sc-surface-subtle);color:var(--sc-ink);border-color:var(--sc-border);border-radius:6px}
+body:has(.frosted-studio) .model-settings-module :is(.text-gray-400,.text-blue-300){color:var(--sc-ink-muted)}
+body:has(.frosted-studio) .model-settings-module .text-xs{font-size:13px;line-height:1.7}
+body:has(.frosted-studio) .model-settings-module :is(details,fieldset,footer){background:var(--sc-surface-subtle);border-color:var(--sc-border-subtle);border-radius:6px}
+body:has(.frosted-studio) .model-settings-module :is(header,footer){border-color:var(--sc-border-subtle)}
+body:has(.frosted-studio) .model-settings-module button{min-height:36px;border-radius:6px}
+body:has(.frosted-studio) .model-settings-module .model-settings-primary{background:var(--sc-accent);color:var(--sc-accent-ink)}
+body:has(.frosted-studio) .model-settings-module .model-settings-primary:hover:not(:disabled){filter:brightness(1.08)}
+body:has(.frosted-studio) .model-settings-module :is(button,input,select):focus-visible{outline:2px solid var(--sc-focus);outline-offset:2px}
 .canvas-studio.frosted-studio .studio-page { position: relative; }
 .canvas-studio.frosted-studio .studio-panel { border: 0; border-radius: var(--sc-radius-lg); background: var(--sc-surface-elevated); box-shadow: none; }
 .canvas-studio.frosted-studio .studio-panel-flat { background: transparent; }

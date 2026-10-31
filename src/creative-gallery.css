@@ -1,5 +1,5 @@
 /* Selected concept 1: manager pages only. Editor geometry and controls stay untouched. */
-.canvas-studio.frosted-studio.manager-mode :is(.home-page,.resource-page){max-width:1680px;padding:32px 38px}
+.canvas-studio.frosted-studio.manager-mode .home-page{max-width:1680px;padding:32px 38px}
 .canvas-studio.frosted-studio.manager-mode .home-creation{display:grid;grid-template-columns:minmax(360px,.95fr) minmax(400px,1.05fr);gap:24px;align-items:stretch;margin:0 0 32px}
 .canvas-studio.frosted-studio.manager-mode .home-create-column{display:flex;flex-direction:column;justify-content:center;gap:22px;padding:24px 10px}
 .canvas-studio.frosted-studio.manager-mode .home-create-column header h1{font-size:clamp(30px,2.8vw,44px);line-height:1.25;letter-spacing:-1px;max-width:500px}
@@ -27,13 +27,9 @@
 .canvas-studio.frosted-studio.manager-mode .home-featured-empty p{font-size:14px;line-height:1.8}
 .canvas-studio.frosted-studio.manager-mode .home-recent{grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
 .canvas-studio.frosted-studio.manager-mode .home-project-link>img,.canvas-studio.frosted-studio.manager-mode .home-project-link>.resource-no-thumb{aspect-ratio:1.9}
-.canvas-studio.frosted-studio.manager-mode .resource-heading{margin-bottom:23px}
-.canvas-studio.frosted-studio.manager-mode .resource-heading h1{font-size:30px}
-.canvas-studio.frosted-studio.manager-mode .resource-toolbar{border:0;padding-bottom:0;margin-bottom:24px}
-.canvas-studio.frosted-studio.manager-mode .resource-grid,.canvas-studio.frosted-studio.manager-mode .resource-project-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
-.canvas-studio.frosted-studio.manager-mode .resource-browser.has-detail{grid-template-columns:minmax(0,1fr) 310px}
-.canvas-studio.frosted-studio.manager-mode .resource-detail{border-radius:18px;padding:20px}
-.canvas-studio.frosted-studio.manager-mode .resource-page .resource-tile.rt-Card,.canvas-studio.frosted-studio.manager-mode .resource-project-grid .resource-row{border-radius:14px}
-@media(max-width:1150px){.canvas-studio.frosted-studio.manager-mode .home-creation{grid-template-columns:minmax(300px,1fr) minmax(320px,1fr);gap:18px}.canvas-studio.frosted-studio.manager-mode .resource-browser.has-detail{grid-template-columns:minmax(0,1fr) 270px}.canvas-studio.frosted-studio.manager-mode .resource-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:850px){.canvas-studio.frosted-studio.manager-mode .home-creation{grid-template-columns:1fr}.canvas-studio.frosted-studio.manager-mode .home-create-column{padding:0}.canvas-studio.frosted-studio.manager-mode .home-featured{min-height:330px}.canvas-studio.frosted-studio.manager-mode .resource-browser.has-detail{grid-template-columns:1fr}.canvas-studio.frosted-studio.manager-mode .home-recent,.canvas-studio.frosted-studio.manager-mode .resource-project-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media(max-width:520px){.canvas-studio.frosted-studio.manager-mode :is(.home-page,.resource-page){padding:22px 14px}.canvas-studio.frosted-studio.manager-mode .home-create-column header h1{font-size:29px}.canvas-studio.frosted-studio.manager-mode .home-featured-heading{padding:18px 16px 0}.canvas-studio.frosted-studio.manager-mode .home-featured-choices img{height:65px}.canvas-studio.frosted-studio.manager-mode .home-recent,.canvas-studio.frosted-studio.manager-mode .resource-grid,.canvas-studio.frosted-studio.manager-mode .resource-project-grid{gap:12px}}
+/* Resource library layout is owned by ui/studio/studio-pages.css. */
+.canvas-studio.frosted-studio.manager-mode .resource-project-grid{grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+.canvas-studio.frosted-studio.manager-mode .resource-project-grid .resource-row{border-radius:14px}
+@media(max-width:1150px){.canvas-studio.frosted-studio.manager-mode .home-creation{grid-template-columns:minmax(300px,1fr) minmax(320px,1fr);gap:18px}}
+@media(max-width:850px){.canvas-studio.frosted-studio.manager-mode .home-creation{grid-template-columns:1fr}.canvas-studio.frosted-studio.manager-mode .home-create-column{padding:0}.canvas-studio.frosted-studio.manager-mode .home-featured{min-height:330px}.canvas-studio.frosted-studio.manager-mode .home-recent,.canvas-studio.frosted-studio.manager-mode .resource-project-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.canvas-studio.frosted-studio.manager-mode .home-page{padding:22px 14px}.canvas-studio.frosted-studio.manager-mode .home-create-column header h1{font-size:29px}.canvas-studio.frosted-studio.manager-mode .home-featured-heading{padding:18px 16px 0}.canvas-studio.frosted-studio.manager-mode .home-featured-choices img{height:65px}.canvas-studio.frosted-studio.manager-mode .home-recent,.canvas-studio.frosted-studio.manager-mode .resource-project-grid{gap:12px}}

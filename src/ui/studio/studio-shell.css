@@ -37,3 +37,4 @@
 @media(max-width:720px){.canvas-studio.frosted-studio .studio-shell-brand>svg{width:30px;height:30px}.canvas-studio.frosted-studio .studio-management-nav{margin-top:var(--sidebar-gap-group)}.canvas-studio.frosted-studio .studio-shell-nav{gap:var(--sidebar-gap-in)}.canvas-studio.frosted-studio.editor-mode>.workbench-global-header{top:12px}}
 
 .dark .canvas-studio.frosted-studio .studio-shell-nav>.rt-Button.studio-nav-item{background:transparent}.dark .canvas-studio.frosted-studio .studio-shell-nav>.rt-Button.studio-nav-item[aria-current=page]{background:var(--sc-nav-active)}
+.dark .canvas-studio.frosted-studio .navigation-pages.studio-shell-nav{background:transparent;border-color:transparent}
