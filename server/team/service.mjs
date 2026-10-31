@@ -60,9 +60,10 @@ async function loginSsoCode(code,redirectUri,tenantId=platformTenant,state){
  const body=new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:redirectUri,client_id:oauthClientId,client_secret:oauthClientSecret,state});
  let response;try{response=await fetch(platformAuthBase+oauthTokenPath,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','tenant-id':String(tenantId??platformTenant)},body,signal:AbortSignal.timeout(15000),redirect:'error'});}catch{fail(502,'无法连接协同认证服务');}
  let data;try{data=await response.json();}catch{fail(502,'协同认证响应无效');}
- const accessToken=data?.data?.accessToken??data?.access_token;
- const refreshToken=data?.data?.refreshToken??data?.refresh_token??'';
- const expiresTime=data?.data?.expiresTime??(typeof data?.expires_in==='number'?Date.now()+data.expires_in*1000:0);
+ const accessToken=data?.data?.access_token??data?.data?.accessToken??data?.access_token;
+ const refreshToken=data?.data?.refresh_token??data?.data?.refreshToken??data?.refresh_token??'';
+ const expiresIn=data?.data?.expires_in??data?.expires_in;
+ const expiresTime=data?.data?.expiresTime??data?.data?.expires_time??data?.expiresTime??data?.expires_time??(typeof expiresIn==='number'?Date.now()+expiresIn*1000:0);
  if(response.status===401||data?.code===401)fail(401,'协同登录已失效');
  if(!response.ok||(data?.code!==undefined&&data.code!==0)||typeof accessToken!=='string'||!accessToken)fail(502,data?.msg||'协同授权码兑换失败');
  const session=await loginSso(accessToken,tenantId);

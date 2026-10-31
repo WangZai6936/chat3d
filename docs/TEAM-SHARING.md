@@ -39,6 +39,7 @@ Dockerfile 同时包含团队校验器。容器部署时将受限持久卷挂载
 - 不在 Web 端提供 AI 生成、工作台编辑或选择性发布；发布仍在桌面客户端顶部导航 **团队** 页完成。
 - OAuth 回调页 `/team/sso/callback` 先清除 URL 中的凭据，再携带 `state` 单次调用 `/api/team/login/sso/code`。成功后仅通过 BroadcastChannel/localStorage 发布平台 `accessToken`、`refreshToken`、`expiresTime`，不发布授权码或 `state`；等待中的桌面/网页使用 `/api/team/login/sso` 建立自己的团队会话，不再兑换授权码。回调失败后重试可重新打开授权窗口。
 - 单次兑换回归：`node tests/team-oauth-callback.mjs`（本地 HTTP 服务，覆盖回调兑换、令牌优先级及 BroadcastChannel/storage/focus 重复通知）。
+- 平台授权码兑换支持 `{code:0,data:{access_token,refresh_token,expires_in}}`，优先读取内层 snake_case 令牌，兼容内层 camelCase 与顶层 OAuth 令牌字段；有效期优先使用 `expiresTime` / `expires_time` 绝对时间，否则将内层或顶层 `expires_in` 秒数换算为毫秒时间戳，缺失时为 `0`。`node tests/team-library.mjs` 使用本地平台 HTTP mock 验证兑换、团队会话、有效期优先级及未配置 secret 的 503。
 
 **OpenResty / Nginx 要点（与现有门户并存）：**
 
