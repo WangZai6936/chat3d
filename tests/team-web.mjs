@@ -31,11 +31,22 @@ const authUrl=new URL(authHash,'http://local.invalid');
 assert.equal(authUrl.pathname,'/sso');
 assert.equal(authUrl.searchParams.get('client_id'),DEFAULT_OAUTH_CLIENT_ID);
 assert.equal(authUrl.searchParams.get('response_type'),'code');
-assert.equal(authUrl.searchParams.get('scope'),'user.read');
+assert.equal(authUrl.searchParams.has('scope'),false);
 assert.equal(authUrl.searchParams.get('state'),'state-test');
-assert.ok(authUrl.searchParams.get('redirect_uri').endsWith(SSO_CALLBACK_PATH));
+assert.equal(authUrl.searchParams.get('redirect_uri'),configuredTeamServiceBase()+SSO_CALLBACK_PATH);
 assert.equal(showTeamPasswordLogin(),false);
+const overrideServer=await createServer({server:{middlewareMode:true,hmr:false},appType:'custom',define:{'import.meta.env.VITE_CHAT3D_PLATFORM_LOGIN_URL':JSON.stringify('https://sso.example/authorize?scope=user.read&theme=dark')}});
+try{
+ const {buildPlatformAuthorizeUrl:buildOverride}=await overrideServer.ssrLoadModule('/src/domain/platformOAuth.ts');
+ const overrideUrl=new URL(buildOverride(configuredTeamServiceBase(),'override-state'));
+ assert.equal(overrideUrl.searchParams.has('scope'),false);
+ assert.equal(overrideUrl.searchParams.get('client_id'),DEFAULT_OAUTH_CLIENT_ID);
+ assert.equal(overrideUrl.searchParams.get('redirect_uri'),configuredTeamServiceBase()+SSO_CALLBACK_PATH);
+ assert.equal(overrideUrl.searchParams.get('response_type'),'code');
+ assert.equal(overrideUrl.searchParams.get('state'),'override-state');
+ assert.equal(overrideUrl.searchParams.get('theme'),'dark');
+}finally{await overrideServer.close();}
 await server.close();
 console.log('PASS team web copy export produces desktop-importable snapshots');
-console.log('PASS platform authorize URL uses hash /#/sso with scenivo client');
+console.log('PASS platform authorize URLs preserve OAuth parameters without auto-approval scope');
 
