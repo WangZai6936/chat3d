@@ -2,6 +2,8 @@ import {useRef,useState} from 'react';
 import {Button,TextField,Badge} from '@radix-ui/themes';
 import {CubeIcon,LayersIcon,MagnifyingGlassIcon,LockClosedIcon,PersonIcon,DesktopIcon} from '@radix-ui/react-icons';
 import {TeamClient,defaultTeamServiceBase,rememberTeamServiceBase,type TeamItem,type TeamVersion} from '../domain/teamLibrary';
+import {DEFAULT_PLATFORM_BASE,DEFAULT_PLATFORM_TENANT,savePlatformAuth} from '../domain/platformAuthStorage';
+import {teamFetch} from '../domain/teamTransport';
 import {assetDocument,parseModelAsset} from '../domain/modelAssets';
 import {parseProject} from '../domain/project';
 import {captureLibraryThumbnail} from '../scene/libraryThumbnail';
@@ -9,7 +11,7 @@ import {downloadTeamCopyFile} from '../domain/teamCopyExport';
 import {BrandMark} from '../ui/BrandMark';
 
 export function TeamWebApp(){
- const [kind,setKind]=useState<'asset'|'scene'>('asset'),[address,setAddress]=useState(()=>defaultTeamServiceBase()||window.location.origin),[username,setUsername]=useState(''),[password,setPassword]=useState(''),[client,setClient]=useState<TeamClient>(),[rows,setRows]=useState<TeamItem[]>([]),[query,setQuery]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[preview,setPreview]=useState<TeamVersion>(),[image,setImage]=useState('');
+const [kind,setKind]=useState<'asset'|'scene'>('asset'),[address,setAddress]=useState(()=>defaultTeamServiceBase()||window.location.origin),[username,setUsername]=useState(''),[password,setPassword]=useState(''),[teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[remember,setRemember]=useState(false),[client,setClient]=useState<TeamClient>(),[rows,setRows]=useState<TeamItem[]>([]),[query,setQuery]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[preview,setPreview]=useState<TeamVersion>(),[image,setImage]=useState('');
  const lock=useRef(false);
  const kindLabel=kind==='asset'?'资产':'场景';
  async function run(fn:()=>Promise<void>){if(lock.current)return;lock.current=true;setBusy(true);setNotice('');try{await fn();}catch(e){setNotice(e instanceof Error?e.message:'操作失败，可重试');}finally{lock.current=false;setBusy(false);}}
@@ -30,12 +32,16 @@ export function TeamWebApp(){
  <li><LockClosedIcon aria-hidden/> 关闭页面后需重新登录</li>
  </ul>
  </div>
- <form className="team-login-card" onSubmit={e=>{e.preventDefault();void run(async()=>{const next=new TeamClient(address);await next.login(username,password);rememberTeamServiceBase(next.base);setPassword('');setClient(next);setRows(await next.list(kind));});}}>
- <header><h3>登录团队库</h3><p>默认使用当前站点作为服务地址，可按需修改。</p></header>
- <label className="team-field"><span className="team-field-label">团队服务地址</span><TextField.Root size="3" aria-label="团队服务地址" value={address} onChange={e=>setAddress(e.target.value)} disabled={busy}/></label>
- <label className="team-field"><span className="team-field-label">团队账号</span><TextField.Root size="3" aria-label="团队账号" autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} disabled={busy}/></label>
- <label className="team-field"><span className="team-field-label">团队密码</span><TextField.Root size="3" aria-label="团队密码" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} disabled={busy}/></label>
- <div className="team-login-actions"><Button size="3" disabled={busy} type="submit">登录团队</Button></div>
+<form className="team-login-card" onSubmit={e=>{e.preventDefault();void run(async()=>{const root=DEFAULT_PLATFORM_BASE.replace(/\/$/,'');const response=await teamFetch(root+'/admin-api/system/auth/login',{method:'POST',headers:{'Content-Type':'application/json','tenant-id':DEFAULT_PLATFORM_TENANT},body:JSON.stringify({username,password}),signal:AbortSignal.timeout(15000),redirect:'error',credentials:'omit'});const data=await response.json().catch(()=>null);if(response.status===401||data?.code===401)throw Error('协同账号或密码错误');if(!response.ok||data?.code!==0||typeof data?.data?.accessToken!=='string')throw Error(data?.msg||'协同登录失败');const next=new TeamClient(address);await next.loginWithPlatform({accessToken:data.data.accessToken,tenantId:DEFAULT_PLATFORM_TENANT});savePlatformAuth({base:root,tenantId:DEFAULT_PLATFORM_TENANT,username,accessToken:data.data.accessToken,refreshToken:data.data.refreshToken??'',expiresTime:data.data.expiresTime??0,remember});rememberTeamServiceBase(next.base);setPassword('');setClient(next);setRows(await next.list(kind));});}}>
+<header><h3>登录团队库</h3><p>优先使用协同账号。默认使用当前站点作为团队服务地址。</p></header>
+<label className="team-field"><span className="team-field-label">团队服务地址</span><TextField.Root size="3" aria-label="团队服务地址" value={address} onChange={e=>setAddress(e.target.value)} disabled={busy}/></label>
+<label className="team-field"><span className="team-field-label">协同账号</span><TextField.Root size="3" aria-label="协同账号" autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} disabled={busy}/></label>
+<label className="team-field"><span className="team-field-label">协同密码</span><TextField.Root size="3" aria-label="协同密码" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} disabled={busy}/></label>
+<label className="team-field"><span className="team-field-label">记住协同登录</span><input aria-label="记住协同登录" type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)} disabled={busy}/></label>
+<div className="team-login-actions"><Button size="3" disabled={busy} type="submit">使用协同账号登录</Button></div>
+<label className="team-field"><span className="team-field-label">团队账号</span><TextField.Root size="3" aria-label="团队账号" autoComplete="username" value={teamUser} onChange={e=>setTeamUser(e.target.value)} disabled={busy}/></label>
+<label className="team-field"><span className="team-field-label">团队密码</span><TextField.Root size="3" aria-label="团队密码" type="password" autoComplete="current-password" value={teamPassword} onChange={e=>setTeamPassword(e.target.value)} disabled={busy}/></label>
+<div className="team-login-actions"><Button size="3" variant="soft" color="gray" type="button" disabled={busy} onClick={()=>void run(async()=>{const next=new TeamClient(address);await next.login(teamUser,teamPassword);rememberTeamServiceBase(next.base);setTeamPassword('');setClient(next);setRows(await next.list(kind));})}>使用团队密码登录</Button></div>
  </form>
  </section>:<div className="team-workspace">
  <header className="team-session-bar team-web-session"><div><strong>{client.user?.name}</strong><span className="team-session-meta"><Badge color="gray" variant="soft">{client.user?.role}</Badge> · 已连接</span></div><Button variant="soft" color="gray" disabled={busy} onClick={()=>void run(async()=>{try{await client.logout();}finally{setClient(undefined);setRows([]);setPreview(undefined);setImage('');}})}>退出</Button></header>

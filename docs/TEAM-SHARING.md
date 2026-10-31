@@ -14,6 +14,11 @@ npm run build
 export CHAT3D_TEAM_DB=/srv/chat3d-data/team.sqlite
 # 浏览器实际来源必须精确匹配；不要设置通配符。
 export CHAT3D_TEAM_ORIGINS=https://team.company.example,https://portal.jiezi-ai.com,http://tauri.localhost,tauri://localhost
+# 协同平台（路径 A）。默认指向公司协同认证；只转发用户 accessToken，不使用服务账号令牌。
+export CHAT3D_PLATFORM_AUTH_BASE=http://36.133.218.210:48080
+export CHAT3D_PLATFORM_TENANT_ID=1
+# 设为 0 时关闭本地团队密码登录（返回 403），只保留协同账号换票。
+export CHAT3D_TEAM_PASSWORD_LOGIN=1
 export HOST=127.0.0.1
 export PORT=1420
 npm start
@@ -88,7 +93,7 @@ node server/team/admin.mjs disable alice
 ## 运维与边界
 
 - 备份：停止服务后复制整个持久目录（含 SQLite、WAL、SHM）；恢复到受限目录，保持相同 Node 版本后启动。在线备份须使用 SQLite 的备份工具，不要仅复制正在写入的主文件。备份含密码哈希与有效会话，应按内部敏感数据保管。
-- 限制：单进程服务，单团队，没有实时协作、外部客户租户、SSO、发布撤回或在线用户管理。单次发布22 MB HTTP上限，现有格式校验20 MB上限。容量规划与磁盘配额由部署方管理。
+- 限制：单进程服务，单团队，没有实时协作、外部客户租户、发布撤回或在线用户管理。登录主路径是协同账号：客户端用用户名密码向协同平台换 accessToken，再向 `/api/team/login/sso` 换 8 小时团队会话。新账号为 member，已有账号保留角色；停用账号与平台 401 均拒绝。SSO 会话超过 5 分钟或发布时会用同一用户 token 复核 `get-permission-info`，平台 401 删除会话。本地团队密码为次要入口，可用 `CHAT3D_TEAM_PASSWORD_LOGIN=0` 关闭。单次发布22 MB HTTP上限，现有格式校验20 MB上限。容量规划与磁盘配额由部署方管理。
 - 防护：服务端认证、数据库事务、不可变版本、逐原件写权限、跨源白名单；登录错误累计8次暂时限流15分钟。生产代理还应限制连接与登录速率。TLS在公司反向代理终止。
 - 测试仅创建临时账号与临时数据库，不触及真实个人数据、不调用真实收费模型。
 

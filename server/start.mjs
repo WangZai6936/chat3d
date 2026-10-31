@@ -12,7 +12,7 @@ const serveTeamWeb=createSpaStatic(teamWebRoot,'/team');
 const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.jpg':'image/jpeg','.webp':'image/webp'};
 const proxy=modelProxyMiddleware({allowed:process.env.CHAT3D_ALLOWED_UPSTREAMS,publicOrigin:process.env.CHAT3D_PUBLIC_ORIGIN});
 const blender=blenderMiddleware({enabled:process.env.CHAT3D_BLENDER_ENABLED==='1',executable:process.env.BLENDER_EXECUTABLE??'blender',publicOrigin:process.env.CHAT3D_PUBLIC_ORIGIN});
-const team=process.env.CHAT3D_TEAM_DB?openTeam(process.env.CHAT3D_TEAM_DB):null;
+const team=process.env.CHAT3D_TEAM_DB?openTeam(process.env.CHAT3D_TEAM_DB,{platformAuthBase:process.env.CHAT3D_PLATFORM_AUTH_BASE,platformTenantId:process.env.CHAT3D_PLATFORM_TENANT_ID,passwordLogin:process.env.CHAT3D_TEAM_PASSWORD_LOGIN!=='0'}):null;
 const sharing=team?teamMiddleware(team,(await import('../dist-team/validator.mjs')).validateTeamPayload,{origins:(process.env.CHAT3D_TEAM_ORIGINS??'').split(',').filter(Boolean)}):(req,res,next)=>next();
 const version=appVersionMiddleware();
 const server=createServer((req,res)=>version(req,res,()=>sharing(req,res,()=>blender(req,res,()=>proxy(req,res,async()=>{
