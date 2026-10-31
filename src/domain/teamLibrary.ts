@@ -124,8 +124,17 @@ async function applyOAuthCallback(callback:PlatformOAuthCallback,base:string,rem
  if(callback.code)return exchangeTeamAuthorizationCode(callback.code,{base,remember,state:callback.state});
  throw Error('协同登录回调缺少令牌或授权码');
 }
-/** Open 协同 login/authorize; resolve when callback delivers accessToken or code. */
-export async function beginTeamAuthorization(options:{base?:string;remember?:boolean;timeoutMs?:number}={}){
+/** Desktop opens the system browser; callback lives on the team portal origin, so BroadcastChannel/localStorage never reach Tauri. Poll the one-time claim by OAuth state instead. */
+export async function claimPlatformOAuthByState(base:string,state:string):Promise<PlatformOAuthCallback|undefined>{
+ const response=await teamFetch(teamAddress(base)+'/api/team/login/sso/claim',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({state}),signal:AbortSignal.timeout(15000),redirect:'error',credentials:'omit'});
+ if(response.status===404)return undefined;
+ const data=await response.json().catch(()=>null) as {error?:string;platform?:{accessToken?:string;refreshToken?:string;expiresTime?:number}}|null;
+ if(!response.ok)throw Error(data?.error??'协同登录领取失败');
+ if(typeof data?.platform?.accessToken!=='string'||!data.platform.accessToken)return undefined;
+ return {accessToken:data.platform.accessToken,refreshToken:data.platform.refreshToken,expiresTime:data.platform.expiresTime};
+}
+/** Open 协同 login/authorize; resolve when callback delivers accessToken or code (same-origin) or desktop claim poll. */
+export async function beginTeamAuthorization(options:{base?:string;remember?:boolean;timeoutMs?:number;pollMs?:number}={}){
  if(sharedClient?.user)throw Error('请先退出当前团队账号');
  const base=options.base||defaultTeamServiceBase();
  const remember=options.remember!==false;
@@ -134,10 +143,11 @@ export async function beginTeamAuthorization(options:{base?:string;remember?:boo
  const state=crypto.randomUUID();
  await openPlatformAuthorizationWindow(buildPlatformAuthorizeUrl(base,state));
  const timeoutMs=options.timeoutMs??300000;
+ const pollMs=options.pollMs??1500;
  return await new Promise<TeamClient>((resolve,reject)=>{
   let settled=false;
   let applying=false;
-  const cleanup=()=>{stopWatch();window.removeEventListener('focus',onFocus);window.clearTimeout(timer);};
+  const cleanup=()=>{stopWatch();window.removeEventListener('focus',onFocus);window.clearTimeout(timer);window.clearInterval(pollTimer);};
   const settle=(fn:()=>void)=>{if(settled)return;settled=true;cleanup();fn();};
   const handle=(callback:PlatformOAuthCallback)=>{
    if(settled||applying)return;
@@ -148,8 +158,15 @@ export async function beginTeamAuthorization(options:{base?:string;remember?:boo
    );
   };
   const stopWatch=watchPlatformOAuthResult(handle);
-  const onFocus=()=>{const again=consumePendingPlatformOAuth()||parsePlatformOAuthCallback();if(again){clearPlatformOAuthCallbackFromUrl();handle(again);}};
+  const onFocus=()=>{
+   const again=consumePendingPlatformOAuth()||parsePlatformOAuthCallback();
+   if(again){clearPlatformOAuthCallbackFromUrl();handle(again);return;}
+   void claimPlatformOAuthByState(base,state).then(result=>{if(result)handle(result);}).catch(()=>{/* keep waiting */});
+  };
   window.addEventListener('focus',onFocus);
+  const pollTimer=window.setInterval(()=>{
+   void claimPlatformOAuthByState(base,state).then(result=>{if(result)handle(result);}).catch(()=>{/* transient network; keep polling */});
+  },pollMs);
   const timer=window.setTimeout(()=>settle(()=>reject(Error('协同登录超时，请重试「登录授权」'))),timeoutMs);
  });
 }

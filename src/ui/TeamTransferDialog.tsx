@@ -12,7 +12,7 @@ export function TeamSessionLogin({onConnected,serviceOrigin}:{onConnected?:()=>v
  useEffect(()=>{if(getTeamSession()?.user||!address)return;let alive=true;void resumeTeamFromPlatformAuth(address).then(next=>{if(alive&&next)onConnected?.();}).catch(()=>{});return ()=>{alive=false;};},[address,onConnected]);
  function submit(action:()=>Promise<unknown>){if(lock.current)return;lock.current=true;setBusy(true);setError('');void action().then(()=>{setTeamPassword('');setWaiting(false);onConnected?.();}).catch(error=>setError(error instanceof Error?error.message:'团队登录失败')).finally(()=>{lock.current=false;setBusy(false);});}
  return <form className="team-login-card" onSubmit={event=>{event.preventDefault();setWaiting(true);submit(()=>beginTeamAuthorization({base:address}));}}>
-  <header><h3>登录团队服务</h3><p>点击登录授权，在协同平台完成登录后自动返回。团队会话仅保存在内存中。</p></header>
+  <header><h3>登录团队服务</h3><p>点击登录授权，在协同平台完成登录后自动返回。登录后各模块共用本次团队会话；关闭应用后可用已保存的协同登录恢复。</p></header>
   {error&&<p className="team-error" role="alert">{error}</p>}
   <Button type="submit" disabled={busy||!address}>{busy||waiting?'等待协同登录…':'登录授权'}</Button>
   {waiting&&!error&&<p className="team-security-note">已打开协同登录，请在浏览器完成授权后回到本窗口。</p>}

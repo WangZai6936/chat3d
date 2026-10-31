@@ -17,25 +17,25 @@ export function TeamWebApp(){
  const [oauthCallback]=useState(()=>parsePlatformOAuthCallback());
  const isOAuthCallback=/\/team\/sso\/callback\/?$/.test(window.location.pathname)||Boolean(oauthCallback);
  const callbackCompletion=useRef<Promise<TeamClient>|undefined>(undefined);
+ const [callbackDone,setCallbackDone]=useState(false);
  useEffect(()=>{
   if(!isOAuthCallback||!oauthCallback)return;
   let alive=true;
-  setWaiting(true);setNotice('');
+  setWaiting(true);setNotice('');setCallbackDone(false);
+  // Exchange once so the desktop can claim by state; do NOT enter the portal team library here.
   const completion=callbackCompletion.current??=completeTeamOAuthCallbackPage(oauthCallback,{base:address});
-  void completion.then(async next=>{
-   if(!alive)return;
-   setClient(next);
-   const items=await next.list('asset');
-   if(!alive)return;
-   setRows(items);
-  }).catch(e=>{if(alive)setNotice(e instanceof Error?e.message:'协同登录失败');}).finally(()=>{if(alive)setWaiting(false);});
+  void completion.then(()=>{if(alive)setCallbackDone(true);}).catch(e=>{if(alive)setNotice(e instanceof Error?e.message:'协同登录失败');}).finally(()=>{if(alive)setWaiting(false);});
   return ()=>{alive=false;};
  },[isOAuthCallback,address,oauthCallback]);
  useEffect(()=>{if(client||!address||isOAuthCallback)return;let alive=true;void resumeTeamFromPlatformAuth(address).then(async next=>{if(!alive||!next)return;setClient(next);try{setRows(await next.list(kind));}catch{/* keep form */}});return ()=>{alive=false;};},[address,client,kind,isOAuthCallback]);
  const kindLabel=kind==='asset'?'资产':'场景';
  async function run(fn:()=>Promise<void>){if(lock.current)return;lock.current=true;setBusy(true);setNotice('');try{await fn();}catch(e){setNotice(e instanceof Error?e.message:'操作失败，可重试');}finally{lock.current=false;setBusy(false);}}
- if(isOAuthCallback&&!client){
-  return <div className="team-web-shell"><main className="team-web-main"><section className="team-login-card"><h2>{waiting?'正在完成协同登录…':'协同登录'}</h2><p>可关闭本页并返回 Scenivo；本页为团队库时会自动兑换授权码进入。</p>{notice&&<p className="team-error" role="alert">{notice}</p>}<Button disabled={busy||waiting} onClick={()=>void run(async()=>{setWaiting(true);try{const next=await beginTeamAuthorization({base:address,timeoutMs:15000});setClient(next);setRows(await next.list(kind));}finally{setWaiting(false);}})}>重试进入团队库</Button></section></main></div>;
+ if(isOAuthCallback){
+  const title=waiting?'正在完成协同登录…':callbackDone?'协同登录已完成':notice?'协同登录未完成':'协同登录';
+  const hint=callbackDone
+   ?'授权已交给 Scenivo 桌面端，请返回应用；可关闭本页。本页不会进入门户团队库。'
+   :'可关闭本页并返回 Scenivo；桌面端会自动完成登录。';
+  return <div className="team-web-shell"><main className="team-web-main"><section className="team-login-card"><h2>{title}</h2><p>{hint}</p>{notice&&<p className="team-error" role="alert">{notice}</p>}{!!notice&&!waiting&&<p className="team-security-note">请返回 Scenivo，重新点击「登录授权」后再试。</p>}</section></main></div>;
  }
  return <div className="team-web-shell">
  <header className="team-web-header"><BrandMark/><div><strong>Scenivo</strong><span>团队库 · 浏览器轻量版</span></div></header>
