@@ -95,7 +95,7 @@ try {
  Assert-ControlMissing '团队服务地址'
  Assert-ControlMissing '服务地址已固定为门户地址，不可修改'
  Find-Control '登录授权' | Out-Null
- Find-Control '登录团队服务' | Out-Null
+ Find-Control '登录，连接你的团队' | Out-Null
  $checks.Add(@{name='team library login-only until authenticated (SSO 登录授权; no asset/scene tabs or password form)';pass=$true})
 
 Click-Control '资产库'
