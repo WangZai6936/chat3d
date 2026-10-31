@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {Badge,Button,Dialog,TextField} from '@radix-ui/themes';
-import {Cross1Icon,LockClosedIcon,UploadIcon,DownloadIcon} from '@radix-ui/react-icons';
+import {Cross1Icon,UploadIcon,DownloadIcon} from '@radix-ui/react-icons';
 import {acquireLinkedTeamVersion,beginTeamAuthorization,defaultTeamServiceBase,getTeamSession,listTeamPublishSources,loginTeamSession,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,resumeTeamFromPlatformAuth,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPublishSource} from '../domain/teamLibrary';
 import {showTeamPasswordLogin} from '../domain/platformOAuth';
 import './team-library.css';
@@ -21,7 +21,6 @@ export function TeamSessionLogin({onConnected,serviceOrigin}:{onConnected?:()=>v
    <label className="team-field"><span>团队密码</span><TextField.Root aria-label="团队密码" type="password" autoComplete="current-password" value={teamPassword} onChange={event=>setTeamPassword(event.target.value)} disabled={busy}/></label>
    <Button type="button" variant="soft" color="gray" disabled={busy||!address||!teamUser||!teamPassword} onClick={()=>submit(()=>loginTeamSession(address,teamUser,teamPassword))}>使用团队密码登录</Button>
   </>}
-  <small className="team-security-note"><LockClosedIcon aria-hidden/> 服务地址已固定为团队门户；不在此填写协同账号密码。</small>
  </form>;
 }
 
