@@ -15,9 +15,12 @@ export function profileOpeningMetrics(doc:SceneDocument){
 export function referenceObservationCoverage(plans:ObjectBlueprint[],hasReference:boolean){
  const features=plans.flatMap(p=>p.features.map(f=>({object:p.name,name:f.name,observation:f.referenceObservation??null})));
  const missing=features.filter(f=>!f.observation);
+ const issues:string[]=!hasReference?[]:!features.length?['参考图尚未拆解为可逐项核对的可见结构特征']:missing.map(f=>`${f.object}：${f.name}缺少参考图可见特征记录`);
+ // Multi-part machines in a reference photo rarely resolve with 1–2 buckets; push for a real inventory.
+ if(hasReference&&features.length>0&&features.length<4)issues.push('参考图结构特征过少（当前'+features.length+'项）：复杂设备应按可见分区拆成更多可核对特征（如底盘、门架/立柱、货叉或载货面、灯具/标牌等），避免单柱或单箱偷懒');
  return {required:hasReference,featureCount:features.length,recordedCount:features.length-missing.length,accepted:false,
-  issues:!hasReference?[]:!features.length?['参考图尚未拆解为可逐项核对的可见结构特征']:missing.map(f=>`${f.object}：${f.name}缺少参考图可见特征记录`),
-  limitation:'只统计是否记录参考观察，不证明观察正确、几何实现或视觉相似；遮挡部分须注明未知，不能编造精确尺寸。'};
+  issues,
+  limitation:'只统计是否记录参考观察及特征拆分是否过粗，不证明观察正确、几何实现或视觉相似；遮挡部分须注明未知，不能编造精确尺寸。'};
 }
 
 export function referenceShapeChanged(before:SceneDocument,after:SceneDocument){
