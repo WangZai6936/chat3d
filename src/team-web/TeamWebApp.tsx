@@ -1,8 +1,8 @@
 import {useEffect,useRef,useState} from 'react';
 import {Button,TextField,Badge} from '@radix-ui/themes';
 import {CubeIcon,LayersIcon,MagnifyingGlassIcon,LockClosedIcon,PersonIcon,DesktopIcon} from '@radix-ui/react-icons';
-import {TeamClient,beginTeamAuthorization,defaultTeamServiceBase,rememberTeamServiceBase,resumeTeamFromPlatformAuth,type TeamItem,type TeamVersion} from '../domain/teamLibrary';
-import {clearPlatformOAuthCallbackFromUrl,parsePlatformOAuthCallback,publishPlatformOAuthResult,showTeamPasswordLogin} from '../domain/platformOAuth';
+import {TeamClient,beginTeamAuthorization,completeTeamOAuthCallbackPage,defaultTeamServiceBase,rememberTeamServiceBase,resumeTeamFromPlatformAuth,type TeamItem,type TeamVersion} from '../domain/teamLibrary';
+import {parsePlatformOAuthCallback,showTeamPasswordLogin} from '../domain/platformOAuth';
 import {assetDocument,parseModelAsset} from '../domain/modelAssets';
 import {parseProject} from '../domain/project';
 import {captureLibraryThumbnail} from '../scene/libraryThumbnail';
@@ -14,21 +14,23 @@ export function TeamWebApp(){
  const [kind,setKind]=useState<'asset'|'scene'>('asset'),[teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[client,setClient]=useState<TeamClient>(),[rows,setRows]=useState<TeamItem[]>([]),[query,setQuery]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[preview,setPreview]=useState<TeamVersion>(),[image,setImage]=useState(''),[waiting,setWaiting]=useState(false);
  const lock=useRef(false);
  const debugPassword=showTeamPasswordLogin();
- const isOAuthCallback=/\/team\/sso\/callback\/?$/.test(window.location.pathname)||Boolean(parsePlatformOAuthCallback());
+ const [oauthCallback]=useState(()=>parsePlatformOAuthCallback());
+ const isOAuthCallback=/\/team\/sso\/callback\/?$/.test(window.location.pathname)||Boolean(oauthCallback);
+ const callbackCompletion=useRef<Promise<TeamClient>|undefined>(undefined);
  useEffect(()=>{
-  if(!isOAuthCallback)return;
-  const callback=parsePlatformOAuthCallback();
-  if(callback){publishPlatformOAuthResult(callback);clearPlatformOAuthCallbackFromUrl();}
- },[isOAuthCallback]);
- useEffect(()=>{
-  if(!isOAuthCallback||client)return;
+  if(!isOAuthCallback||!oauthCallback)return;
   let alive=true;
-  setWaiting(true);
-  void beginTeamAuthorization({base:address,timeoutMs:15000}).then(async next=>{
-   if(!alive)return;setClient(next);setRows(await next.list(kind));
+  setWaiting(true);setNotice('');
+  const completion=callbackCompletion.current??=completeTeamOAuthCallbackPage(oauthCallback,{base:address});
+  void completion.then(async next=>{
+   if(!alive)return;
+   setClient(next);
+   const items=await next.list('asset');
+   if(!alive)return;
+   setRows(items);
   }).catch(e=>{if(alive)setNotice(e instanceof Error?e.message:'协同登录失败');}).finally(()=>{if(alive)setWaiting(false);});
   return ()=>{alive=false;};
- },[isOAuthCallback,address,client,kind]);
+ },[isOAuthCallback,address,oauthCallback]);
  useEffect(()=>{if(client||!address||isOAuthCallback)return;let alive=true;void resumeTeamFromPlatformAuth(address).then(async next=>{if(!alive||!next)return;setClient(next);try{setRows(await next.list(kind));}catch{/* keep form */}});return ()=>{alive=false;};},[address,client,kind,isOAuthCallback]);
  const kindLabel=kind==='asset'?'资产':'场景';
  async function run(fn:()=>Promise<void>){if(lock.current)return;lock.current=true;setBusy(true);setNotice('');try{await fn();}catch(e){setNotice(e instanceof Error?e.message:'操作失败，可重试');}finally{lock.current=false;setBusy(false);}}

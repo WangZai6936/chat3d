@@ -86,6 +86,9 @@ export async function loginTeamWithAccessToken(accessToken:string,options:{base?
  savePlatformAuth(auth);rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
 }
 export async function exchangeTeamAuthorizationCode(code:string,options:{base?:string;redirectUri?:string;tenantId?:string;state?:string;remember?:boolean}={}){
+ return (await exchangeTeamAuthorizationCodeResult(code,options)).client;
+}
+async function exchangeTeamAuthorizationCodeResult(code:string,options:{base?:string;redirectUri?:string;tenantId?:string;state?:string;remember?:boolean}){
  if(sharedClient?.user)throw Error('请先退出当前团队账号');
  const base=options.base||defaultTeamServiceBase();
  const next=new TeamClient(base);
@@ -94,7 +97,26 @@ export async function exchangeTeamAuthorizationCode(code:string,options:{base?:s
  if(result.platform?.accessToken){
   savePlatformAuth({base:DEFAULT_PLATFORM_BASE,tenantId:options.tenantId||platformTenantId(),username:result.user.name,accessToken:result.platform.accessToken,refreshToken:result.platform.refreshToken??'',expiresTime:result.platform.expiresTime??0,remember:options.remember!==false});
  }
- rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
+ rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return {client:next,platform:result.platform};
+}
+/** The callback page consumes the one-time code; other windows receive only platform tokens. */
+export async function completeTeamOAuthCallbackPage(callback:PlatformOAuthCallback,options:{base?:string;remember?:boolean}={}):Promise<TeamClient>{
+ clearPlatformOAuthCallbackFromUrl();
+ if(callback.error)throw Error(callback.error);
+ if(callback.accessToken){
+  const {accessToken,refreshToken,expiresTime}=callback;
+  const client=await loginTeamWithAccessToken(accessToken,{...options,refreshToken,expiresTime});
+  publishPlatformOAuthResult({accessToken,refreshToken,expiresTime});
+  return client;
+ }
+ if(callback.code){
+  const {client,platform}=await exchangeTeamAuthorizationCodeResult(callback.code,{...options,state:callback.state});
+  if(!platform?.accessToken)throw Error('协同登录回调缺少令牌');
+  const {accessToken,refreshToken,expiresTime}=platform;
+  publishPlatformOAuthResult({accessToken,refreshToken,expiresTime});
+  return client;
+ }
+ throw Error('协同登录回调缺少令牌或授权码');
 }
 async function applyOAuthCallback(callback:PlatformOAuthCallback,base:string,remember:boolean){
  if(callback.error)throw Error(callback.error);
@@ -114,9 +136,12 @@ export async function beginTeamAuthorization(options:{base?:string;remember?:boo
  const timeoutMs=options.timeoutMs??300000;
  return await new Promise<TeamClient>((resolve,reject)=>{
   let settled=false;
+  let applying=false;
   const cleanup=()=>{stopWatch();window.removeEventListener('focus',onFocus);window.clearTimeout(timer);};
   const settle=(fn:()=>void)=>{if(settled)return;settled=true;cleanup();fn();};
   const handle=(callback:PlatformOAuthCallback)=>{
+   if(settled||applying)return;
+   applying=true;
    void applyOAuthCallback(callback,base,remember).then(
     client=>{settle(()=>resolve(client));},
     error=>{settle(()=>reject(error instanceof Error?error:Error(String(error))));}

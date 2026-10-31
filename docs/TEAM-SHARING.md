@@ -37,6 +37,8 @@ Dockerfile 同时包含团队校验器。容器部署时将受限持久卷挂载
 - 地址示例：`https://portal.jiezi-ai.com/team/`（同域调用 `/api/team/`，无需在网页里填写端口）。
 - 能力：登录、搜索、预览固定版本、**下载桌面导入包**（资产 JSON / 场景 `.chat3d.json`，含新 id，不写入浏览器 IndexedDB）。
 - 不在 Web 端提供 AI 生成、工作台编辑或选择性发布；发布仍在桌面客户端顶部导航 **团队** 页完成。
+- OAuth 回调页 `/team/sso/callback` 先清除 URL 中的凭据，再携带 `state` 单次调用 `/api/team/login/sso/code`。成功后仅通过 BroadcastChannel/localStorage 发布平台 `accessToken`、`refreshToken`、`expiresTime`，不发布授权码或 `state`；等待中的桌面/网页使用 `/api/team/login/sso` 建立自己的团队会话，不再兑换授权码。回调失败后重试可重新打开授权窗口。
+- 单次兑换回归：`node tests/team-oauth-callback.mjs`（本地 HTTP 服务，覆盖回调兑换、令牌优先级及 BroadcastChannel/storage/focus 重复通知）。
 
 **OpenResty / Nginx 要点（与现有门户并存）：**
 
