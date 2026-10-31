@@ -16,6 +16,10 @@ for(const [column,type] of [['platform_access','TEXT'],['platform_tenant','TEXT'
 const platformAuthBase=(options.platformAuthBase??process.env.CHAT3D_PLATFORM_AUTH_BASE??'http://36.133.218.210:48080').replace(/\/$/,'');
 const platformTenant=String(options.platformTenantId??process.env.CHAT3D_PLATFORM_TENANT_ID??'1');
 const passwordLogin=options.passwordLogin??process.env.CHAT3D_TEAM_PASSWORD_LOGIN!=='0';
+const oauthClientId=options.oauthClientId??process.env.CHAT3D_PLATFORM_OAUTH_CLIENT_ID??'scenivo';
+const oauthClientSecret=options.oauthClientSecret??process.env.CHAT3D_PLATFORM_OAUTH_CLIENT_SECRET??'';
+const oauthTokenPath=options.oauthTokenPath??process.env.CHAT3D_PLATFORM_OAUTH_TOKEN_PATH??'/admin-api/system/oauth2/token';
+
 async function platformUser(accessToken,tenantId){
  if(typeof accessToken!=='string'||!accessToken||accessToken.length>4096||typeof tenantId!=='string'||!/^[0-9]{1,16}$/.test(tenantId))fail(400,'协同登录参数无效');
  let response;try{response=await fetch(platformAuthBase+'/admin-api/system/auth/get-permission-info',{headers:{Authorization:'Bearer '+accessToken,'tenant-id':tenantId},signal:AbortSignal.timeout(15000),redirect:'error'});}catch{fail(502,'无法连接协同认证服务');}
@@ -50,6 +54,20 @@ async function loginSso(accessToken,tenantId=platformTenant){
  if(u.disabled)fail(401,'账号已停用');
  return {token:issue(u.id,now,{access:accessToken,tenant}),user:{id:u.id,name:u.name,role:u.role}};
 }
+async function loginSsoCode(code,redirectUri,tenantId=platformTenant){
+ if(!oauthClientId||!oauthClientSecret)fail(503,'协同 OAuth client 尚未配置');
+ if(typeof code!=='string'||!code||typeof redirectUri!=='string'||!redirectUri)fail(400,'授权码参数无效');
+ const body=new URLSearchParams({grant_type:'authorization_code',code,redirect_uri:redirectUri,client_id:oauthClientId,client_secret:oauthClientSecret});
+ let response;try{response=await fetch(platformAuthBase+oauthTokenPath,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded','tenant-id':String(tenantId??platformTenant)},body,signal:AbortSignal.timeout(15000),redirect:'error'});}catch{fail(502,'无法连接协同认证服务');}
+ let data;try{data=await response.json();}catch{fail(502,'协同认证响应无效');}
+ const accessToken=data?.data?.accessToken??data?.access_token;
+ const refreshToken=data?.data?.refreshToken??data?.refresh_token??'';
+ const expiresTime=data?.data?.expiresTime??(typeof data?.expires_in==='number'?Date.now()+data.expires_in*1000:0);
+ if(response.status===401||data?.code===401)fail(401,'协同登录已失效');
+ if(!response.ok||(data?.code!==undefined&&data.code!==0)||typeof accessToken!=='string'||!accessToken)fail(502,data?.msg||'协同授权码兑换失败');
+ const session=await loginSso(accessToken,tenantId);
+ return {...session,platform:{accessToken,refreshToken,expiresTime}};
+}
 async function recheck(row,force){
  if(!row.platform_access)return;
  const now=Date.now();if(!force&&now-(row.platform_checked??0)<=300000)return;
@@ -78,7 +96,7 @@ function publish(user,body,validate,token){
    const result={id,version};db.prepare('INSERT INTO requests VALUES(?,?,?,?)').run(user.id,key,digest,JSON.stringify(result));return result;
   });
 }
-return {db,provision,login,loginSso,authenticate,list,read,publish,logout:token=>db.prepare('DELETE FROM sessions WHERE token=?').run(hash(token??'')),disable:name=>transaction(()=>{db.prepare('UPDATE users SET disabled=1 WHERE name=?').run(name);db.prepare('DELETE FROM sessions WHERE user IN (SELECT id FROM users WHERE name=?)').run(name);}),close:()=>db.close()};
+return {db,provision,login,loginSso,loginSsoCode,authenticate,list,read,publish,logout:token=>db.prepare('DELETE FROM sessions WHERE token=?').run(hash(token??'')),disable:name=>transaction(()=>{db.prepare('UPDATE users SET disabled=1 WHERE name=?').run(name);db.prepare('DELETE FROM sessions WHERE user IN (SELECT id FROM users WHERE name=?)').run(name);}),close:()=>db.close()};
 }
 export function teamMiddleware(team,validate,{origins=[]}={}){
  return async(req,res,next)=>{
@@ -94,6 +112,7 @@ export function teamMiddleware(team,validate,{origins=[]}={}){
    }
    if(req.method==='POST'&&url.pathname==='/api/team/login')return send(200,team.login(body.name,body.password));
    if(req.method==='POST'&&url.pathname==='/api/team/login/sso')return send(200,await team.loginSso(body.accessToken,body.tenantId));
+   if(req.method==='POST'&&url.pathname==='/api/team/login/sso/code')return send(200,await team.loginSsoCode(body.code,body.redirectUri,body.tenantId));
    const token=req.headers.authorization?.replace(/^Bearer /,'');const user=await team.authenticate(token);
    if(req.method==='GET'&&url.pathname==='/api/team/me')return send(200,user);
    if(req.method==='POST'&&url.pathname==='/api/team/logout'){team.logout(token);return send(200,{ok:true});}

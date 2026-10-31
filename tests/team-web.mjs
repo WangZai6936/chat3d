@@ -23,5 +23,15 @@ assert.equal(sceneCopy.revision,0);
 
 assert.match(teamCopyFilename(assetItem),/scenivo-team-asset/);
 assert.match(teamCopyFilename(sceneItem),/\.chat3d\.json$/);
+const {buildPlatformAuthorizeUrl,DEFAULT_OAUTH_CLIENT_ID,DEFAULT_SSO_UI_BASE,SSO_CALLBACK_PATH,configuredTeamServiceBase,showTeamPasswordLogin}=await server.ssrLoadModule('/src/domain/platformOAuth.ts');
+const authUrl=new URL(buildPlatformAuthorizeUrl(configuredTeamServiceBase(),'state-test'));
+assert.equal(authUrl.origin+authUrl.pathname,DEFAULT_SSO_UI_BASE+'/sso');
+assert.equal(authUrl.searchParams.get('client_id'),DEFAULT_OAUTH_CLIENT_ID);
+assert.equal(authUrl.searchParams.get('response_type'),'code');
+assert.equal(authUrl.searchParams.get('scope'),'user.read');
+assert.ok(authUrl.searchParams.get('redirect_uri').endsWith(SSO_CALLBACK_PATH));
+assert.equal(showTeamPasswordLogin(),false);
 await server.close();
 console.log('PASS team web copy export produces desktop-importable snapshots');
+console.log('PASS platform authorize URL defaults to SSO UI /sso with scenivo client');
+

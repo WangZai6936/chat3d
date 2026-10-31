@@ -56,6 +56,8 @@ platformUsers.set('pat-new',null);await assert.rejects(ssoTeam.authenticate(sess
 platformUsers.set('pat-admin',{username:'admin',disabled:false});const adminSession=await ssoTeam.loginSso('pat-admin','1');platformUsers.set('pat-admin',null);
 const sceneRequest={kind:'scene',name:'协同发布',description:'',payload:scene,key:crypto.randomUUID(),expectedVersion:0};
 await assert.rejects(ssoTeam.publish(adminSession.user,sceneRequest,validateTeamPayload,adminSession.token),e=>e.status===401);
-console.log('PASS platform SSO upsert, role keep, disabled, 401, password lock and publish recheck');
+await assert.rejects(ssoTeam.loginSsoCode('code','https://portal.jiezi-ai.com/team/oauth/callback','1'),e=>e.status===503);
+console.log('PASS platform SSO upsert, role keep, disabled, 401, password lock, publish recheck and oauth code placeholder');
+
 ssoTeam.close();ssoTeam=undefined;await new Promise(resolve=>platform.close(resolve));platform=undefined;
 }finally{if(server)await new Promise(resolve=>server.close(resolve));if(platform)await new Promise(resolve=>platform.close(resolve));team.close();ssoTeam?.close();await rm(dir,{recursive:true,force:true});}

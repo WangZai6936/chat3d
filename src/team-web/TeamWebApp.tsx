@@ -1,9 +1,8 @@
 import {useEffect,useRef,useState} from 'react';
 import {Button,TextField,Badge} from '@radix-ui/themes';
 import {CubeIcon,LayersIcon,MagnifyingGlassIcon,LockClosedIcon,PersonIcon,DesktopIcon} from '@radix-ui/react-icons';
-import {TeamClient,defaultTeamServiceBase,rememberTeamServiceBase,resumeTeamFromPlatformAuth,type TeamItem,type TeamVersion} from '../domain/teamLibrary';
-import {DEFAULT_PLATFORM_BASE,DEFAULT_PLATFORM_TENANT,loadPlatformAuth,savePlatformAuth} from '../domain/platformAuthStorage';
-import {teamFetch} from '../domain/teamTransport';
+import {TeamClient,beginTeamAuthorization,defaultTeamServiceBase,rememberTeamServiceBase,resumeTeamFromPlatformAuth,type TeamItem,type TeamVersion} from '../domain/teamLibrary';
+import {clearPlatformOAuthCallbackFromUrl,parsePlatformOAuthCallback,publishPlatformOAuthResult,showTeamPasswordLogin} from '../domain/platformOAuth';
 import {assetDocument,parseModelAsset} from '../domain/modelAssets';
 import {parseProject} from '../domain/project';
 import {captureLibraryThumbnail} from '../scene/libraryThumbnail';
@@ -11,11 +10,31 @@ import {downloadTeamCopyFile} from '../domain/teamCopyExport';
 import {BrandMark} from '../ui/BrandMark';
 
 export function TeamWebApp(){
-const [kind,setKind]=useState<'asset'|'scene'>('asset'),[address,setAddress]=useState(()=>defaultTeamServiceBase()||window.location.origin),[username,setUsername]=useState(()=>loadPlatformAuth()?.username??''),[password,setPassword]=useState(''),[teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[remember,setRemember]=useState(()=>loadPlatformAuth()?.remember===true),[client,setClient]=useState<TeamClient>(),[rows,setRows]=useState<TeamItem[]>([]),[query,setQuery]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[preview,setPreview]=useState<TeamVersion>(),[image,setImage]=useState('');
+ const address=defaultTeamServiceBase()||window.location.origin;
+ const [kind,setKind]=useState<'asset'|'scene'>('asset'),[teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[client,setClient]=useState<TeamClient>(),[rows,setRows]=useState<TeamItem[]>([]),[query,setQuery]=useState(''),[busy,setBusy]=useState(false),[notice,setNotice]=useState(''),[preview,setPreview]=useState<TeamVersion>(),[image,setImage]=useState(''),[waiting,setWaiting]=useState(false);
  const lock=useRef(false);
- useEffect(()=>{if(client||!address)return;let alive=true;void resumeTeamFromPlatformAuth(address).then(async next=>{if(!alive||!next)return;setClient(next);try{setRows(await next.list(kind));}catch{/* keep form if list fails */}});return ()=>{alive=false;};},[address,client,kind]);
+ const debugPassword=showTeamPasswordLogin();
+ const isOAuthCallback=/\/team\/sso\/callback\/?$/.test(window.location.pathname)||Boolean(parsePlatformOAuthCallback());
+ useEffect(()=>{
+  if(!isOAuthCallback)return;
+  const callback=parsePlatformOAuthCallback();
+  if(callback){publishPlatformOAuthResult(callback);clearPlatformOAuthCallbackFromUrl();}
+ },[isOAuthCallback]);
+ useEffect(()=>{
+  if(!isOAuthCallback||client)return;
+  let alive=true;
+  setWaiting(true);
+  void beginTeamAuthorization({base:address,timeoutMs:15000}).then(async next=>{
+   if(!alive)return;setClient(next);setRows(await next.list(kind));
+  }).catch(e=>{if(alive)setNotice(e instanceof Error?e.message:'协同登录失败');}).finally(()=>{if(alive)setWaiting(false);});
+  return ()=>{alive=false;};
+ },[isOAuthCallback,address,client,kind]);
+ useEffect(()=>{if(client||!address||isOAuthCallback)return;let alive=true;void resumeTeamFromPlatformAuth(address).then(async next=>{if(!alive||!next)return;setClient(next);try{setRows(await next.list(kind));}catch{/* keep form */}});return ()=>{alive=false;};},[address,client,kind,isOAuthCallback]);
  const kindLabel=kind==='asset'?'资产':'场景';
  async function run(fn:()=>Promise<void>){if(lock.current)return;lock.current=true;setBusy(true);setNotice('');try{await fn();}catch(e){setNotice(e instanceof Error?e.message:'操作失败，可重试');}finally{lock.current=false;setBusy(false);}}
+ if(isOAuthCallback&&!client){
+  return <div className="team-web-shell"><main className="team-web-main"><section className="team-login-card"><h2>{waiting?'正在完成协同登录…':'协同登录'}</h2><p>可关闭本页并返回 Scenivo；本页为团队库时会自动兑换授权码进入。</p>{notice&&<p className="team-error" role="alert">{notice}</p>}<Button disabled={busy||waiting} onClick={()=>void run(async()=>{setWaiting(true);try{const next=await beginTeamAuthorization({base:address,timeoutMs:15000});setClient(next);setRows(await next.list(kind));}finally{setWaiting(false);}})}>重试进入团队库</Button></section></main></div>;
+ }
  return <div className="team-web-shell">
  <header className="team-web-header"><BrandMark/><div><strong>Scenivo</strong><span>团队库 · 浏览器轻量版</span></div></header>
  <main className="team-web-main resource-page team-web-page">
@@ -29,20 +48,19 @@ const [kind,setKind]=useState<'asset'|'scene'>('asset'),[address,setAddress]=use
  <p>与桌面端相同的团队库内容，适合快速查阅与下载导入包。</p>
  <ul className="team-auth-points">
  <li><DesktopIcon aria-hidden/> 下载包可在桌面 Scenivo 导入</li>
- <li><PersonIcon aria-hidden/> 使用公司团队账号</li>
- <li><LockClosedIcon aria-hidden/> 关闭页面后需重新登录</li>
+ <li><PersonIcon aria-hidden/> 使用公司协同账号授权</li>
+ <li><LockClosedIcon aria-hidden/> 关闭页面后需重新授权（可记住协同令牌）</li>
  </ul>
  </div>
-<form className="team-login-card" onSubmit={e=>{e.preventDefault();void run(async()=>{const root=DEFAULT_PLATFORM_BASE.replace(/\/$/,'');const response=await teamFetch(root+'/admin-api/system/auth/login',{method:'POST',headers:{'Content-Type':'application/json','tenant-id':DEFAULT_PLATFORM_TENANT},body:JSON.stringify({username,password}),signal:AbortSignal.timeout(15000),redirect:'error',credentials:'omit'});const data=await response.json().catch(()=>null);if(response.status===401||data?.code===401)throw Error('协同账号或密码错误');if(!response.ok||data?.code!==0||typeof data?.data?.accessToken!=='string')throw Error(data?.msg||'协同登录失败');const next=new TeamClient(address);await next.loginWithPlatform({accessToken:data.data.accessToken,tenantId:DEFAULT_PLATFORM_TENANT});savePlatformAuth({base:root,tenantId:DEFAULT_PLATFORM_TENANT,username,accessToken:data.data.accessToken,refreshToken:data.data.refreshToken??'',expiresTime:data.data.expiresTime??0,remember});rememberTeamServiceBase(next.base);setPassword('');setClient(next);setRows(await next.list(kind));});}}>
-<header><h3>登录团队库</h3><p>优先使用协同账号。默认使用当前站点作为团队服务地址。</p></header>
-<label className="team-field"><span className="team-field-label">团队服务地址</span><TextField.Root size="3" aria-label="团队服务地址" value={address} onChange={e=>setAddress(e.target.value)} disabled={busy}/></label>
-<label className="team-field"><span className="team-field-label">协同账号</span><TextField.Root size="3" aria-label="协同账号" autoComplete="username" value={username} onChange={e=>setUsername(e.target.value)} disabled={busy}/></label>
-<label className="team-field"><span className="team-field-label">协同密码</span><TextField.Root size="3" aria-label="协同密码" type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} disabled={busy}/></label>
-<label className="team-field"><span className="team-field-label">记住协同登录</span><input aria-label="记住协同登录" type="checkbox" checked={remember} onChange={e=>setRemember(e.target.checked)} disabled={busy}/></label>
-<div className="team-login-actions"><Button size="3" disabled={busy} type="submit">使用协同账号登录</Button></div>
-<label className="team-field"><span className="team-field-label">团队账号</span><TextField.Root size="3" aria-label="团队账号" autoComplete="username" value={teamUser} onChange={e=>setTeamUser(e.target.value)} disabled={busy}/></label>
-<label className="team-field"><span className="team-field-label">团队密码</span><TextField.Root size="3" aria-label="团队密码" type="password" autoComplete="current-password" value={teamPassword} onChange={e=>setTeamPassword(e.target.value)} disabled={busy}/></label>
-<div className="team-login-actions"><Button size="3" variant="soft" color="gray" type="button" disabled={busy} onClick={()=>void run(async()=>{const next=new TeamClient(address);await next.login(teamUser,teamPassword);rememberTeamServiceBase(next.base);setTeamPassword('');setClient(next);setRows(await next.list(kind));})}>使用团队密码登录</Button></div>
+ <form className="team-login-card" onSubmit={e=>{e.preventDefault();void run(async()=>{setWaiting(true);try{const next=await beginTeamAuthorization({base:address});setClient(next);setRows(await next.list(kind));}finally{setWaiting(false);}});}}>
+ <header><h3>登录团队库</h3><p>点击登录授权，在协同平台完成登录后自动返回。</p></header>
+ <div className="team-login-actions"><Button size="3" disabled={busy} type="submit">{busy||waiting?'等待协同登录…':'登录授权'}</Button></div>
+ {waiting&&!notice&&<p className="team-security-note">已打开协同登录，请在浏览器完成授权后回到本页。</p>}
+ {debugPassword&&<>
+ <label className="team-field"><span className="team-field-label">团队账号</span><TextField.Root size="3" aria-label="团队账号" autoComplete="username" value={teamUser} onChange={e=>setTeamUser(e.target.value)} disabled={busy}/></label>
+ <label className="team-field"><span className="team-field-label">团队密码</span><TextField.Root size="3" aria-label="团队密码" type="password" autoComplete="current-password" value={teamPassword} onChange={e=>setTeamPassword(e.target.value)} disabled={busy}/></label>
+ <div className="team-login-actions"><Button size="3" variant="soft" color="gray" type="button" disabled={busy} onClick={()=>void run(async()=>{const next=new TeamClient(address);await next.login(teamUser,teamPassword);rememberTeamServiceBase(next.base);setTeamPassword('');setClient(next);setRows(await next.list(kind));})}>使用团队密码登录</Button></div>
+ </>}
  </form>
  </section>:<div className="team-workspace">
  <header className="team-session-bar team-web-session"><div><strong>{client.user?.name}</strong><span className="team-session-meta"><Badge color="gray" variant="soft">{client.user?.role}</Badge> · 已连接</span></div><Button variant="soft" color="gray" disabled={busy} onClick={()=>void run(async()=>{try{await client.logout();}finally{setClient(undefined);setRows([]);setPreview(undefined);setImage('');}})}>退出</Button></header>
