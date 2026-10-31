@@ -97,6 +97,7 @@ try {
  Find-Control '登录授权' | Out-Null
  Find-Control '登录，连接你的团队' | Out-Null
  $checks.Add(@{name='team library login-only until authenticated (SSO 登录授权; no asset/scene tabs or password form)';pass=$true})
+Click-Control '继续使用本地资源'
 
 Click-Control '资产库'
  Click-Control '新建资产';Find-Control '导出与更多' | Out-Null;Shot 'ui-workbench'
