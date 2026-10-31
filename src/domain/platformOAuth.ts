@@ -62,6 +62,7 @@ export function platformOAuthRedirectUri(teamBase:string){
  * Build collaborative SSO authorize URL.
  * 协同 admin UI uses Vue hash history, so the route must be `/#/sso?…` (not path `/sso?…`).
  * Path `/sso` only hits SPA fallback HTML; the router then lands on `#/home` and never issues a code.
+ * Omit scope: 协同 auto-approves when it is present, bypassing explicit consent.
  */
 export function buildPlatformAuthorizeUrl(teamBase:string,state:string){
  const redirect=platformOAuthRedirectUri(teamBase);
@@ -72,7 +73,7 @@ export function buildPlatformAuthorizeUrl(teamBase:string,state:string){
   url.searchParams.set('client_id',clientId);
   url.searchParams.set('redirect_uri',redirect);
   url.searchParams.set('response_type','code');
-  url.searchParams.set('scope','user.read');
+  url.searchParams.delete('scope');
   url.searchParams.set('state',state);
   return url.toString();
  }
@@ -80,7 +81,6 @@ export function buildPlatformAuthorizeUrl(teamBase:string,state:string){
   client_id:clientId,
   redirect_uri:redirect,
   response_type:'code',
-  scope:'user.read',
   state,
  });
  return platformSsoUiBase()+'/#/sso?'+q.toString();
