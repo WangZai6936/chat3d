@@ -1,20 +1,30 @@
 import {useEffect,useRef,useState,useSyncExternalStore} from 'react';
 import {Badge,Button,Dialog,TextField} from '@radix-ui/themes';
 import {Cross1Icon,LockClosedIcon,UploadIcon,DownloadIcon} from '@radix-ui/react-icons';
-import {acquireLinkedTeamVersion,defaultTeamServiceBase,getTeamSession,listTeamPublishSources,loginTeamSession,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPublishSource} from '../domain/teamLibrary';
+import {acquireLinkedTeamVersion,beginTeamAuthorization,defaultTeamServiceBase,getTeamSession,listTeamPublishSources,loginTeamSession,logoutTeamSession,prepareTeamPublications,publishPreparedTeamBatch,resumeTeamFromPlatformAuth,subscribeTeamSession,type PreparedTeamPublication,type TeamItem,type TeamLocalSource,type TeamPublishSource} from '../domain/teamLibrary';
+import {showTeamPasswordLogin} from '../domain/platformOAuth';
 import './team-library.css';
 
 export function TeamSessionLogin({onConnected,serviceOrigin}:{onConnected?:()=>void;serviceOrigin?:string}){
- const [address,setAddress]=useState(()=>serviceOrigin??defaultTeamServiceBase()),[username,setUsername]=useState(''),[password,setPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');const lock=useRef(false);
- return <form className="team-login-card" onSubmit={event=>{event.preventDefault();if(lock.current)return;lock.current=true;setBusy(true);setError('');void loginTeamSession(address,username,password).then(()=>{setPassword('');onConnected?.();}).catch(error=>setError(error instanceof Error?error.message:'团队登录失败')).finally(()=>{lock.current=false;setBusy(false);});}}>
-  <header><h3>登录团队服务</h3><p>会话只在内存中保留。切换资产、场景或页面无需重新登录；退出后清除凭据。</p></header>
-  <label className="team-field"><span>团队服务地址</span><TextField.Root aria-label="团队服务地址" placeholder="https://team.company.example" value={address} onChange={event=>setAddress(event.target.value)} disabled={busy||!!serviceOrigin}/></label>
-  <label className="team-field"><span>团队账号</span><TextField.Root aria-label="团队账号" autoComplete="username" value={username} onChange={event=>setUsername(event.target.value)} disabled={busy}/></label>
-  <label className="team-field"><span>团队密码</span><TextField.Root aria-label="团队密码" type="password" autoComplete="current-password" value={password} onChange={event=>setPassword(event.target.value)} disabled={busy}/></label>
-  {error&&<p className="team-error" role="alert">{error}</p>}<Button type="submit" disabled={busy||!address||!username||!password}>{busy?'正在登录…':'登录团队'}</Button>
-  <small className="team-security-note"><LockClosedIcon aria-hidden/> 仅保存服务地址，不保存密码、令牌或模型配置。</small>
+ const address=serviceOrigin??defaultTeamServiceBase();
+ const [teamUser,setTeamUser]=useState(''),[teamPassword,setTeamPassword]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[waiting,setWaiting]=useState(false);const lock=useRef(false);
+ const debugPassword=showTeamPasswordLogin();
+ useEffect(()=>{if(getTeamSession()?.user||!address)return;let alive=true;void resumeTeamFromPlatformAuth(address).then(next=>{if(alive&&next)onConnected?.();}).catch(()=>{});return ()=>{alive=false;};},[address,onConnected]);
+ function submit(action:()=>Promise<unknown>){if(lock.current)return;lock.current=true;setBusy(true);setError('');void action().then(()=>{setTeamPassword('');setWaiting(false);onConnected?.();}).catch(error=>setError(error instanceof Error?error.message:'团队登录失败')).finally(()=>{lock.current=false;setBusy(false);});}
+ return <form className="team-login-card" onSubmit={event=>{event.preventDefault();setWaiting(true);submit(()=>beginTeamAuthorization({base:address}));}}>
+  <header><h3>登录团队服务</h3><p>点击登录授权，在协同平台完成登录后自动返回。团队会话仅保存在内存中。</p></header>
+  {error&&<p className="team-error" role="alert">{error}</p>}
+  <Button type="submit" disabled={busy||!address}>{busy||waiting?'等待协同登录…':'登录授权'}</Button>
+  {waiting&&!error&&<p className="team-security-note">已打开协同登录，请在浏览器完成授权后回到本窗口。</p>}
+  {debugPassword&&<>
+   <label className="team-field"><span>团队账号</span><TextField.Root aria-label="团队账号" autoComplete="username" value={teamUser} onChange={event=>setTeamUser(event.target.value)} disabled={busy}/></label>
+   <label className="team-field"><span>团队密码</span><TextField.Root aria-label="团队密码" type="password" autoComplete="current-password" value={teamPassword} onChange={event=>setTeamPassword(event.target.value)} disabled={busy}/></label>
+   <Button type="button" variant="soft" color="gray" disabled={busy||!address||!teamUser||!teamPassword} onClick={()=>submit(()=>loginTeamSession(address,teamUser,teamPassword))}>使用团队密码登录</Button>
+  </>}
+  <small className="team-security-note"><LockClosedIcon aria-hidden/> 服务地址已固定为团队门户；不在此填写协同账号密码。</small>
  </form>;
 }
+
 export interface TeamTransferDialogProps {
  kind:'asset'|'scene';mode:'publish'|'acquire';sources?:TeamLocalSource[];items?:TeamItem[];serviceOrigin?:string;onClose:()=>void;onCompleted?:()=>void;
 }

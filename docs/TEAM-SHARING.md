@@ -14,6 +14,11 @@ npm run build
 export CHAT3D_TEAM_DB=/srv/chat3d-data/team.sqlite
 # 浏览器实际来源必须精确匹配；不要设置通配符。
 export CHAT3D_TEAM_ORIGINS=https://team.company.example,https://portal.jiezi-ai.com,http://tauri.localhost,tauri://localhost
+# 协同平台（路径 A）。默认指向公司协同认证；只转发用户 accessToken，不使用服务账号令牌。
+export CHAT3D_PLATFORM_AUTH_BASE=http://36.133.218.210:48080
+export CHAT3D_PLATFORM_TENANT_ID=1
+# 设为 0 时关闭本地团队密码登录（返回 403），只保留协同账号换票。
+export CHAT3D_TEAM_PASSWORD_LOGIN=1
 export HOST=127.0.0.1
 export PORT=1420
 npm start
@@ -32,6 +37,9 @@ Dockerfile 同时包含团队校验器。容器部署时将受限持久卷挂载
 - 地址示例：`https://portal.jiezi-ai.com/team/`（同域调用 `/api/team/`，无需在网页里填写端口）。
 - 能力：登录、搜索、预览固定版本、**下载桌面导入包**（资产 JSON / 场景 `.chat3d.json`，含新 id，不写入浏览器 IndexedDB）。
 - 不在 Web 端提供 AI 生成、工作台编辑或选择性发布；发布仍在桌面客户端顶部导航 **团队** 页完成。
+- OAuth 回调页 `/team/sso/callback` 先清除 URL 中的凭据，再携带 `state` 单次调用 `/api/team/login/sso/code`。成功后仅通过 BroadcastChannel/localStorage 发布平台 `accessToken`、`refreshToken`、`expiresTime`，不发布授权码或 `state`；等待中的桌面/网页使用 `/api/team/login/sso` 建立自己的团队会话，不再兑换授权码。回调失败后重试可重新打开授权窗口。
+- 单次兑换回归：`node tests/team-oauth-callback.mjs`（本地 HTTP 服务，覆盖回调兑换、令牌优先级及 BroadcastChannel/storage/focus 重复通知）。
+- 平台授权码兑换支持 `{code:0,data:{access_token,refresh_token,expires_in}}`，优先读取内层 snake_case 令牌，兼容内层 camelCase 与顶层 OAuth 令牌字段；有效期优先使用 `expiresTime` / `expires_time` 绝对时间，否则将内层或顶层 `expires_in` 秒数换算为毫秒时间戳，缺失时为 `0`。`node tests/team-library.mjs` 使用本地平台 HTTP mock 验证兑换、团队会话、有效期优先级及未配置 secret 的 503。
 
 **OpenResty / Nginx 要点（与现有门户并存）：**
 
@@ -69,11 +77,11 @@ unset TEAM_PASSWORD
 node server/team/admin.mjs disable alice
 ```
 
-角色：`viewer` 只能读取和获取；`member` 可发布新原件和追加自己的原件版本；`admin` 可追加任意原件版本。现有版本不可编辑或删除。账号管理仍使用服务器命令，不向客户端提供提升权限入口。数据库保存 scrypt 密码哈希和会话 token 哈希，会话8小时过期。客户端 token 仅在内存中：切换资产/场景或离开团队页再返回保留连接，显式退出或关闭/刷新应用后需重新登录。仅服务根地址保存在 localStorage；客户端不跟随 API 重定向。Windows/Tauri 沿用原生 HTTP 插件的既有权限范围与正常 TLS 校验。
+角色：`viewer` 只能读取和获取；`member` 可发布新原件和追加自己的原件版本；`admin` 可追加任意原件版本。现有版本不可编辑或删除。账号管理仍使用服务器命令，不向客户端提供提升权限入口。数据库保存 scrypt 密码哈希和会话 token 哈希，会话8小时过期。团队会话 token 仅在内存中：切换资产/场景或离开团队页再返回保留连接；关闭应用后需重新换票。勾选「记住协同登录」时，协同 access/refresh 可写入本机 localStorage（与模型 API Key 同级的显式同意存储），下次打开会用已保存的 accessToken 静默兑换团队会话；不保存协同密码。仅服务根地址与可选协同令牌保存在 localStorage；客户端不跟随 API 重定向。Windows/Tauri 沿用原生 HTTP 插件的既有权限范围与正常 TLS 校验。
 
 ## 使用
 
-1. 在 **团队资源** 页登录公司分配的账号，填写 HTTPS 服务根地址，不带 `/team` 或 `/api`。资产和场景共用本次登录。
+1. 在 **团队资源** 页点击 **登录授权**，在协同平台完成登录后自动返回（无需填写团队服务地址；桌面默认 `https://portal.jiezi-ai.com`，`/team/` 门户同域用当前 origin；可用 `VITE_CHAT3D_TEAM_DEFAULT_BASE` 覆盖）。资产和场景共用本次登录。
 2. 浏览团队网格/列表，搜索名称和说明，按“已关联本地 / 可更新”筛选。可以多选资源并一次确认获取，列表显示逐项成功、失败与重试结果。
 3. 本地资产库或场景库的详情及批量操作可直接 **发布至团队**，不再先跳页从底部长下拉框逐项找内容。仅已保存内容可发布；未保存场景、待确认预览和运行中的任务必须先处理。
 4. 点击“准备发布”冻结选中快照，核对新团队原件或有权追加的目标后确认。准备阶段不上传；准备之后本地发生的新修改也不加入本次发布。失败重试复用同一请求标识，已成功项不会重复发布。
@@ -88,7 +96,7 @@ node server/team/admin.mjs disable alice
 ## 运维与边界
 
 - 备份：停止服务后复制整个持久目录（含 SQLite、WAL、SHM）；恢复到受限目录，保持相同 Node 版本后启动。在线备份须使用 SQLite 的备份工具，不要仅复制正在写入的主文件。备份含密码哈希与有效会话，应按内部敏感数据保管。
-- 限制：单进程服务，单团队，没有实时协作、外部客户租户、SSO、发布撤回或在线用户管理。单次发布22 MB HTTP上限，现有格式校验20 MB上限。容量规划与磁盘配额由部署方管理。
+- 限制：单进程服务，单团队，没有实时协作、外部客户租户、发布撤回或在线用户管理。登录主路径是 **登录授权**：打开协同 SSO 页 `{SSO_UI}/#/sso?client_id=scenivo&redirect_uri=…&response_type=code&scope=user.read`（**hash 路由** `/#/sso`，勿用 path `/sso`）；默认 SSO UI `http://36.133.218.210:48001`，API `http://36.133.218.210:48080`。回调 `/team/sso/callback` 带回 code 后服务端 `/api/team/login/sso/code` 兑换。新账号为 member，已有账号保留角色；停用账号与平台 401 均拒绝。SSO 会话超过 5 分钟或发布时会用同一用户 token 复核 `get-permission-info`，平台 401 删除会话。本地团队密码登录默认隐藏，仅 `VITE_CHAT3D_TEAM_SHOW_PASSWORD_LOGIN=1` 调试展示；服务端可用 `CHAT3D_TEAM_PASSWORD_LOGIN=0` 关闭。单次发布22 MB HTTP上限，现有格式校验20 MB上限。容量规划与磁盘配额由部署方管理。
 - 防护：服务端认证、数据库事务、不可变版本、逐原件写权限、跨源白名单；登录错误累计8次暂时限流15分钟。生产代理还应限制连接与登录速率。TLS在公司反向代理终止。
 - 测试仅创建临时账号与临时数据库，不触及真实个人数据、不调用真实收费模型。
 

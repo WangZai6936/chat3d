@@ -23,5 +23,19 @@ assert.equal(sceneCopy.revision,0);
 
 assert.match(teamCopyFilename(assetItem),/scenivo-team-asset/);
 assert.match(teamCopyFilename(sceneItem),/\.chat3d\.json$/);
+const {buildPlatformAuthorizeUrl,DEFAULT_OAUTH_CLIENT_ID,DEFAULT_SSO_UI_BASE,SSO_CALLBACK_PATH,configuredTeamServiceBase,showTeamPasswordLogin}=await server.ssrLoadModule('/src/domain/platformOAuth.ts');
+const authUrlRaw=buildPlatformAuthorizeUrl(configuredTeamServiceBase(),'state-test');
+assert.ok(authUrlRaw.startsWith(DEFAULT_SSO_UI_BASE+'/#/sso?'),authUrlRaw);
+const authHash=authUrlRaw.slice(authUrlRaw.indexOf('#')+1); // /sso?...
+const authUrl=new URL(authHash,'http://local.invalid');
+assert.equal(authUrl.pathname,'/sso');
+assert.equal(authUrl.searchParams.get('client_id'),DEFAULT_OAUTH_CLIENT_ID);
+assert.equal(authUrl.searchParams.get('response_type'),'code');
+assert.equal(authUrl.searchParams.get('scope'),'user.read');
+assert.equal(authUrl.searchParams.get('state'),'state-test');
+assert.ok(authUrl.searchParams.get('redirect_uri').endsWith(SSO_CALLBACK_PATH));
+assert.equal(showTeamPasswordLogin(),false);
 await server.close();
 console.log('PASS team web copy export produces desktop-importable snapshots');
+console.log('PASS platform authorize URL uses hash /#/sso with scenivo client');
+

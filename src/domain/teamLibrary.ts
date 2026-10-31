@@ -7,6 +7,8 @@ import {createSession,flushWorkspace,useWorkspaceStore} from '../workspace';
 import {assertLibraryReady} from './libraryNavigation';
 import {listModelAssets,readModelAsset} from './modelAssetStorage';
 import {listTeamResourceLinks,listLocalTeamResourceStates,reserveTeamResourceLink,saveTeamResourceLink,rememberTeamResourceHeads,teamLocalFingerprint,teamResourceKey,type TeamResourceLink,type LocalTeamResourceState} from './teamResourceLinks';
+import {DEFAULT_PLATFORM_BASE,DEFAULT_PLATFORM_TENANT,loadPlatformAuth,savePlatformAuth,type PlatformAuth} from './platformAuthStorage';
+import {buildPlatformAuthorizeUrl,clearPendingPlatformOAuth,clearPlatformOAuthCallbackFromUrl,configuredTeamServiceBase,consumePendingPlatformOAuth,openPlatformAuthorizationWindow,parsePlatformOAuthCallback,platformOAuthRedirectUri,platformTenantId,publishPlatformOAuthResult,watchPlatformOAuthResult,type PlatformOAuthCallback} from './platformOAuth';
 type PublicationShape=true|{[key:string]:PublicationShape}|readonly PublicationShape[];
 const vectorShape=[true] as const,transformShape={position:vectorShape,rotationQuaternion:vectorShape,scale:vectorShape};
 const geometryShape={type:true,params:{width:true,height:true,depth:true,bevelRadius:true,radius:true,widthSegments:true,heightSegments:true,radiusTop:true,radiusBottom:true,radialSegments:true,cornerRadius:true,holeRadius:true,length:true,thickness:true,outerRadius:true,innerRadius:true,widthTop:true,widthBottom:true,positions:vectorShape,indices:vectorShape,normals:vectorShape,uvs:vectorShape,points:[vectorShape],rings:[{center:vectorShape,radiusX:true,radiusZ:true}],segments:true,smooth:true,wallThickness:true,capStart:true,capEnd:true,holes:[[vectorShape]],edgeRadius:true}} satisfies PublicationShape;
@@ -31,12 +33,13 @@ export interface TeamPublish {kind:'asset'|'scene';name:string;description:strin
 const TEAM_ADDRESS_KEY='chat3d.team.address';
 export function teamAddress(value:string){const url=new URL(value);if(url.username||url.password||url.search||url.hash||url.pathname!=='/'||(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1','[::1]'].includes(url.hostname))))throw Error('请输入 HTTPS 服务根地址（本机测试可用 HTTP localhost）');return url.origin;}
 export function defaultTeamServiceBase(){
- if(typeof window==='undefined')return '';
- try{
-  const path=window.location.pathname;
-  if(path==='/team'||path.startsWith('/team/'))return window.location.origin;
- }catch{/* ignore */}
- return localStorage.getItem(TEAM_ADDRESS_KEY)??'';
+ if(typeof window!=='undefined'){
+  try{
+   const path=window.location.pathname;
+   if(path==='/team'||path.startsWith('/team/'))return window.location.origin;
+  }catch{/* ignore */}
+ }
+ return configuredTeamServiceBase();
 }
 export function rememberTeamServiceBase(base:string){localStorage.setItem(TEAM_ADDRESS_KEY,teamAddress(base));}
 export class TeamClient {
@@ -46,7 +49,9 @@ export class TeamClient {
   const response=await teamFetch(this.base+'/api/team/'+path,{method:body===undefined?'GET':'POST',headers:{...(body===undefined?{}:{'Content-Type':'application/json'}),...(this.token?{Authorization:'Bearer '+this.token}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(60000),redirect:'error',credentials:'omit'});
   const data=await response.json();if(!response.ok)throw Error(data.error??'团队服务请求失败');return data as T;
  }
- async login(name:string,password:string){const result=await this.request<{token:string;user:TeamUser}>('login',{name,password});this.token=result.token;this.user=result.user;return result.user;}
+async login(name:string,password:string){const result=await this.request<{token:string;user:TeamUser}>('login',{name,password});this.token=result.token;this.user=result.user;return result.user;}
+async loginWithPlatform(auth:{accessToken:string;tenantId:string}){const result=await this.request<{token:string;user:TeamUser}>('login/sso',{accessToken:auth.accessToken,tenantId:auth.tenantId});this.token=result.token;this.user=result.user;return result.user;}
+ acceptSession(token:string,user:TeamUser){this.token=token;this.user=user;}
  async logout(){const pending=this.request('logout',{});this.token='';this.user=undefined;await pending;}
  list(kind:'asset'|'scene',q=''){return this.request<TeamItem[]>('items?kind='+kind+'&q='+encodeURIComponent(q));}
  async read(item:TeamItem){const value=await this.request<TeamVersion>(`items/${encodeURIComponent(item.id)}/${item.version}`);if(value.id!==item.id||value.kind!==item.kind||value.version!==item.version)throw Error('团队服务返回的固定版本不匹配');return value;}
@@ -60,7 +65,108 @@ export async function loginTeamSession(base:string,name:string,password:string){
  if(sharedClient?.user)throw Error('请先退出当前团队账号');
  const next=new TeamClient(base);await next.login(name,password);rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
 }
-export async function logoutTeamSession(){const previous=sharedClient;sharedClient=undefined;for(const listener of sessionListeners)listener();await previous?.logout();}
+export async function loginTeamWithPlatform(base:string,username:string,password:string,remember:boolean,platformBase=DEFAULT_PLATFORM_BASE,tenantId=DEFAULT_PLATFORM_TENANT){
+ if(sharedClient?.user)throw Error('请先退出当前团队账号');
+ const root=platformBase.replace(/\/$/,'');
+ const response=await teamFetch(root+'/admin-api/system/auth/login',{method:'POST',headers:{'Content-Type':'application/json','tenant-id':tenantId},body:JSON.stringify({username,password}),signal:AbortSignal.timeout(15000),redirect:'error',credentials:'omit'});
+ const data=await response.json().catch(()=>null) as {code?:number;msg?:string;data?:{accessToken?:string;refreshToken?:string;expiresTime?:number}}|null;
+ if(response.status===401||data?.code===401)throw Error('协同账号或密码错误');
+ if(!response.ok||data?.code!==0||typeof data.data?.accessToken!=='string')throw Error(data?.msg||'协同登录失败');
+ const auth:PlatformAuth={base:root,tenantId,username,accessToken:data.data.accessToken,refreshToken:data.data.refreshToken??'',expiresTime:data.data.expiresTime??0,remember};
+ const next=new TeamClient(base);await next.loginWithPlatform(auth);savePlatformAuth(auth);rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
+}
+export async function loginTeamWithAccessToken(accessToken:string,options:{base?:string;tenantId?:string;refreshToken?:string;expiresTime?:number;username?:string;remember?:boolean}={}){
+ if(sharedClient?.user)throw Error('请先退出当前团队账号');
+ if(typeof accessToken!=='string'||!accessToken)throw Error('缺少协同登录令牌');
+ const base=options.base||defaultTeamServiceBase();
+ const tenantId=options.tenantId||platformTenantId();
+ const next=new TeamClient(base);
+ await next.loginWithPlatform({accessToken,tenantId});
+ const auth:PlatformAuth={base:DEFAULT_PLATFORM_BASE,tenantId,username:options.username??next.user?.name??'',accessToken,refreshToken:options.refreshToken??'',expiresTime:options.expiresTime??0,remember:options.remember!==false};
+ savePlatformAuth(auth);rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
+}
+export async function exchangeTeamAuthorizationCode(code:string,options:{base?:string;redirectUri?:string;tenantId?:string;state?:string;remember?:boolean}={}){
+ return (await exchangeTeamAuthorizationCodeResult(code,options)).client;
+}
+async function exchangeTeamAuthorizationCodeResult(code:string,options:{base?:string;redirectUri?:string;tenantId?:string;state?:string;remember?:boolean}){
+ if(sharedClient?.user)throw Error('请先退出当前团队账号');
+ const base=options.base||defaultTeamServiceBase();
+ const next=new TeamClient(base);
+ const result=await next.request<{token:string;user:TeamUser;platform?:{accessToken:string;refreshToken?:string;expiresTime?:number}}>('login/sso/code',{code,redirectUri:options.redirectUri||platformOAuthRedirectUri(base),tenantId:options.tenantId||platformTenantId(),...(options.state!==undefined?{state:options.state}:{})});
+ next.acceptSession(result.token,result.user);
+ if(result.platform?.accessToken){
+  savePlatformAuth({base:DEFAULT_PLATFORM_BASE,tenantId:options.tenantId||platformTenantId(),username:result.user.name,accessToken:result.platform.accessToken,refreshToken:result.platform.refreshToken??'',expiresTime:result.platform.expiresTime??0,remember:options.remember!==false});
+ }
+ rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return {client:next,platform:result.platform};
+}
+/** The callback page consumes the one-time code; other windows receive only platform tokens. */
+export async function completeTeamOAuthCallbackPage(callback:PlatformOAuthCallback,options:{base?:string;remember?:boolean}={}):Promise<TeamClient>{
+ clearPlatformOAuthCallbackFromUrl();
+ if(callback.error)throw Error(callback.error);
+ if(callback.accessToken){
+  const {accessToken,refreshToken,expiresTime}=callback;
+  const client=await loginTeamWithAccessToken(accessToken,{...options,refreshToken,expiresTime});
+  publishPlatformOAuthResult({accessToken,refreshToken,expiresTime});
+  return client;
+ }
+ if(callback.code){
+  const {client,platform}=await exchangeTeamAuthorizationCodeResult(callback.code,{...options,state:callback.state});
+  if(!platform?.accessToken)throw Error('协同登录回调缺少令牌');
+  const {accessToken,refreshToken,expiresTime}=platform;
+  publishPlatformOAuthResult({accessToken,refreshToken,expiresTime});
+  return client;
+ }
+ throw Error('协同登录回调缺少令牌或授权码');
+}
+async function applyOAuthCallback(callback:PlatformOAuthCallback,base:string,remember:boolean){
+ if(callback.error)throw Error(callback.error);
+ if(callback.accessToken)return loginTeamWithAccessToken(callback.accessToken,{base,refreshToken:callback.refreshToken,expiresTime:callback.expiresTime,remember});
+ if(callback.code)return exchangeTeamAuthorizationCode(callback.code,{base,remember,state:callback.state});
+ throw Error('协同登录回调缺少令牌或授权码');
+}
+/** Open 协同 login/authorize; resolve when callback delivers accessToken or code. */
+export async function beginTeamAuthorization(options:{base?:string;remember?:boolean;timeoutMs?:number}={}){
+ if(sharedClient?.user)throw Error('请先退出当前团队账号');
+ const base=options.base||defaultTeamServiceBase();
+ const remember=options.remember!==false;
+ const pending=consumePendingPlatformOAuth()||parsePlatformOAuthCallback();
+ if(pending){clearPlatformOAuthCallbackFromUrl();return applyOAuthCallback(pending,base,remember);}
+ const state=crypto.randomUUID();
+ await openPlatformAuthorizationWindow(buildPlatformAuthorizeUrl(base,state));
+ const timeoutMs=options.timeoutMs??300000;
+ return await new Promise<TeamClient>((resolve,reject)=>{
+  let settled=false;
+  let applying=false;
+  const cleanup=()=>{stopWatch();window.removeEventListener('focus',onFocus);window.clearTimeout(timer);};
+  const settle=(fn:()=>void)=>{if(settled)return;settled=true;cleanup();fn();};
+  const handle=(callback:PlatformOAuthCallback)=>{
+   if(settled||applying)return;
+   applying=true;
+   void applyOAuthCallback(callback,base,remember).then(
+    client=>{settle(()=>resolve(client));},
+    error=>{settle(()=>reject(error instanceof Error?error:Error(String(error))));}
+   );
+  };
+  const stopWatch=watchPlatformOAuthResult(handle);
+  const onFocus=()=>{const again=consumePendingPlatformOAuth()||parsePlatformOAuthCallback();if(again){clearPlatformOAuthCallbackFromUrl();handle(again);}};
+  window.addEventListener('focus',onFocus);
+  const timer=window.setTimeout(()=>settle(()=>reject(Error('协同登录超时，请重试「登录授权」'))),timeoutMs);
+ });
+}
+export async function logoutTeamSession(){const previous=sharedClient;sharedClient=undefined;clearPendingPlatformOAuth();savePlatformAuth(null);for(const listener of sessionListeners)listener();await previous?.logout();}
+export async function resumeTeamFromPlatformAuth(base:string,platformBase?:string,tenantId?:string){
+ if(sharedClient?.user)return sharedClient;
+ const saved=loadPlatformAuth();if(!saved?.accessToken)return undefined;
+ if(saved.expiresTime>0&&saved.expiresTime<Date.now()){savePlatformAuth(null);return undefined;}
+ const next=new TeamClient(base||defaultTeamServiceBase()||saved.base);
+ try{
+  await next.loginWithPlatform({accessToken:saved.accessToken,tenantId:tenantId??saved.tenantId??DEFAULT_PLATFORM_TENANT});
+  rememberTeamServiceBase(next.base);sharedClient=next;for(const listener of sessionListeners)listener();return next;
+ }catch{
+  // Expired or revoked platform token: drop durable credentials so the form is shown.
+  savePlatformAuth(null);return undefined;
+ }
+}
 export function teamItemFromLink(link:TeamResourceLink,version=link.latestVersion):TeamItem{return {id:link.teamItemId,kind:link.kind,version,name:link.teamName,owner:'',description:'',created:''};}
 export async function refreshLinkedTeamResources(kind:'asset'|'scene'):Promise<LocalTeamResourceState[]>{const client=sharedClient;if(!client?.user)throw Error('请先登录团队服务');const heads=await client.list(kind);await rememberTeamResourceHeads(client.base,kind,heads);return listLocalTeamResourceStates(kind);}
 // Explicit allowlist prevents session/chat/settings data from entering a publication.

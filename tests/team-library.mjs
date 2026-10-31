@@ -5,7 +5,7 @@ import {join} from 'node:path';
 import {createServer} from 'node:http';
 import {openTeam,teamMiddleware} from '../server/team/service.mjs';
 import {validateTeamPayload} from '../dist-team/validator.mjs';
-const dir=await mkdtemp(join(tmpdir(),'chat3d-team-'));let team=openTeam(join(dir,'test.sqlite'));let server;
+const dir=await mkdtemp(join(tmpdir(),'chat3d-team-'));let team=openTeam(join(dir,'test.sqlite'));let server,platform,ssoTeam;
 const scene={format:'chat3d-project',version:1,scene:{schemaVersion:1,projectId:'test-scene',revision:0,unit:'m',upAxis:'Y',nodes:[],materials:[],assets:[]}};
 const check=(label,fn)=>{fn();console.log('PASS '+label);};
 try{
@@ -39,4 +39,42 @@ try{
  const result=await call('items?kind=scene',{headers:{Authorization:`Bearer ${b.token}`}});assert.equal(result.status,200);assert.equal((await result.json()).length,2);
  console.log('PASS HTTP auth, origin allowlist, preflight and malformed request checks');
  team.logout(a.token);assert.throws(()=>team.authenticate(a.token),e=>e.status===401);team.disable('bob');assert.throws(()=>team.authenticate(b.token),e=>e.status===401);console.log('PASS logout and account disable revoke access');
-}finally{if(server)await new Promise(resolve=>server.close(resolve));team.close();await rm(dir,{recursive:true,force:true});}
+const platformUsers=new Map([['pat-new',{username:'carol',disabled:false}],['pat-admin',{username:'admin',disabled:false}],['pat-off',{username:'carol',disabled:true}],['pat-dead',null]]);
+let oauthResponse={code:0,data:{access_token:'pat-admin',refresh_token:'refresh-snake',expires_in:3600}};
+platform=createServer((req,res)=>{if(req.url==='/admin-api/system/oauth2/token'){res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(oauthResponse));return;}const token=(req.headers.authorization??'').replace(/^Bearer /,'');const user=platformUsers.get(token);if(!user){res.writeHead(401,{'Content-Type':'application/json'}).end(JSON.stringify({code:401}));return;}if(user.disabled){res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({code:401}));return;}res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({code:0,data:{user:{username:user.username}}}));});
+await new Promise(resolve=>platform.listen(0,'127.0.0.1',resolve));const platformBase=`http://127.0.0.1:${platform.address().port}`;
+ssoTeam=openTeam(join(dir,'sso.sqlite'),{platformAuthBase:platformBase,platformTenantId:'1',passwordLogin:true});
+ssoTeam.provision('admin','isolated-test-password-x','admin');
+const created=await ssoTeam.loginSso('pat-new','1');assert.equal(created.user.name,'carol');assert.equal(created.user.role,'member');assert.notEqual(ssoTeam.db.prepare('SELECT password FROM users WHERE name=?').get('carol').password,'pat-new');
+const kept=await ssoTeam.loginSso('pat-admin','1');assert.equal(kept.user.role,'admin');
+const freshAdmin=ssoTeam.db.prepare('SELECT role FROM users WHERE name=?').get('admin');assert.equal(freshAdmin.role,'admin');
+await assert.rejects(ssoTeam.loginSso('pat-off','1'),e=>e.status===401);
+await assert.rejects(ssoTeam.loginSso('pat-dead','1'),e=>e.status===401);
+const locked=openTeam(join(dir,'locked.sqlite'),{platformAuthBase:platformBase,passwordLogin:false});
+assert.throws(()=>locked.login('nobody','isolated-test-password-a'),e=>e.status===403);locked.close();
+const session=await ssoTeam.loginSso('pat-new','1');ssoTeam.db.prepare('UPDATE sessions SET platform_checked=? WHERE token=?').run(0,ssoTeam.db.prepare('SELECT token FROM sessions WHERE user=?').get(session.user.id).token);
+platformUsers.set('pat-new',null);await assert.rejects(ssoTeam.authenticate(session.token,{force:true}),e=>e.status===401);assert.throws(()=>ssoTeam.authenticate(session.token),e=>e.status===401);
+platformUsers.set('pat-admin',{username:'admin',disabled:false});const adminSession=await ssoTeam.loginSso('pat-admin','1');platformUsers.set('pat-admin',null);
+const sceneRequest={kind:'scene',name:'协同发布',description:'',payload:scene,key:crypto.randomUUID(),expectedVersion:0};
+await assert.rejects(ssoTeam.publish(adminSession.user,sceneRequest,validateTeamPayload,adminSession.token),e=>e.status===401);
+await assert.rejects(ssoTeam.loginSsoCode('code','https://portal.jiezi-ai.com/team/oauth/callback','1'),e=>e.status===503);
+const oauthTeam=openTeam(join(dir,'oauth.sqlite'),{platformAuthBase:platformBase,oauthClientSecret:'test-only-secret'});
+try{
+ const exchange=()=>oauthTeam.loginSsoCode('code','https://portal.jiezi-ai.com/team/oauth/callback','1','test-state');
+ platformUsers.set('pat-admin',{username:'admin',disabled:false});
+ const before=Date.now(),result=await exchange(),after=Date.now();
+ assert.equal(result.platform.accessToken,'pat-admin');assert.equal(result.platform.refreshToken,'refresh-snake');assert.equal(result.user.name,'admin');assert.equal((await oauthTeam.authenticate(result.token)).name,'admin');
+ assert.ok(result.platform.expiresTime>=before+3600000&&result.platform.expiresTime<=after+3600000);
+ for(const [response,expected] of [
+  [{code:0,data:{access_token:'pat-admin',accessToken:'wrong',refresh_token:'snake',refreshToken:'wrong',expiresTime:123,expires_time:456,expires_in:3600}},['snake',123]],
+  [{code:0,data:{access_token:'pat-admin',expires_time:456,expires_in:3600}},['',456]],
+  [{code:0,data:{accessToken:'pat-admin',refreshToken:'camel',expiresTime:789}},['camel',789]],
+  [{access_token:'pat-admin',refresh_token:'top'},['top',0]],
+ ]){oauthResponse=response;const session=await exchange();assert.equal(session.platform.accessToken,'pat-admin');assert.deepEqual([session.platform.refreshToken,session.platform.expiresTime],expected);}
+ oauthResponse={access_token:'pat-admin',expires_in:60};const start=Date.now(),top=await exchange();assert.ok(top.platform.expiresTime>=start+60000&&top.platform.expiresTime<=Date.now()+60000);
+ console.log('PASS OAuth snake_case exchange, authenticated session, expiry precedence and legacy fallbacks');
+}finally{oauthTeam.close();}
+console.log('PASS platform SSO upsert, role keep, disabled, 401, password lock, publish recheck and OAuth secret requirement');
+
+ssoTeam.close();ssoTeam=undefined;await new Promise(resolve=>platform.close(resolve));platform=undefined;
+}finally{if(server)await new Promise(resolve=>server.close(resolve));if(platform)await new Promise(resolve=>platform.close(resolve));team.close();ssoTeam?.close();await rm(dir,{recursive:true,force:true});}
