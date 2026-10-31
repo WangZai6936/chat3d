@@ -159,7 +159,7 @@ node tests/worker-proxy.mjs
 
 ## 运行与维护优化
 
-- 新配置的默认预算为 10 分钟、24 轮、50 万已报告 Token；设置中可选小改动、常规建模、复杂场景或自行填写。已有明确保存的预算保持不变，达到上限保留阶段草稿，仍需手动继续。
+- 新配置的默认预算为 10 分钟、24 轮、200 万已报告 Token；设置中可选小改动、常规建模、复杂场景或自行填写。已有明确保存的预算保持不变，达到上限保留阶段草稿，仍需手动继续。
 - 离线 HTML 导出运行库按需加载，首次点击导出时下载；生成的 HTML 仍是自包含离线文件。
 - AI 上下文裁剪、工具参数 Schema、提示词分别位于 `src/ai/agentContext.ts`、`agentSchemas.ts`、`agentPrompt.ts`，执行状态与工具守卫保留在 `modelingAgent.ts`。
 - `npm run build && npm run test:runtime` 按 Docker 运行阶段 COPY 清单组装临时目录，验证服务启动和版本接口；实际容器环境仍可单独验收。
