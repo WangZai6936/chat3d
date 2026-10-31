@@ -62,6 +62,11 @@ function Dump-Controls($name) {
  $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
  @($all | ForEach-Object { @{name=$_.Current.Name; type=$_.Current.ControlType.ProgrammaticName; enabled=$_.Current.IsEnabled} }) | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $out "$name.json")
 }
+function Assert-ControlMissing($name) {
+ $all=$window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+ $hit=$all | Where-Object { $_.Current.Name -eq $name } | Select-Object -First 1
+ if($hit){throw "UI control unexpectedly present: $name ($($hit.Current.ControlType.ProgrammaticName))"}
+}
 try {
  # Prove the isolated server is reachable before testing the installed UI.
  $fixtureLogin=Invoke-RestMethod -Uri ($teamBase + '/api/team/login') -Method Post -ContentType 'application/json' -Body (@{name='smoke-bob';password='isolated-smoke-password-b'} | ConvertTo-Json)
@@ -82,9 +87,16 @@ try {
  $checks.Add(@{name='installed app home renders with accessible navigation';pass=$true})
  Click-Control '团队库';Find-Control '登录授权' | Out-Null;Shot 'ui-team-page';Dump-Controls 'ui-team-page-controls'
  $checks.Add(@{name='team library page opens from navigation';pass=$true})
- Click-Control '团队资产'
+ # #66+: unauthenticated team library is login-only — no asset/scene tabs or local password form.
+ Assert-ControlMissing '团队资产'
+ Assert-ControlMissing '团队场景'
+ Assert-ControlMissing '团队账号'
+ Assert-ControlMissing '团队密码'
+ Assert-ControlMissing '团队服务地址'
+ Assert-ControlMissing '服务地址已固定为门户地址，不可修改'
  Find-Control '登录授权' | Out-Null
- $checks.Add(@{name='team library shows SSO 登录授权 (no local address/password form)';pass=$true})
+ Find-Control '登录团队服务' | Out-Null
+ $checks.Add(@{name='team library login-only until authenticated (SSO 登录授权; no asset/scene tabs or password form)';pass=$true})
 
 Click-Control '资产库'
  Click-Control '新建资产';Find-Control '导出与更多' | Out-Null;Shot 'ui-workbench'
