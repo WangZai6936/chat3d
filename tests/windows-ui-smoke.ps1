@@ -86,6 +86,7 @@ try {
  Find-Control '登录授权' | Out-Null
  $checks.Add(@{name='team library shows SSO 登录授权 (no local address/password form)';pass=$true})
 
+Click-Control '资产库'
  Click-Control '新建资产';Find-Control '导出与更多' | Out-Null;Shot 'ui-workbench'
  $checks.Add(@{name='new asset opens workbench';pass=$true})
  Click-Control '导出与更多';Shot 'ui-export-menu';Dump-Controls 'ui-export-controls';Click-Control '备份与恢复';Shot 'ui-after-menu-selection';Find-Control '下载工作台备份' | Out-Null
