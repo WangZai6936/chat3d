@@ -80,25 +80,11 @@ try {
  Start-Sleep -Seconds 4;Shot 'ui-home';Dump-Controls 'ui-home-controls'
  Find-Control '资产库' | Out-Null
  $checks.Add(@{name='installed app home renders with accessible navigation';pass=$true})
- Click-Control '团队库';Find-Control '团队服务地址' | Out-Null;Shot 'ui-team-page'
+ Click-Control '团队库';Find-Control '登录授权' | Out-Null;Shot 'ui-team-page';Dump-Controls 'ui-team-page-controls'
  $checks.Add(@{name='team library page opens from navigation';pass=$true})
  Click-Control '团队资产'
- Set-Input '团队服务地址' $teamBase
- Set-Input '团队账号' 'smoke-bob'
- Set-Input '团队密码' 'isolated-smoke-password-b'
- Click-Control '登录团队'
- Find-Control '预览 NativeTestBox' | Out-Null
- Click-Control '预览 NativeTestBox'
- Find-Control '获取此固定版本' | Out-Null
- Shot 'ui-team-preview'
- Click-Control '获取此固定版本'
- Click-Control '确认获取并保留旧副本'
- Find-Control '已获取 1 项，旧副本和本地修改均已保留。' | Out-Null
- Click-Control '关闭'
- Click-Control '资产库'
- Find-Control '查看资产 NativeTestBox 副本' | Out-Null
- Shot 'ui-team-local-copy'
- $checks.Add(@{name='installed app member B logs into isolated server, previews member A asset and copies it into local library';pass=$true})
+ Find-Control '登录授权' | Out-Null
+ $checks.Add(@{name='team library shows SSO 登录授权 (no local address/password form)';pass=$true})
 
  Click-Control '新建资产';Find-Control '导出与更多' | Out-Null;Shot 'ui-workbench'
  $checks.Add(@{name='new asset opens workbench';pass=$true})
